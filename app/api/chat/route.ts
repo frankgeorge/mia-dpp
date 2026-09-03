@@ -143,8 +143,9 @@ export async function POST(req: Request) {
     let generate = false;
 
     for (const call of choice.message.tool_calls ?? []) {
-      const args = JSON.parse(call.function.arguments);
-      if (call.function.name === "propose_mappings") {
+      const fn = (call as any).function as { name: string; arguments: string };
+      const args = JSON.parse(fn.arguments);
+      if (fn.name === "propose_mappings") {
         proposal = {
           productName: args.productName,
           mappings: (args.mappings ?? []).map((m: any) => ({
@@ -157,7 +158,7 @@ export async function POST(req: Request) {
           })),
         };
       }
-      if (call.function.name === "generate_dpp") generate = true;
+      if (fn.name === "generate_dpp") generate = true;
     }
 
     if (!reply) {
