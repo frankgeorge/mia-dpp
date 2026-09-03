@@ -5,7 +5,7 @@ import type { GraphEntry } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MODEL = "deepseek/deepseek-chat-v3-0324:free";
+const MODEL = "deepseek/deepseek-chat-v3-0324";
 
 const SYSTEM = `You are MIA, an integration agent that turns a manufacturer's messy product data into a standards-compliant Digital Product Passport.
 

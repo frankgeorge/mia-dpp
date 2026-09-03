@@ -287,7 +287,7 @@ export default function Home() {
 
       <footer className="mx-auto max-w-shell px-6 py-10">
         <div className="flex flex-col justify-between gap-3 text-[13px] text-muted md:flex-row">
-          <p>MIA — Mittelstand Integration Agent</p>
+          <p>MIA - Mittelstand Integration Agent</p>
           <p className="font-mono text-[12px]">
             Built for the LEVEL3 AI Engineering track
           </p>
