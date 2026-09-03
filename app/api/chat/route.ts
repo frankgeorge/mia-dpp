@@ -1,11 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { NAMEPLATE_ELEMENTS, semanticIdFor, demoPropose } from "@/lib/idta";
 import type { GraphEntry } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "deepseek/deepseek-chat-v3-0324:free";
 
 const SYSTEM = `You are MIA, an integration agent that turns a manufacturer's messy product data into a standards-compliant Digital Product Passport.
 
@@ -26,65 +26,71 @@ Rules you must follow:
 
 Be brief and concrete. You are a working tool, not a chatbot.`;
 
-const tools: Anthropic.Tool[] = [
+const tools: OpenAI.ChatCompletionTool[] = [
   {
-    name: "propose_mappings",
-    description:
-      "Propose field mappings from the user's product data onto the IDTA Digital Nameplate submodel. Call this once per product description.",
-    input_schema: {
-      type: "object",
-      properties: {
-        productName: {
-          type: "string",
-          description: "Short human-readable product name for this passport.",
-        },
-        mappings: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              sourceField: {
-                type: "string",
-                description:
-                  "Field name as it would appear in the manufacturer's own system.",
+    type: "function",
+    function: {
+      name: "propose_mappings",
+      description:
+        "Propose field mappings from the user's product data onto the IDTA Digital Nameplate submodel. Call this once per product description.",
+      parameters: {
+        type: "object",
+        properties: {
+          productName: {
+            type: "string",
+            description: "Short human-readable product name for this passport.",
+          },
+          mappings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                sourceField: {
+                  type: "string",
+                  description:
+                    "Field name as it would appear in the manufacturer's own system.",
+                },
+                sourceValue: { type: "string", description: "The value provided by the user." },
+                targetElement: {
+                  type: "string",
+                  description: "Exact name of the target Digital Nameplate element.",
+                },
+                confidence: {
+                  type: "number",
+                  description: "Honest confidence from 0 to 1.",
+                },
+                reasoning: {
+                  type: "string",
+                  description: "One sentence on why this mapping was chosen.",
+                },
               },
-              sourceValue: { type: "string", description: "The value provided by the user." },
-              targetElement: {
-                type: "string",
-                description: "Exact name of the target Digital Nameplate element.",
-              },
-              confidence: {
-                type: "number",
-                description: "Honest confidence from 0 to 1.",
-              },
-              reasoning: {
-                type: "string",
-                description: "One sentence on why this mapping was chosen.",
-              },
+              required: [
+                "sourceField",
+                "sourceValue",
+                "targetElement",
+                "confidence",
+                "reasoning",
+              ],
             },
-            required: [
-              "sourceField",
-              "sourceValue",
-              "targetElement",
-              "confidence",
-              "reasoning",
-            ],
           },
         },
+        required: ["productName", "mappings"],
       },
-      required: ["productName", "mappings"],
     },
   },
   {
-    name: "generate_dpp",
-    description:
-      "Assemble the Digital Product Passport from the mappings the user has approved. Only call when the user asks to generate or export.",
-    input_schema: {
-      type: "object",
-      properties: {
-        confirm: { type: "boolean", description: "Always true." },
+    type: "function",
+    function: {
+      name: "generate_dpp",
+      description:
+        "Assemble the Digital Product Passport from the mappings the user has approved. Only call when the user asks to generate or export.",
+      parameters: {
+        type: "object",
+        properties: {
+          confirm: { type: "boolean", description: "Always true." },
+        },
+        required: ["confirm"],
       },
-      required: ["confirm"],
     },
   },
 ];
@@ -97,15 +103,22 @@ export async function POST(req: Request) {
     const graph: GraphEntry[] = body.graph ?? [];
 
     const last = messages[messages.length - 1]?.content ?? "";
-    const key = process.env.ANTHROPIC_API_KEY;
+    const key = process.env.OPENROUTER_API_KEY;
 
     /* ---------- Demo mode: no API key configured ---------- */
     if (!key) {
       return Response.json(demoTurn(last, graph));
     }
 
-    /* ---------- Live mode ---------- */
-    const client = new Anthropic({ apiKey: key });
+    /* ---------- Live mode via OpenRouter → DeepSeek ---------- */
+    const client = new OpenAI({
+      apiKey: key,
+      baseURL: "https://openrouter.ai/api/v1",
+      defaultHeaders: {
+        "HTTP-Referer": "https://mia-dpp.vercel.app",
+        "X-Title": "MIA Digital Product Passport",
+      },
+    });
 
     const graphHint = graph.length
       ? `\n\nIntegration Graph — mappings a human already verified on earlier products. Reuse these when the same source field appears again, and raise your confidence accordingly:\n${graph
@@ -113,37 +126,38 @@ export async function POST(req: Request) {
           .join("\n")}`
       : "";
 
-    const res = await client.messages.create({
+    const res = await client.chat.completions.create({
       model: MODEL,
       max_tokens: 2000,
-      system: SYSTEM + graphHint,
       tools,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      tool_choice: "auto",
+      messages: [
+        { role: "system", content: SYSTEM + graphHint },
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ],
     });
 
-    let reply = "";
+    const choice = res.choices[0];
+    let reply = choice.message.content ?? "";
     let proposal: any = null;
     let generate = false;
 
-    for (const block of res.content) {
-      if (block.type === "text") reply += block.text;
-      if (block.type === "tool_use") {
-        if (block.name === "propose_mappings") {
-          const input = block.input as any;
-          proposal = {
-            productName: input.productName,
-            mappings: (input.mappings ?? []).map((m: any) => ({
-              sourceField: String(m.sourceField ?? "unknown"),
-              sourceValue: String(m.sourceValue ?? ""),
-              targetElement: String(m.targetElement ?? ""),
-              semanticId: semanticIdFor(String(m.targetElement ?? "")),
-              confidence: clamp(Number(m.confidence ?? 0.5)),
-              reasoning: String(m.reasoning ?? ""),
-            })),
-          };
-        }
-        if (block.name === "generate_dpp") generate = true;
+    for (const call of choice.message.tool_calls ?? []) {
+      const args = JSON.parse(call.function.arguments);
+      if (call.function.name === "propose_mappings") {
+        proposal = {
+          productName: args.productName,
+          mappings: (args.mappings ?? []).map((m: any) => ({
+            sourceField: String(m.sourceField ?? "unknown"),
+            sourceValue: String(m.sourceValue ?? ""),
+            targetElement: String(m.targetElement ?? ""),
+            semanticId: semanticIdFor(String(m.targetElement ?? "")),
+            confidence: clamp(Number(m.confidence ?? 0.5)),
+            reasoning: String(m.reasoning ?? ""),
+          })),
+        };
       }
+      if (call.function.name === "generate_dpp") generate = true;
     }
 
     if (!reply) {
@@ -160,7 +174,7 @@ export async function POST(req: Request) {
     return Response.json(
       {
         reply:
-          "That request didn't reach the model. Check the ANTHROPIC_API_KEY setting and try again — the rest of the workspace still works in demo mode.",
+          "That request didn't reach the model. Check the OPENROUTER_API_KEY setting and try again — the rest of the workspace still works in demo mode.",
         proposal: null,
         generate: false,
         mode: "error",
@@ -207,7 +221,6 @@ function demoTurn(text: string, graph: GraphEntry[]) {
 
   const { productName, mappings } = demoPropose(text);
 
-  // Apply Integration Graph memory: fields verified before get a confidence lift.
   const lifted = mappings.map((m) => {
     const hit = graph.find(
       (g) => g.sourceField.toLowerCase() === m.sourceField.toLowerCase()
