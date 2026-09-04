@@ -102,15 +102,4 @@ lib/
    whole thesis: the second passport costs less human attention than the first.**
 7. **Generate passport** → preview, then **Download package**.
 
----
 
-## Notes and honest limits
-
-- The Integration Graph persists to `localStorage`, which is right for a
-  five-week MVP demo but would be a real database in production.
-- One submodel (Digital Nameplate) is covered deliberately and properly rather
-  than many shallowly. Technical Data, Handover Documentation and Carbon
-  Footprint are the natural next ones.
-- Demo mode uses pattern matching, not a model. It exists so the demo can't
-  dead-end on a missing key or a flaky network — set `ANTHROPIC_API_KEY` to see
-  the real agent reasoning, which handles far messier input.
