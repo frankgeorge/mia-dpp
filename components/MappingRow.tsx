@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import type { FieldMapping } from "@/lib/types";
-import { NAMEPLATE_ELEMENTS } from "@/lib/idta";
+import type { FieldMapping, NameplateElement } from "@/lib/types";
 
 export function MappingRow({
   mapping: m,
+  elements,
   onDecide,
   onCorrect,
 }: {
   mapping: FieldMapping;
+  elements: NameplateElement[];
   onDecide: (id: string, status: "approved" | "rejected") => void;
   onCorrect: (id: string, target: string) => void;
 }) {
@@ -100,7 +101,7 @@ export function MappingRow({
               }}
               className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2 font-mono text-[12px] focus:border-signal focus:outline-none"
             >
-              {NAMEPLATE_ELEMENTS.map((e) => (
+              {elements.map((e) => (
                 <option key={e.name} value={e.name}>
                   {e.name}
                   {e.required ? " (required)" : ""}

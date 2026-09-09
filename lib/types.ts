@@ -16,6 +16,15 @@ export interface FieldMapping {
   fromGraph?: boolean;
 }
 
+export type ProposedFieldMapping = Omit<FieldMapping, "id">;
+
+export interface NameplateElement {
+  name: string;
+  semanticId: string;
+  hint: string;
+  required: boolean;
+}
+
 export interface GraphEntry {
   sourceField: string;
   targetElement: string;
