@@ -4,16 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
   ChatMessage,
+  DppPackage,
   FieldMapping,
   GraphEntry,
-  DppPackage,
+  NameplateElement,
+  ProposedFieldMapping,
 } from "@/lib/types";
-import { buildDpp, missingRequired, NAMEPLATE_ELEMENTS } from "@/lib/idta";
 import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
 
-const THRESHOLD = 0.85;
 const GRAPH_KEY = "mia.graph.v1";
+const API_URL =
+  process.env.NEXT_PUBLIC_MIA_API_URL ?? "http://127.0.0.1:8000";
 
 const SAMPLES = [
   {
@@ -38,6 +40,9 @@ export default function Workspace() {
   const [productName, setProductName] = useState("");
   const [dpp, setDpp] = useState<DppPackage | null>(null);
   const [graph, setGraph] = useState<GraphEntry[]>([]);
+  const [nameplateElements, setNameplateElements] = useState<
+    NameplateElement[]
+  >([]);
   const [mode, setMode] = useState<string>("");
   const [tab, setTab] = useState<"mappings" | "graph">("mappings");
   const endRef = useRef<HTMLDivElement>(null);
@@ -74,28 +79,31 @@ export default function Workspace() {
     setBusy(true);
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next, graph }),
       });
+      if (!res.ok) throw new Error(`Python backend returned ${res.status}`);
       const data = await res.json();
       setMode(data.mode ?? "");
+      setNameplateElements(data.nameplateElements ?? []);
 
       if (data.proposal) {
         setProductName(data.proposal.productName || "Product");
         setMappings(
-          (data.proposal.mappings ?? []).map((m: any, i: number) => ({
-            ...m,
-            id: `${Date.now()}-${i}`,
-            status: m.confidence >= THRESHOLD ? "auto" : "review",
-          }))
+          (data.proposal.mappings ?? []).map(
+            (m: ProposedFieldMapping, i: number) => ({
+              ...m,
+              id: `${Date.now()}-${i}`,
+            })
+          )
         );
         setDpp(null);
         setTab("mappings");
       }
 
-      if (data.generate) generate();
+      if (data.generate) await generate();
 
       setMessages((prev) => [
         ...prev,
@@ -131,7 +139,7 @@ export default function Workspace() {
               ...m,
               targetElement,
               semanticId:
-                NAMEPLATE_ELEMENTS.find((e) => e.name === targetElement)
+                nameplateElements.find((e) => e.name === targetElement)
                   ?.semanticId ?? m.semanticId,
               status: "approved",
               reasoning: "Corrected by you, and saved to the Integration Graph.",
@@ -176,18 +184,47 @@ export default function Workspace() {
     );
   }
 
-  function generate() {
-    setMappings((cur) => {
-      setDpp(buildDpp(productName || "Product", cur));
-      return cur;
-    });
+  async function generate() {
+    try {
+      const response = await fetch(`${API_URL}/api/dpp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName: productName || "Product",
+          mappings,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Python backend returned ${response.status}`);
+      }
+      setDpp(await response.json());
+    } catch {
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          content:
+            "The Python backend could not build the passport. Check that it is running and try again.",
+        },
+      ]);
+    }
   }
 
   const pending = mappings.filter((m) => m.status === "review").length;
   const ready = mappings.filter(
     (m) => m.status === "approved" || m.status === "auto"
   ).length;
-  const gaps = missingRequired(mappings);
+  const present = new Set(
+    mappings
+      .filter(
+        (mapping) =>
+          mapping.status === "approved" || mapping.status === "auto"
+      )
+      .map((mapping) => mapping.targetElement)
+  );
+  const gaps = nameplateElements
+    .filter((element) => element.required && !present.has(element.name))
+    .map((element) => element.name);
 
   return (
     <div className="flex h-screen flex-col bg-mist">
@@ -391,6 +428,7 @@ export default function Workspace() {
                       <MappingRow
                         key={m.id}
                         mapping={m}
+                        elements={nameplateElements}
                         onDecide={decide}
                         onCorrect={correct}
                       />
