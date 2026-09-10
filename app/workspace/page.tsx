@@ -229,10 +229,10 @@ export default function Workspace() {
   return (
     <div className="flex h-screen flex-col bg-mist">
       {/* Top bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-hairline bg-paper px-5">
+      <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-hairline bg-paper px-5 shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2">
-            <span className="grid h-6 w-6 place-items-center rounded-md bg-ink">
+            <span className="grid h-6 w-6 place-items-center rounded-md bg-ink shadow-sm">
               <span className="h-1.5 w-1.5 rounded-[1px] bg-white" />
             </span>
             <span className="text-[15px] font-semibold tracking-tight">MIA</span>
@@ -255,7 +255,7 @@ export default function Workspace() {
           <button
             onClick={generate}
             disabled={ready === 0}
-            className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
+            className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-all hover:shadow-md hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:translate-y-0 disabled:hover:shadow-none"
           >
             Generate passport
           </button>
@@ -264,11 +264,11 @@ export default function Workspace() {
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Chat */}
-        <section className="flex min-h-0 flex-1 flex-col border-hairline bg-paper lg:max-w-[46%] lg:border-r">
+        <section className="flex min-h-0 flex-1 flex-col border-hairline bg-[#F9FAFB] lg:max-w-[46%] lg:border-r">
           <div className="scroll-quiet flex-1 overflow-y-auto px-5 py-6">
             {messages.length === 0 && (
               <div className="mx-auto max-w-md pt-6">
-                <h1 className="text-[26px] font-semibold leading-tight tracking-tight">
+                <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
                   Describe a product.
                 </h1>
                 <p className="mt-2 text-[15px] leading-relaxed text-muted">
@@ -276,15 +276,15 @@ export default function Workspace() {
                   technical values you have. MIA maps it to the IDTA Digital
                   Nameplate and stops wherever it needs your decision.
                 </p>
-                <div className="mt-6 space-y-2">
+                <div className="mt-8 space-y-3">
                   {SAMPLES.map((s) => (
                     <button
                       key={s.label}
                       onClick={() => send(s.text)}
-                      className="w-full rounded-xl border border-hairline p-3.5 text-left transition-colors hover:bg-mist"
+                      className="w-full rounded-xl border border-hairline bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-signal/40 hover:bg-signal/5 hover:shadow-sm"
                     >
-                      <p className="text-[14px] font-medium">{s.label}</p>
-                      <p className="mt-0.5 line-clamp-2 text-[13px] leading-relaxed text-muted">
+                      <p className="text-[14px] font-semibold text-ink">{s.label}</p>
+                      <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted">
                         {s.text}
                       </p>
                     </button>
@@ -293,17 +293,17 @@ export default function Workspace() {
               </div>
             )}
 
-            <div className="mx-auto max-w-md space-y-4">
+            <div className="mx-auto max-w-md space-y-5">
               {messages.map((m, i) => (
                 <div
                   key={i}
-                  className={m.role === "user" ? "flex justify-end" : ""}
+                  className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
                 >
                   <div
                     className={
                       m.role === "user"
-                        ? "max-w-[85%] rounded-2xl rounded-br-md bg-signal px-4 py-2.5 text-[14px] leading-relaxed text-white"
-                        : "max-w-[92%] text-[14px] leading-relaxed text-ink"
+                        ? "max-w-[85%] rounded-2xl rounded-br-sm bg-gradient-to-tr from-signal to-blue-500 px-4 py-3 text-[14px] leading-relaxed text-white shadow-sm"
+                        : "max-w-[92%] rounded-2xl rounded-bl-sm border border-hairline bg-white px-4 py-3 text-[14px] leading-relaxed text-ink shadow-sm"
                     }
                   >
                     {m.content}
@@ -311,11 +311,11 @@ export default function Workspace() {
                 </div>
               ))}
               {busy && (
-                <div className="flex gap-1.5 py-1">
+                <div className="flex gap-1.5 py-2 pl-2">
                   {[0, 1, 2].map((i) => (
                     <span
                       key={i}
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted"
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal/60"
                       style={{ animationDelay: `${i * 140}ms` }}
                     />
                   ))}
@@ -325,8 +325,8 @@ export default function Workspace() {
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-hairline p-4">
-            <div className="mx-auto flex max-w-md items-end gap-2">
+          <div className="shrink-0 p-4 pb-6">
+            <div className="mx-auto flex max-w-md items-end gap-2 rounded-[24px] border border-hairline bg-white p-1.5 shadow-sm transition-all focus-within:border-signal/50 focus-within:ring-4 focus-within:ring-signal/10">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -337,20 +337,20 @@ export default function Workspace() {
                   }
                 }}
                 rows={1}
-                placeholder="Describe the product, or ask to generate the passport"
-                className="max-h-32 flex-1 resize-none rounded-2xl border border-hairline bg-paper px-4 py-3 text-[14px] leading-relaxed placeholder:text-muted focus:border-signal focus:outline-none"
+                placeholder="Describe the product..."
+                className="max-h-32 flex-1 resize-none bg-transparent px-4 py-2.5 text-[14px] leading-relaxed text-ink placeholder:text-muted focus:outline-none"
               />
               <button
                 onClick={() => send(input)}
                 disabled={busy || !input.trim()}
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-ink text-white transition-opacity hover:opacity-85 disabled:opacity-25"
+                className="mb-0.5 mr-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink text-white transition-transform hover:scale-105 disabled:scale-100 disabled:opacity-25"
                 aria-label="Send message"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
                   <path
                     d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5"
                     stroke="currentColor"
-                    strokeWidth="1.6"
+                    strokeWidth="1.8"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -368,18 +368,18 @@ export default function Workspace() {
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`relative px-3 py-3.5 text-[13px] font-medium capitalize transition-colors ${
-                    tab === t ? "text-ink" : "text-muted hover:text-ink"
+                  className={`relative px-4 py-4 text-[13px] font-medium capitalize transition-colors ${
+                    tab === t ? "text-signal" : "text-muted hover:text-ink"
                   }`}
                 >
                   {t === "graph" ? "Integration Graph" : "Mappings"}
                   {t === "graph" && graph.length > 0 && (
-                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px]">
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
                       {graph.length}
                     </span>
                   )}
                   {tab === t && (
-                    <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-ink" />
+                    <span className="absolute inset-x-3 -bottom-px h-[3px] rounded-t-full bg-signal" />
                   )}
                 </button>
               ))}
@@ -387,7 +387,7 @@ export default function Workspace() {
             {tab === "mappings" && pending > 0 && (
               <button
                 onClick={approveAll}
-                className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-mist"
+                className="rounded-full border border-hairline px-4 py-1.5 text-[12px] font-medium transition-all hover:bg-mist hover:shadow-sm"
               >
                 Approve all
               </button>
@@ -402,28 +402,28 @@ export default function Workspace() {
                   body="Send a product description and the proposed mappings will appear here for your approval."
                 />
               ) : (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
+                <div className="space-y-5">
+                  <div className="flex flex-wrap gap-3">
                     <Stat label="Ready" value={ready} tone="ok" />
                     <Stat label="Needs you" value={pending} tone="warn" />
                     <Stat label="Gaps" value={gaps.length} tone="plain" />
                   </div>
 
                   {gaps.length > 0 && (
-                    <div className="rounded-xl border border-warn/25 bg-warn/[0.06] p-3.5">
-                      <p className="text-[13px] font-medium text-warn">
+                    <div className="rounded-xl border border-warn/20 bg-warn/[0.04] p-4 shadow-sm">
+                      <p className="text-[13px] font-semibold text-warn">
                         Required elements still missing
                       </p>
-                      <p className="mt-1 font-mono text-[12px] leading-relaxed text-ink/70">
+                      <p className="mt-1.5 font-mono text-[12px] leading-relaxed text-ink/80">
                         {gaps.join(" · ")}
                       </p>
-                      <p className="mt-1.5 text-[12px] text-muted">
+                      <p className="mt-2 text-[12px] text-muted">
                         Add these values in the chat. MIA will not invent them.
                       </p>
                     </div>
                   )}
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {mappings.map((m) => (
                       <MappingRow
                         key={m.id}
@@ -444,32 +444,34 @@ export default function Workspace() {
                 body="Approve or correct a mapping and it gets saved here. The next product that uses the same field starts from your decision."
               />
             ) : (
-              <div className="space-y-2">
-                <p className="pb-1 text-[13px] leading-relaxed text-muted">
+              <div className="space-y-3">
+                <p className="pb-2 text-[13px] leading-relaxed text-muted">
                   Verified mappings reused across products. These raise MIA&rsquo;s
                   confidence on the next passport.
                 </p>
                 {graph.map((g) => (
                   <div
                     key={g.sourceField}
-                    className="rounded-xl border border-hairline bg-paper p-3.5"
+                    className="rounded-xl border border-hairline bg-paper p-4 shadow-sm transition-all hover:shadow-md"
                   >
                     <p className="font-mono text-[13px]">
                       {g.sourceField}{" "}
                       <span className="text-muted">&rarr;</span>{" "}
                       <span className="text-signal">{g.targetElement}</span>
                     </p>
-                    <p className="mt-1 font-mono text-[11px] text-muted">
+                    <p className="mt-1.5 font-mono text-[11px] text-muted">
                       {g.semanticId} · verified {g.corrections}&times;
                     </p>
                   </div>
                 ))}
-                <button
-                  onClick={() => setGraph([])}
-                  className="mt-2 text-[12px] text-muted underline underline-offset-2 hover:text-ink"
-                >
-                  Clear graph
-                </button>
+                <div className="pt-2">
+                  <button
+                    onClick={() => setGraph([])}
+                    className="text-[12px] text-muted underline underline-offset-2 hover:text-ink"
+                  >
+                    Clear graph
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -495,20 +497,29 @@ function Stat({
       ? "text-warn"
       : "text-muted";
   return (
-    <div className="rounded-lg border border-hairline bg-paper px-3 py-2">
-      <span className={`font-mono text-[15px] tabular-nums ${cls}`}>
+    <div className="flex flex-col rounded-xl border border-hairline bg-paper px-4 py-2.5 shadow-sm">
+      <span className={`font-mono text-[18px] font-semibold tabular-nums ${cls}`}>
         {value}
       </span>
-      <span className="ml-1.5 text-[12px] text-muted">{label}</span>
+      <span className="mt-0.5 text-[12px] text-muted">{label}</span>
     </div>
   );
 }
 
 function Empty({ title, body }: { title: string; body: string }) {
   return (
-    <div className="mx-auto max-w-xs pt-16 text-center">
-      <p className="text-[15px] font-medium">{title}</p>
-      <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{body}</p>
+    <div className="mx-auto max-w-xs pt-20 text-center">
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-full bg-white shadow-sm border border-hairline text-muted">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+      </div>
+      <p className="text-[15px] font-semibold text-ink">{title}</p>
+      <p className="mt-2 text-[13px] leading-relaxed text-muted">{body}</p>
     </div>
   );
 }

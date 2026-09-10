@@ -26,7 +26,7 @@ export function MappingRow({
       : "border-hairline";
 
   return (
-    <div className={`rounded-xl border bg-paper p-3.5 transition-all ${tone}`}>
+    <div className={`rounded-xl border bg-paper p-4 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 ${tone}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="truncate font-mono text-[13px]">
