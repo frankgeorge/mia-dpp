@@ -12,10 +12,11 @@ export function MappingRow({
   mapping: FieldMapping;
   elements: NameplateElement[];
   onDecide: (id: string, status: "approved" | "rejected") => void;
-  onCorrect: (id: string, target: string) => void;
+  onCorrect: (id: string, target: NameplateElement) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const pct = Math.round(m.confidence * 100);
+  const missingPct = Math.max(0, 100 - pct);
   const strong = m.confidence >= 0.85;
 
   const tone =
@@ -58,6 +59,47 @@ export function MappingRow({
         {m.reasoning}
       </p>
 
+      <details className="mt-2.5 rounded-lg border border-hairline bg-mist/60 px-3 py-2">
+        <summary className="cursor-pointer text-[12px] font-medium text-ink">
+          Why {pct}%? {missingPct > 0 && `What is the missing ${missingPct}%?`}
+        </summary>
+        <div className="mt-2.5 space-y-2.5">
+          {m.confidenceAssessment.factors.map((factor) => (
+            <div key={factor.code}>
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-[12px] font-medium">{factor.label}</p>
+                <p className="shrink-0 font-mono text-[10px] text-muted">
+                  +{Math.round(factor.awarded * 100)} / {Math.round(factor.maximum * 100)}
+                </p>
+              </div>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
+                {factor.explanation}
+              </p>
+            </div>
+          ))}
+
+          <div className="border-t border-hairline pt-2">
+            <p className="text-[11px] font-medium text-ink">
+              Remaining uncertainty
+            </p>
+            {m.confidenceAssessment.remainingUncertainty.length > 0 ? (
+              <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-muted">
+                {m.confidenceAssessment.remainingUncertainty.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-[11px] text-muted">
+                No missing points under the current deterministic rules.
+              </p>
+            )}
+            <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
+              This score explains available evidence; it is not a probability.
+            </p>
+          </div>
+        </div>
+      </details>
+
       {m.fromGraph && (
         <p className="mt-1.5 inline-block rounded-full bg-signalDim px-2 py-0.5 font-mono text-[10px] text-signal">
           From Integration Graph
@@ -94,16 +136,23 @@ export function MappingRow({
             Map this field to
             <select
               autoFocus
-              defaultValue={m.targetElement}
+              defaultValue={m.target.instancePath.join("/")}
               onChange={(e) => {
-                onCorrect(m.id, e.target.value);
+                const target = elements.find(
+                  (element) =>
+                    element.target.instancePath.join("/") === e.target.value
+                );
+                if (target) onCorrect(m.id, target);
                 setEditing(false);
               }}
               className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2 font-mono text-[12px] focus:border-signal focus:outline-none"
             >
               {elements.map((e) => (
-                <option key={e.name} value={e.name}>
-                  {e.name}
+                <option
+                  key={e.target.instancePath.join("/")}
+                  value={e.target.instancePath.join("/")}
+                >
+                  {e.path.join(" / ")}
                   {e.required ? " (required)" : ""}
                 </option>
               ))}

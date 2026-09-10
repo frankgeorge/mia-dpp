@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      network: "${DOCKER_BUILD_NETWORK:-host}"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - /app/backend/.venv/bin/python
+        - -c
+        - >-
+          import json, sys, urllib.request;
+          data = json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2));
+          sys.exit(0 if data.get('status') == 'ok' else 1)
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      network: "${DOCKER_BUILD_NETWORK:-host}"
+      args:
+        NEXT_PUBLIC_MIA_API_URL: "${NEXT_PUBLIC_MIA_API_URL:-http://127.0.0.1:8000}"
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/').then(response =>
+          process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
