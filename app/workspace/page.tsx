@@ -17,8 +17,7 @@ import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
 
 const GRAPH_KEY = "mia.graph.v1";
-const API_URL =
-  process.env.NEXT_PUBLIC_MIA_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
 
 const SAMPLES = [
   {
