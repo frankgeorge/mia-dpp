@@ -1,212 +1,104 @@
-"""Python port of the current local Digital Nameplate demo logic."""
+"""Deterministic manual-text evidence and official IDTA mapping proposals.
+
+This module keeps the original demo useful while changing its foundation: the
+regexes extract evidence, but all target metadata comes from the pinned
+official template repository.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from re import Pattern
 
-from mia_dpp.models import DemoProposal, DppPackage, FieldMapping, MappingDraft, MappingStatus
-
-
-@dataclass(frozen=True)
-class NameplateElement:
-    name: str
-    semantic_id: str
-    hint: str
-    required: bool = False
-
-
-NAMEPLATE_ELEMENTS = (
-    NameplateElement(
-        "ManufacturerName",
-        "0173-1#02-AAO677#002",
-        "Legal name of the company that made the product",
-        True,
-    ),
-    NameplateElement(
-        "ManufacturerProductDesignation",
-        "0173-1#02-AAW338#001",
-        "Product name or model designation",
-        True,
-    ),
-    NameplateElement(
-        "ManufacturerProductFamily",
-        "0173-1#02-AAU731#001",
-        "Product family or series the item belongs to",
-    ),
-    NameplateElement(
-        "SerialNumber",
-        "0173-1#02-AAM556#002",
-        "Unique serial number of the individual item",
-        True,
-    ),
-    NameplateElement(
-        "YearOfConstruction",
-        "0173-1#02-AAP906#001",
-        "Year the product was built",
-        True,
-    ),
-    NameplateElement(
-        "CountryOfOrigin",
-        "0173-1#02-AAO259#004",
-        "Country where the product was manufactured",
-    ),
-    NameplateElement(
-        "ManufacturingSite",
-        "0173-1#02-AAW336#001",
-        "Plant or site where the product was manufactured",
-    ),
-    NameplateElement(
-        "OrderCode",
-        "0173-1#02-AAO227#002",
-        "Article, order or material number used to order the product",
-    ),
-    NameplateElement(
-        "DegreeOfProtection",
-        "0173-1#02-AAM634#003",
-        "IP rating or ingress protection class",
-    ),
-    NameplateElement(
-        "MeasuringRange",
-        "0173-1#02-AAN401#003",
-        "Operating or measuring range, with unit",
-    ),
-    NameplateElement(
-        "MaterialNumber",
-        "0173-1#02-AAO676#003",
-        "Internal material master number",
-    ),
-    NameplateElement(
-        "CEMarking",
-        "0173-1#02-AAO729#001",
-        "CE conformity marking or declared conformity",
-    ),
+from mia_dpp.confidence import (
+    MatchQuality,
+    ValueFormatQuality,
+    assess_mapping_confidence,
 )
+from mia_dpp.errors import MappingError
+from mia_dpp.models import (
+    DemoProposal,
+    EvidenceRecord,
+    EvidenceStatus,
+    MappingDraft,
+    MappingTarget,
+    ReferenceKey,
+    SemanticReference,
+    SourceLocation,
+    SubmodelTemplate,
+    TemplateElement,
+)
+from mia_dpp.templates import OfficialTemplateRepository, resolve_element
 
-REQUIRED_ELEMENTS = tuple(element.name for element in NAMEPLATE_ELEMENTS if element.required)
-UNKNOWN_SEMANTIC_ID = "0173-1#02-XXXXXX#001"
 
-
-def semantic_id_for(element_name: str) -> str:
-    """Return the current demo's semantic ID, including its unknown placeholder."""
-
-    normalized = element_name.casefold()
-    return next(
-        (
-            element.semantic_id
-            for element in NAMEPLATE_ELEMENTS
-            if element.name.casefold() == normalized
-        ),
-        UNKNOWN_SEMANTIC_ID,
+def external_reference(value: str) -> SemanticReference:
+    return SemanticReference(
+        type="ExternalReference",
+        keys=(ReferenceKey(type="GlobalReference", value=value),),
     )
 
 
-def missing_required(mappings: list[FieldMapping]) -> list[str]:
-    """List required elements not represented by an accepted mapping."""
-
-    accepted = {
-        mapping.target_element
-        for mapping in mappings
-        if mapping.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
-    }
-    return [element for element in REQUIRED_ELEMENTS if element not in accepted]
-
-
-def _slug(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")[:40]
-    return slug or "product"
-
-
-def _base36(value: int) -> str:
-    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-    result = ""
-    while value:
-        value, remainder = divmod(value, 36)
-        result = digits[remainder] + result
-    return result or "0"
-
-
-def build_dpp(
-    product_name: str,
-    mappings: list[FieldMapping],
+def mapping_target(
+    template: SubmodelTemplate,
+    path: tuple[str, ...],
     *,
-    now: datetime | None = None,
-) -> DppPackage:
-    """Build the same AAS-shaped object currently produced by TypeScript."""
+    id_short: str | None = None,
+    semantic_id: str | None = None,
+) -> MappingTarget:
+    """Construct a typed target from authoritative template metadata."""
 
-    moment = now or datetime.now(UTC)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    moment = moment.astimezone(UTC)
-    timestamp_ms = int(moment.timestamp() * 1000)
-    passport_id = f"urn:dpp:{_slug(product_name)}:{_base36(timestamp_ms)}"
-    approved = [
-        mapping
-        for mapping in mappings
-        if mapping.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
-    ]
-
-    submodel_elements = []
-    for mapping in approved:
-        submodel_elements.append(
-            {
-                "idShort": mapping.target_element,
-                "modelType": "Property",
-                "valueType": "xs:string",
-                "value": mapping.source_value,
-                "semanticId": {
-                    "type": "ExternalReference",
-                    "keys": [{"type": "GlobalReference", "value": mapping.semantic_id}],
-                },
-                "qualifiers": [
-                    {
-                        "type": "MappingConfidence",
-                        "valueType": "xs:double",
-                        "value": f"{mapping.confidence:.2f}",
-                    },
-                    {
-                        "type": "SourceField",
-                        "valueType": "xs:string",
-                        "value": mapping.source_field,
-                    },
-                ],
-            }
-        )
-
-    generated_at = moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    return DppPackage(
-        product_name=product_name,
-        passport_id=passport_id,
-        generated_at=generated_at,
-        submodel={
-            "idShort": "Nameplate",
-            "id": passport_id,
-            "kind": "Instance",
-            "semanticId": {
-                "type": "ExternalReference",
-                "keys": [
-                    {
-                        "type": "GlobalReference",
-                        "value": "https://admin-shell.io/zvei/nameplate/2/0/Nameplate",
-                    }
-                ],
-            },
-            "modelType": "Submodel",
-            "submodelElements": submodel_elements,
-        },
+    element = resolve_element(template, path)
+    target_id_short = id_short or element.id_short
+    if target_id_short is None:
+        raise MappingError(f"template path {'/'.join(path)} has no target idShort")
+    if element.wildcard:
+        if semantic_id is None:
+            raise MappingError("wildcard target requires an explicit semantic ID")
+        reference = external_reference(semantic_id)
+        instance_path = (*element.path[:-1], target_id_short)
+    else:
+        if element.semantic_id is None:
+            raise MappingError(f"template path {'/'.join(path)} has no semantic ID")
+        if id_short is not None or semantic_id is not None:
+            raise MappingError("fixed official targets cannot be overridden")
+        reference = element.semantic_id
+        instance_path = element.path
+    return MappingTarget(
+        template_key=template.release.key,
+        template_release=template.release.release,
+        template_path=element.path,
+        instance_path=instance_path,
+        id_short=target_id_short,
+        semantic_id=reference,
+        model_type=element.model_type,
+        value_type=element.value_type,
+        wildcard=element.wildcard,
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PatternRule:
     pattern: Pattern[str]
-    source: str
-    target: str
-    confidence: float
+    source_field: str
+    predicate: str
+    template_path: tuple[str, ...]
     reasoning: str
+    source_label: MatchQuality = MatchQuality.EXACT
+    value_format: ValueFormatQuality = ValueFormatQuality.VALID
+    semantic_match: MatchQuality = MatchQuality.EXACT
+    destination_candidates: int = 1
+    instance_id_short: str | None = None
+    semantic_id_override: str | None = None
 
+
+NAMEPLATE_ROOT = "Nameplate"
+ARBITRARY_PROPERTY_PATH = (
+    NAMEPLATE_ROOT,
+    "AssetSpecificProperties",
+    "ArbitraryProperty",
+)
 
 PATTERNS = (
     PatternRule(
@@ -216,16 +108,19 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "SERNR",
-        "SerialNumber",
-        0.96,
-        "Explicit serial-number label with an alphanumeric identifier.",
+        "product.serial_number",
+        (NAMEPLATE_ROOT, "SerialNumber"),
+        "An explicit serial-number label identifies the individual product.",
     ),
     PatternRule(
         re.compile(r"\b(IP\s?\d{2})\b", re.IGNORECASE),
         "SCHUTZART",
-        "DegreeOfProtection",
-        0.94,
-        "Matches the IPxx ingress-protection notation.",
+        "product.degree_of_protection",
+        ARBITRARY_PROPERTY_PATH,
+        "The value follows the standard IPxx protection notation.",
+        semantic_match=MatchQuality.STRONG,
+        instance_id_short="DegreeOfProtection",
+        semantic_id_override="0173-1#02-AAM634#003",
     ),
     PatternRule(
         re.compile(
@@ -234,9 +129,12 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "MESSBEREICH",
-        "MeasuringRange",
-        0.88,
-        "Numeric span followed by a physical unit reads as a range.",
+        "product.measuring_range",
+        ARBITRARY_PROPERTY_PATH,
+        "A numeric span and physical unit identify a measuring range.",
+        semantic_match=MatchQuality.STRONG,
+        instance_id_short="MeasuringRange",
+        semantic_id_override="0173-1#02-AAN401#003",
     ),
     PatternRule(
         re.compile(
@@ -245,9 +143,9 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "MATNR_TXT",
-        "ManufacturerProductDesignation",
-        0.91,
-        "Labelled model/type designation.",
+        "product.designation",
+        (NAMEPLATE_ROOT, "ManufacturerProductDesignation"),
+        "An explicit model/type label identifies the manufacturer's designation.",
     ),
     PatternRule(
         re.compile(
@@ -256,9 +154,9 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "LAND1",
-        "CountryOfOrigin",
-        0.90,
-        "Country stated with an origin phrase.",
+        "product.country_of_origin",
+        (NAMEPLATE_ROOT, "CountryOfOrigin"),
+        "An origin phrase explicitly states the country of manufacture.",
     ),
     PatternRule(
         re.compile(
@@ -267,9 +165,12 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "WERKS",
-        "ManufacturingSite",
-        0.86,
-        "SAP plant code WERKS conventionally carries the manufacturing site.",
+        "product.manufacturing_site",
+        ARBITRARY_PROPERTY_PATH,
+        "A plant/site label identifies a manufacturing location.",
+        semantic_match=MatchQuality.STRONG,
+        instance_id_short="ManufacturingSite",
+        semantic_id_override="0173-1#02-AAW336#001",
     ),
     PatternRule(
         re.compile(
@@ -279,9 +180,11 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "MATNR",
-        "OrderCode",
-        0.79,
-        "Material number is often reused as the order code, but the two can diverge.",
+        "product.order_code",
+        (NAMEPLATE_ROOT, "OrderCodeOfManufacturer"),
+        "The label identifies an order/article number, but those identifiers can diverge.",
+        semantic_match=MatchQuality.STRONG,
+        destination_candidates=2,
     ),
     PatternRule(
         re.compile(
@@ -289,32 +192,128 @@ PATTERNS = (
             re.IGNORECASE,
         ),
         "BAUJAHR",
-        "YearOfConstruction",
-        0.93,
-        "Four-digit year with a construction-year label.",
+        "product.year_of_construction",
+        (NAMEPLATE_ROOT, "YearOfConstruction"),
+        "A construction-year label is followed by a valid four-digit year.",
     ),
     PatternRule(
         re.compile(r"\b(CE)\b[\s-]*(?:mark|marking|konform)?", re.IGNORECASE),
         "CE_KZ",
-        "CEMarking",
-        0.72,
-        "CE mentioned, but the declaration reference is not stated.",
+        "product.marking",
+        (NAMEPLATE_ROOT, "Markings", "[]", "MarkingName"),
+        "CE is present, although no certificate or declaration reference was supplied.",
+        source_label=MatchQuality.STRONG,
+        value_format=ValueFormatQuality.PLAUSIBLE,
+        semantic_match=MatchQuality.STRONG,
+        destination_candidates=2,
     ),
 )
 
 KNOWN_MANUFACTURERS = ("AFRISO", "SCHUNK", "FIBRO", "Bosch", "Siemens", "Festo")
 
 
-def demo_propose(text: str) -> DemoProposal:
-    """Port the current no-API-key proposal behavior to Python."""
+def _evidence(
+    *,
+    text: str,
+    source_field: str,
+    predicate: str,
+    value: str,
+    excerpt: str,
+) -> EvidenceRecord:
+    content_hash = hashlib.sha256(text.encode()).hexdigest()
+    identity = hashlib.sha256(
+        f"{content_hash}\0{source_field}\0{predicate}\0{value}".encode()
+    ).hexdigest()
+    return EvidenceRecord(
+        id=f"ev-{identity[:24]}",
+        predicate=predicate,
+        value=value,
+        source_uri=f"urn:mia:manual:{content_hash[:24]}",
+        source_content_sha256=content_hash,
+        source_location=SourceLocation(excerpt=excerpt[:240]),
+        extraction_method="deterministic_regex",
+        extractor_name="mia-manual-text",
+        extractor_version="2",
+        status=EvidenceStatus.OBSERVED,
+    )
 
-    found: list[MappingDraft] = []
-    seen: set[str] = set()
 
-    def add(mapping: MappingDraft) -> None:
-        if mapping.target_element not in seen:
-            seen.add(mapping.target_element)
-            found.append(mapping)
+def _draft(
+    *,
+    evidence: EvidenceRecord,
+    source_field: str,
+    target: MappingTarget,
+    reasoning: str,
+    source_label: MatchQuality,
+    value_format: ValueFormatQuality,
+    semantic_match: MatchQuality,
+    destination_candidates: int,
+    history_confirmations: int,
+) -> MappingDraft:
+    assessment = assess_mapping_confidence(
+        source_label=source_label,
+        value_format=value_format,
+        semantic_match=semantic_match,
+        destination_candidates=destination_candidates,
+        history_confirmations=history_confirmations,
+    )
+    return MappingDraft(
+        evidence_id=evidence.id,
+        source_field=source_field,
+        source_value=str(evidence.value),
+        target_element=target.id_short,
+        semantic_id=target.semantic_id.primary_value,
+        target=target,
+        confidence=assessment.score,
+        confidence_assessment=assessment,
+        reasoning=reasoning,
+        from_graph=history_confirmations > 0,
+    )
+
+
+def demo_propose(
+    text: str,
+    repository: OfficialTemplateRepository,
+    *,
+    history: dict[tuple[str, str], int] | None = None,
+) -> DemoProposal:
+    """Extract manual evidence and propose official-template mappings deterministically."""
+
+    template = repository.load("digital_nameplate")
+    history = history or {}
+    evidence_records: list[EvidenceRecord] = []
+    mappings: list[MappingDraft] = []
+    seen_instance_paths: set[tuple[str, ...]] = set()
+
+    def add(
+        *,
+        evidence: EvidenceRecord,
+        source_field: str,
+        target: MappingTarget,
+        reasoning: str,
+        source_label: MatchQuality,
+        value_format: ValueFormatQuality,
+        semantic_match: MatchQuality,
+        destination_candidates: int,
+    ) -> None:
+        if target.instance_path in seen_instance_paths:
+            return
+        seen_instance_paths.add(target.instance_path)
+        evidence_records.append(evidence)
+        confirmations = history.get((source_field.casefold(), target.id_short), 0)
+        mappings.append(
+            _draft(
+                evidence=evidence,
+                source_field=source_field,
+                target=target,
+                reasoning=reasoning,
+                source_label=source_label,
+                value_format=value_format,
+                semantic_match=semantic_match,
+                destination_candidates=destination_candidates,
+                history_confirmations=confirmations,
+            )
+        )
 
     manufacturer = next(
         (
@@ -325,51 +324,81 @@ def demo_propose(text: str) -> DemoProposal:
         None,
     )
     if manufacturer:
+        evidence = _evidence(
+            text=text,
+            source_field="NAME1",
+            predicate="manufacturer.name",
+            value=manufacturer,
+            excerpt=manufacturer,
+        )
         add(
-            MappingDraft(
-                source_field="NAME1",
-                source_value=manufacturer,
-                target_element="ManufacturerName",
-                semantic_id=semantic_id_for("ManufacturerName"),
-                confidence=0.97,
-                reasoning="Recognised manufacturer name stated directly in the request.",
-            )
+            evidence=evidence,
+            source_field="NAME1",
+            target=mapping_target(template, (NAMEPLATE_ROOT, "ManufacturerName")),
+            reasoning="A recognized manufacturer name appears directly in the source.",
+            source_label=MatchQuality.STRONG,
+            value_format=ValueFormatQuality.VALID,
+            semantic_match=MatchQuality.EXACT,
+            destination_candidates=1,
         )
 
     for rule in PATTERNS:
-        if match := rule.pattern.search(text):
-            add(
-                MappingDraft(
-                    source_field=rule.source,
-                    source_value=(match.group(1) or match.group(0)).strip(),
-                    target_element=rule.target,
-                    semantic_id=semantic_id_for(rule.target),
-                    confidence=rule.confidence,
-                    reasoning=rule.reasoning,
-                )
-            )
+        match = rule.pattern.search(text)
+        if match is None:
+            continue
+        value = (match.group(1) or match.group(0)).strip()
+        evidence = _evidence(
+            text=text,
+            source_field=rule.source_field,
+            predicate=rule.predicate,
+            value=value,
+            excerpt=match.group(0),
+        )
+        add(
+            evidence=evidence,
+            source_field=rule.source_field,
+            target=mapping_target(
+                template,
+                rule.template_path,
+                id_short=rule.instance_id_short,
+                semantic_id=rule.semantic_id_override,
+            ),
+            reasoning=rule.reasoning,
+            source_label=rule.source_label,
+            value_format=rule.value_format,
+            semantic_match=rule.semantic_match,
+            destination_candidates=rule.destination_candidates,
+        )
 
-    if "YearOfConstruction" not in seen:
-        if year := re.search(r"\b(19[89]\d|20[0-4]\d)\b", text):
+    if not any(item.predicate == "product.year_of_construction" for item in evidence_records):
+        year = re.search(r"\b(19[89]\d|20[0-4]\d)\b", text)
+        if year:
+            evidence = _evidence(
+                text=text,
+                source_field="BAUJAHR",
+                predicate="product.year_of_construction",
+                value=year.group(1),
+                excerpt=year.group(0),
+            )
             add(
-                MappingDraft(
-                    source_field="BAUJAHR",
-                    source_value=year.group(1),
-                    target_element="YearOfConstruction",
-                    semantic_id=semantic_id_for("YearOfConstruction"),
-                    confidence=0.64,
-                    reasoning=(
-                        "Unlabelled four-digit year. Could also be a revision or catalogue year, "
-                        "so this needs a human check."
-                    ),
-                )
+                evidence=evidence,
+                source_field="BAUJAHR",
+                target=mapping_target(template, (NAMEPLATE_ROOT, "YearOfConstruction")),
+                reasoning=(
+                    "An unlabelled four-digit year could be a construction, revision or "
+                    "catalogue year."
+                ),
+                source_label=MatchQuality.NONE,
+                value_format=ValueFormatQuality.VALID,
+                semantic_match=MatchQuality.WEAK,
+                destination_candidates=3,
             )
 
     designation = next(
         (
-            mapping.source_value
-            for mapping in found
-            if mapping.target_element == "ManufacturerProductDesignation"
+            item.source_value
+            for item in mappings
+            if item.target_element == "ManufacturerProductDesignation"
         ),
         None,
     )
@@ -380,5 +409,32 @@ def demo_propose(text: str) -> DemoProposal:
         first_phrase,
         flags=re.IGNORECASE,
     ).strip()
-    product_name = (designation or fallback or "Product")[:60]
-    return DemoProposal(product_name=product_name, mappings=tuple(found))
+    return DemoProposal(
+        product_name=(designation or fallback or "Product")[:60],
+        evidence=tuple(evidence_records),
+        mappings=tuple(mappings),
+    )
+
+
+def selectable_elements(template: SubmodelTemplate) -> tuple[TemplateElement, ...]:
+    """Return fixed value-bearing targets appropriate for a correction menu."""
+
+    selected: list[TemplateElement] = []
+
+    def visit(elements: tuple[TemplateElement, ...]) -> None:
+        for element in elements:
+            if (
+                element.model_type
+                in {
+                    "Property",
+                    "MultiLanguageProperty",
+                    "Range",
+                    "File",
+                }
+                and not element.wildcard
+            ):
+                selected.append(element)
+            visit(element.children)
+
+    visit(template.elements)
+    return tuple(selected)

@@ -1,58 +1,128 @@
-"""HTTP-level checks for the Python replacement backend."""
+"""HTTP contract tests for the locally deployable Python backend."""
+
+from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import httpx
+
 from mia_dpp.api import app
+from mia_dpp.chat import demo_turn
+from mia_dpp.models import ChatMessage, ChatRequest
 
 
-def request(path: str, payload: dict[str, object]) -> httpx.Response:
+def request(
+    method: str,
+    path: str,
+    payload: dict[str, object] | None = None,
+) -> httpx.Response:
     async def send() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            return await client.post(path, json=payload)
+            return await client.request(method, path, json=payload)
 
     return asyncio.run(send())
 
 
-def test_chat_endpoint_uses_demo_mode_without_a_key(monkeypatch: object) -> None:
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)  # type: ignore[attr-defined]
+def accepted_payload(text: str) -> dict[str, Any]:
+    proposal = demo_turn(ChatRequest(messages=(ChatMessage(role="user", content=text),))).proposal
+    assert proposal is not None
+    mappings = []
+    for index, item in enumerate(proposal.mappings):
+        data = item.model_dump(mode="json", by_alias=True)
+        data["id"] = f"mapping-{index}"
+        data["status"] = "approved"
+        mappings.append(data)
+    return {"productName": proposal.product_name, "mappings": mappings}
+
+
+def test_health_and_template_catalog_prove_standards_readiness() -> None:
+    health = request("GET", "/health")
+    templates = request("GET", "/api/templates")
+
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    assert health.json()["standardsReady"] is True
+    assert len(health.json()["standardsCommit"]) == 40
+    assert templates.status_code == 200
+    assert [item["release"] for item in templates.json()] == ["3.0.1", "2.0.1"]
+
+
+def test_chat_endpoint_runs_without_an_external_key() -> None:
     response = request(
+        "POST",
         "/api/chat",
         {
-            "messages": [
-                {"role": "user", "content": "Festo sensor, model SDE5, serial SN-42."}
-            ],
+            "messages": [{"role": "user", "content": "Festo sensor, model SDE5, serial SN-42."}],
             "graph": [],
         },
     )
 
     assert response.status_code == 200
-    assert response.json()["mode"] == "demo"
-    assert response.json()["proposal"]["productName"] == "SDE5"
+    body = response.json()
+    assert body["mode"] == "demo"
+    assert body["proposal"]["productName"] == "SDE5"
+    assert body["proposal"]["mappings"][0]["confidenceAssessment"]["factors"]
 
 
-def test_dpp_endpoint_returns_the_existing_wire_format() -> None:
+def test_dpp_endpoint_returns_full_verified_environment_and_reports() -> None:
     response = request(
+        "POST",
         "/api/dpp",
-        {
-            "productName": "Festo SDE5",
-            "mappings": [
-                {
-                    "id": "mapping-1",
-                    "sourceField": "NAME1",
-                    "sourceValue": "Festo",
-                    "targetElement": "ManufacturerName",
-                    "semanticId": "0173-1#02-AAO677#002",
-                    "confidence": 0.97,
-                    "reasoning": "Recognised manufacturer.",
-                    "status": "approved",
-                }
-            ],
-        },
+        accepted_payload(
+            "AFRISO gauge, model RF100-16, serial number 2024-8871, built 2024, "
+            "IP65, 0-16 bar, material number 63820."
+        ),
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["productName"] == "Festo SDE5"
-    assert body["submodel"]["submodelElements"][0]["value"] == "Festo"
+    assert body["productName"] == "RF100-16"
+    assert body["environment"]["assetAdministrationShells"]
+    assert body["environment"]["submodels"]
+    assert body["validationReport"]["valid"] is True
+    assert body["deployable"] is True
+    assert len(body["artifactSha256"]) == 64
+
+
+def test_incomplete_but_well_formed_artifact_is_returned_with_blocking_gaps() -> None:
+    response = request(
+        "POST",
+        "/api/dpp",
+        accepted_payload("SCHUNK clamping module, order code JGZ-100-1, 2022."),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deployable"] is False
+    assert body["gapReport"]["blocksDeployment"] is True
+    assert body["gapReport"]["gaps"][0]["templatePath"] == [
+        "Nameplate",
+        "ManufacturerProductDesignation",
+    ]
+
+
+def test_client_cannot_forge_official_semantic_metadata() -> None:
+    payload = accepted_payload(
+        "AFRISO gauge, model RF100-16, serial number 2024-8871, built 2024, material number 63820."
+    )
+    first = payload["mappings"][0]
+    forged = "https://attacker.example/not-idta"
+    first["semanticId"] = forged
+    first["target"]["semanticId"]["keys"][0]["value"] = forged
+
+    response = request("POST", "/api/dpp", payload)
+
+    assert response.status_code == 422
+    assert "semantic ID differs" in response.json()["detail"]
+
+
+def test_pydantic_rejects_unknown_request_fields() -> None:
+    response = request(
+        "POST",
+        "/api/chat",
+        {"messages": [], "graph": [], "unexpected": True},
+    )
+
+    assert response.status_code == 422

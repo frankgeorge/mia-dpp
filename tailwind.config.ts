@@ -16,8 +16,8 @@ const config: Config = {
         warn: "#B8760B",
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "-apple-system", "sans-serif"],
-        mono: ["'IBM Plex Mono'", "ui-monospace", "monospace"],
+        sans: ["system-ui", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Consolas", "monospace"],
       },
       letterSpacing: { tightest: "-0.045em" },
       maxWidth: { shell: "1180px" },

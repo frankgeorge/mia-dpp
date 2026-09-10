@@ -1,58 +1,114 @@
-"""Python implementation of the existing chat endpoint behavior."""
+"""Chat boundary: AI may propose, deterministic Python scores and validates targets."""
 
 from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 import httpx
 
-from mia_dpp.idta import NAMEPLATE_ELEMENTS, demo_propose, semantic_id_for
+from mia_dpp.confidence import (
+    MatchQuality,
+    ValueFormatQuality,
+    assess_mapping_confidence,
+)
+from mia_dpp.idta import (
+    ARBITRARY_PROPERTY_PATH,
+    demo_propose,
+    mapping_target,
+    selectable_elements,
+)
 from mia_dpp.models import (
     ChatRequest,
     ChatResponse,
     MappingProposal,
     MappingStatus,
+    NameplateElement,
     ProposedFieldMapping,
 )
+from mia_dpp.templates import OfficialTemplateRepository
 
 MODEL = "deepseek/deepseek-chat-v3-0324"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 CONFIDENCE_THRESHOLD = 0.85
 
+_KNOWN_ARBITRARY_TARGETS = (
+    (
+        "DegreeOfProtection",
+        "0173-1#02-AAM634#003",
+        "IP ingress-protection rating.",
+    ),
+    (
+        "MeasuringRange",
+        "0173-1#02-AAN401#003",
+        "Operating or measuring range with unit.",
+    ),
+    (
+        "ManufacturingSite",
+        "0173-1#02-AAW336#001",
+        "Plant or site where the product was manufactured.",
+    ),
+)
 
-def _catalog() -> tuple[dict[str, Any], ...]:
-    return tuple(
-        {
-            "name": element.name,
-            "semanticId": element.semantic_id,
-            "hint": element.hint,
-            "required": element.required,
-        }
-        for element in NAMEPLATE_ELEMENTS
-    )
+
+def _catalog(repository: OfficialTemplateRepository) -> tuple[NameplateElement, ...]:
+    template = repository.load("digital_nameplate")
+    result: list[NameplateElement] = []
+    for element in selectable_elements(template):
+        target = mapping_target(template, element.path)
+        result.append(
+            NameplateElement(
+                name=target.id_short,
+                path=target.instance_path,
+                semantic_id=target.semantic_id.primary_value,
+                hint=element.description or f"Official {target.model_type} target.",
+                required=bool(element.cardinality and element.cardinality.minimum),
+                model_type=target.model_type,
+                value_type=target.value_type,
+                target=target,
+            )
+        )
+    for name, semantic_id, hint in _KNOWN_ARBITRARY_TARGETS:
+        target = mapping_target(
+            template,
+            ARBITRARY_PROPERTY_PATH,
+            id_short=name,
+            semantic_id=semantic_id,
+        )
+        result.append(
+            NameplateElement(
+                name=name,
+                path=target.instance_path,
+                semantic_id=semantic_id,
+                hint=hint,
+                required=False,
+                model_type=target.model_type,
+                value_type=target.value_type,
+                target=target,
+            )
+        )
+    return tuple(result)
 
 
 def _status(confidence: float) -> MappingStatus:
-    return (
-        MappingStatus.AUTO
-        if confidence >= CONFIDENCE_THRESHOLD
-        else MappingStatus.REVIEW
-    )
+    return MappingStatus.AUTO if confidence >= CONFIDENCE_THRESHOLD else MappingStatus.REVIEW
 
 
-def _clamp(value: object) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return 0.5
-    return max(0.0, min(1.0, number))
+def _history(request: ChatRequest) -> dict[tuple[str, str], int]:
+    return {
+        (entry.source_field.casefold(), entry.target_element): max(entry.corrections, 1)
+        for entry in request.graph
+    }
 
 
-def demo_turn(request: ChatRequest) -> ChatResponse:
-    """Run the current no-key chat behavior without external services."""
+def demo_turn(
+    request: ChatRequest,
+    repository: OfficialTemplateRepository | None = None,
+) -> ChatResponse:
+    """Run the offline deterministic path without any external service."""
 
+    repository = repository or OfficialTemplateRepository()
+    catalog = _catalog(repository)
     text = request.messages[-1].content if request.messages else ""
     wants_generate = bool(
         re.search(
@@ -60,11 +116,7 @@ def demo_turn(request: ChatRequest) -> ChatResponse:
             text,
             re.IGNORECASE,
         )
-        or re.search(
-            r"^(generate|export|build it|do it|yes)\b",
-            text.strip(),
-            re.IGNORECASE,
-        )
+        or re.search(r"^(generate|export|build it|do it|yes)\b", text.strip(), re.IGNORECASE)
     )
     looks_like_product = len(text.strip()) > 12 and bool(
         re.search(
@@ -76,110 +128,58 @@ def demo_turn(request: ChatRequest) -> ChatResponse:
 
     if wants_generate and not looks_like_product:
         return ChatResponse(
-            reply="Building the passport from your approved mappings.",
+            reply="Building the passport from the mappings currently accepted in the table.",
             generate=True,
             mode="demo",
-            nameplate_elements=_catalog(),
+            nameplate_elements=catalog,
         )
-
     if not looks_like_product:
         return ChatResponse(
             reply=(
-                "Describe the product and I'll map it — manufacturer, model, serial number, "
-                "year, plant, and any technical values you have. Or press one of the sample "
-                "products above."
+                "Describe the product and I'll extract evidence and propose official IDTA "
+                "targets. Include manufacturer, model, serial number, year and order code."
             ),
             mode="demo",
-            nameplate_elements=_catalog(),
+            nameplate_elements=catalog,
         )
 
-    draft = demo_propose(text)
-    mappings: list[ProposedFieldMapping] = []
-    for mapping in draft.mappings:
-        graph_match = next(
-            (
-                entry
-                for entry in request.graph
-                if entry.source_field.casefold() == mapping.source_field.casefold()
-                and entry.target_element == mapping.target_element
-            ),
-            None,
+    draft = demo_propose(text, repository, history=_history(request))
+    mappings = tuple(
+        ProposedFieldMapping(
+            **mapping.model_dump(),
+            status=_status(mapping.confidence),
         )
-        if graph_match:
-            confidence = min(0.99, mapping.confidence + 0.22)
-            reasoning = (
-                "Verified on an earlier product, so this is reused from the Integration "
-                f"Graph. {mapping.reasoning}"
-            )
-            from_graph = True
-        else:
-            confidence = mapping.confidence
-            reasoning = mapping.reasoning
-            from_graph = False
-        mappings.append(
-            ProposedFieldMapping(
-                **mapping.model_dump(exclude={"confidence", "reasoning", "from_graph"}),
-                confidence=confidence,
-                reasoning=reasoning,
-                from_graph=from_graph,
-                status=_status(confidence),
-            )
-        )
-
-    low = sum(mapping.confidence < CONFIDENCE_THRESHOLD for mapping in mappings)
-    reused = sum(mapping.from_graph for mapping in mappings)
-    reply = f"Found {len(mappings)} field{'s' if len(mappings) != 1 else ''} in that description."
+        for mapping in draft.mappings
+    )
+    low = sum(item.status is MappingStatus.REVIEW for item in mappings)
+    reused = sum(item.from_graph for item in mappings)
+    reply = f"Found {len(mappings)} evidence-backed mapping{'s' if len(mappings) != 1 else ''}."
     if reused:
-        reply += f" {reused} came straight from the Integration Graph."
+        reply += f" Prior review history reduced target ambiguity for {reused}."
     if low:
-        verb = "is" if low == 1 else "are"
-        need = "needs" if low == 1 else "need"
-        reply += f" {low} {verb} below the confidence line and {need} your decision."
+        reply += f" {low} still need{'s' if low == 1 else ''} your decision."
     else:
-        reply += " All of them cleared the confidence line."
-
+        reply += " Their deterministic evidence scores cleared the review line."
     return ChatResponse(
         reply=reply,
-        proposal=MappingProposal(product_name=draft.product_name, mappings=tuple(mappings)),
+        proposal=MappingProposal(product_name=draft.product_name, mappings=mappings),
         mode="demo",
-        nameplate_elements=_catalog(),
+        nameplate_elements=catalog,
     )
 
 
-def _system_prompt() -> str:
-    elements = "\n".join(
-        f"- {item.name}{' (required)' if item.required else ''} — {item.hint}"
-        for item in NAMEPLATE_ELEMENTS
-    )
+def _system_prompt(catalog: tuple[NameplateElement, ...]) -> str:
+    elements = "\n".join(f"- {item.name} ({'/'.join(item.path)}) - {item.hint}" for item in catalog)
     return "\n".join(
         (
-            "You are MIA, an integration agent that turns a manufacturer's messy product "
-            "data into a standards-compliant Digital Product Passport.",
+            "You are MIA's semantic proposal assistant. Python, not you, decides confidence "
+            "and validates official template metadata.",
             "",
-            "You map source fields onto the IDTA Digital Nameplate submodel. These are "
-            "the only valid target elements:",
-            "",
+            "You may propose only these target names:",
             elements,
             "",
-            "Rules you must follow:",
-            "1. When the user describes a product, call propose_mappings once with every "
-            "field you can identify.",
-            "2. Give each mapping an honest confidence between 0 and 1. Be genuinely "
-            "uncertain when the evidence is weak — a guessed field at 0.55 is far more useful "
-            "than a false 0.95. Reserve above 0.9 for cases where the label is explicit and "
-            "unambiguous.",
-            "3. sourceField should be the field name as it would appear in a German "
-            "manufacturer's SAP system (WERKS, MATNR, SERNR, BAUJAHR, NAME1, LAND1) when "
-            "you can infer it, otherwise a plain descriptive name.",
-            "4. Never invent values the user did not provide. Missing data is a gap to "
-            "report, not to fill.",
-            "5. After proposing, tell the user in one or two short sentences what you mapped "
-            "and what still needs their decision. Do not repeat the whole table back — the "
-            "interface already shows it.",
-            "6. Only call generate_dpp when the user explicitly asks to generate, build, "
-            "or export the passport.",
-            "",
-            "Be brief and concrete. You are a working tool, not a chatbot.",
+            "Never invent a source value. Call propose_mappings once with every explicit "
+            "field. Give a short rationale. Only call generate_dpp after an explicit request.",
         )
     )
 
@@ -189,9 +189,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "propose_mappings",
-            "description": (
-                "Propose field mappings from product data onto the IDTA Digital Nameplate."
-            ),
+            "description": "Propose source fields for official IDTA target names.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -204,14 +202,12 @@ TOOLS = [
                                 "sourceField": {"type": "string"},
                                 "sourceValue": {"type": "string"},
                                 "targetElement": {"type": "string"},
-                                "confidence": {"type": "number"},
                                 "reasoning": {"type": "string"},
                             },
                             "required": [
                                 "sourceField",
                                 "sourceValue",
                                 "targetElement",
-                                "confidence",
                                 "reasoning",
                             ],
                         },
@@ -225,7 +221,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "generate_dpp",
-            "description": "Assemble the DPP from mappings the user has approved.",
+            "description": "Generate from mappings already reviewed in the interface.",
             "parameters": {
                 "type": "object",
                 "properties": {"confirm": {"type": "boolean"}},
@@ -236,28 +232,33 @@ TOOLS = [
 ]
 
 
-async def live_turn(request: ChatRequest, api_key: str) -> ChatResponse:
-    """Call the same OpenRouter model previously used by the Next.js route."""
+async def live_turn(
+    request: ChatRequest,
+    api_key: str,
+    repository: OfficialTemplateRepository | None = None,
+) -> ChatResponse:
+    """Ask OpenRouter for proposals, then enforce targets and confidence in Python."""
 
+    repository = repository or OfficialTemplateRepository()
+    catalog = _catalog(repository)
+    catalog_by_name = {item.name: item for item in catalog}
     graph_hint = ""
     if request.graph:
         mappings = "\n".join(
-            f"- {entry.source_field} maps to {entry.target_element} (verified)"
+            f"- {entry.source_field} maps to {entry.target_element} (human reviewed)"
             for entry in request.graph
         )
         graph_hint = (
-            "\n\nIntegration Graph — mappings a human already verified on earlier products. "
-            "Reuse these when the same source field appears again, and raise your confidence "
-            f"accordingly:\n{mappings}"
+            "\n\nPrior review history may help choose a target, but it does not verify a "
+            f"current value:\n{mappings}"
         )
-
     payload = {
         "model": MODEL,
         "max_tokens": 2000,
         "tools": TOOLS,
         "tool_choice": "auto",
         "messages": [
-            {"role": "system", "content": _system_prompt() + graph_hint},
+            {"role": "system", "content": _system_prompt(catalog) + graph_hint},
             *[message.model_dump() for message in request.messages],
         ],
     }
@@ -274,47 +275,70 @@ async def live_turn(request: ChatRequest, api_key: str) -> ChatResponse:
     reply = message.get("content") or ""
     proposal: MappingProposal | None = None
     generate = False
+    history = _history(request)
 
     for call in message.get("tool_calls") or []:
         function = call.get("function") or {}
-        arguments = json.loads(function.get("arguments") or "{}")
+        try:
+            arguments = json.loads(function.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            continue
         if function.get("name") == "propose_mappings":
-            proposed = []
-            for item in arguments.get("mappings") or []:
-                confidence = _clamp(item.get("confidence", 0.5))
+            proposed: list[ProposedFieldMapping] = []
+            for index, item in enumerate(arguments.get("mappings") or []):
+                target_name = str(item.get("targetElement") or "")
+                catalog_item = catalog_by_name.get(target_name)
+                if catalog_item is None:
+                    continue
+                source_field = str(item.get("sourceField") or "unknown")
+                source_value = str(item.get("sourceValue") or "").strip()
+                if not source_value:
+                    continue
+                confirmations = history.get((source_field.casefold(), target_name), 0)
+                assessment = assess_mapping_confidence(
+                    source_label=(
+                        MatchQuality.STRONG if source_field != "unknown" else MatchQuality.NONE
+                    ),
+                    value_format=ValueFormatQuality.PLAUSIBLE,
+                    semantic_match=MatchQuality.STRONG,
+                    destination_candidates=1,
+                    history_confirmations=confirmations,
+                )
+                digest = re.sub(r"[^a-z0-9]", "", source_field.casefold())[:12] or "source"
+                evidence_id = f"ev-live-{digest}-{index}"
                 proposed.append(
                     ProposedFieldMapping(
-                        source_field=str(item.get("sourceField") or "unknown"),
-                        source_value=str(item.get("sourceValue") or ""),
-                        target_element=str(item.get("targetElement") or ""),
-                        semantic_id=semantic_id_for(str(item.get("targetElement") or "")),
-                        confidence=confidence,
-                        reasoning=str(item.get("reasoning") or ""),
-                        status=_status(confidence),
+                        evidence_id=evidence_id,
+                        source_field=source_field,
+                        source_value=source_value,
+                        target_element=target_name,
+                        semantic_id=catalog_item.semantic_id,
+                        target=catalog_item.target,
+                        confidence=assessment.score,
+                        confidence_assessment=assessment,
+                        reasoning=str(item.get("reasoning") or "Semantic proposal from the model."),
+                        from_graph=confirmations > 0,
+                        status=_status(assessment.score),
                     )
                 )
             proposal = MappingProposal(
                 product_name=str(arguments.get("productName") or "Product"),
                 mappings=tuple(proposed),
             )
-        if function.get("name") == "generate_dpp":
+        elif function.get("name") == "generate_dpp":
             generate = True
 
     if not reply:
         if proposal:
-            reply = (
-                "Mapped what I could from that. Anything below the confidence line is "
-                "waiting on your decision."
-            )
+            reply = "Proposals are ready. Python calculated every confidence explanation."
         elif generate:
-            reply = "Building the passport from your approved mappings."
+            reply = "Building from the mappings currently accepted in the table."
         else:
-            reply = "Tell me about the product and I'll map it."
-
+            reply = "Tell me about the product and I'll propose official IDTA targets."
     return ChatResponse(
         reply=reply,
         proposal=proposal,
         generate=generate,
         mode="live",
-        nameplate_elements=_catalog(),
+        nameplate_elements=catalog,
     )

@@ -45,19 +45,26 @@ export default function Workspace() {
   >([]);
   const [mode, setMode] = useState<string>("");
   const [tab, setTab] = useState<"mappings" | "graph">("mappings");
+  const graphReadyRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   /* Integration Graph persists across sessions in the browser. */
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(GRAPH_KEY);
-      if (raw) setGraph(JSON.parse(raw));
-    } catch {
-      /* ignore unreadable storage */
-    }
+    const restore = setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(GRAPH_KEY);
+        if (saved) setGraph(JSON.parse(saved));
+      } catch {
+        /* ignore unreadable storage */
+      } finally {
+        graphReadyRef.current = true;
+      }
+    }, 0);
+    return () => clearTimeout(restore);
   }, []);
 
   useEffect(() => {
+    if (!graphReadyRef.current) return;
     try {
       localStorage.setItem(GRAPH_KEY, JSON.stringify(graph));
     } catch {
@@ -89,21 +96,25 @@ export default function Workspace() {
       setMode(data.mode ?? "");
       setNameplateElements(data.nameplateElements ?? []);
 
+      let generationProduct = productName;
+      let generationMappings = mappings;
       if (data.proposal) {
-        setProductName(data.proposal.productName || "Product");
-        setMappings(
-          (data.proposal.mappings ?? []).map(
-            (m: ProposedFieldMapping, i: number) => ({
-              ...m,
-              id: `${Date.now()}-${i}`,
-            })
-          )
+        generationProduct = data.proposal.productName || "Product";
+        generationMappings = (data.proposal.mappings ?? []).map(
+          (m: ProposedFieldMapping, i: number) => ({
+            ...m,
+            id: `${Date.now()}-${i}`,
+          })
         );
+        setProductName(generationProduct);
+        setMappings(generationMappings);
         setDpp(null);
         setTab("mappings");
       }
 
-      if (data.generate) await generate();
+      if (data.generate) {
+        await generate(generationProduct, generationMappings);
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -131,24 +142,21 @@ export default function Workspace() {
     if (m && status === "approved") writeToGraph(m);
   }
 
-  function correct(id: string, targetElement: string) {
-    setMappings((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              targetElement,
-              semanticId:
-                nameplateElements.find((e) => e.name === targetElement)
-                  ?.semanticId ?? m.semanticId,
-              status: "approved",
-              reasoning: "Corrected by you, and saved to the Integration Graph.",
-            }
-          : m
-      )
+  function correct(id: string, selected: NameplateElement) {
+    const mapping = mappings.find((item) => item.id === id);
+    if (!mapping) return;
+    const corrected: FieldMapping = {
+      ...mapping,
+      targetElement: selected.name,
+      semanticId: selected.semanticId,
+      target: selected.target,
+      status: "approved",
+      reasoning: "Corrected by you, and saved to the Integration Graph.",
+    };
+    setMappings((previous) =>
+      previous.map((item) => (item.id === id ? corrected : item))
     );
-    const m = mappings.find((x) => x.id === id);
-    if (m) writeToGraph({ ...m, targetElement });
+    writeToGraph(corrected);
   }
 
   /* Every human decision is written back — this is the compounding memory. */
@@ -184,14 +192,17 @@ export default function Workspace() {
     );
   }
 
-  async function generate() {
+  async function generate(
+    selectedProduct = productName,
+    selectedMappings = mappings
+  ) {
     try {
       const response = await fetch(`${API_URL}/api/dpp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productName: productName || "Product",
-          mappings,
+          productName: selectedProduct || "Product",
+          mappings: selectedMappings,
         }),
       });
       if (!response.ok) {
@@ -220,10 +231,13 @@ export default function Workspace() {
         (mapping) =>
           mapping.status === "approved" || mapping.status === "auto"
       )
-      .map((mapping) => mapping.targetElement)
+      .map((mapping) => mapping.target.instancePath.join("/"))
   );
   const gaps = nameplateElements
-    .filter((element) => element.required && !present.has(element.name))
+    .filter(
+      (element) =>
+        element.required && !present.has(element.target.instancePath.join("/"))
+    )
     .map((element) => element.name);
 
   return (
@@ -253,7 +267,7 @@ export default function Workspace() {
             </span>
           )}
           <button
-            onClick={generate}
+            onClick={() => void generate()}
             disabled={ready === 0}
             className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
           >

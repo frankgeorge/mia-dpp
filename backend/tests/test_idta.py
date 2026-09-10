@@ -1,66 +1,134 @@
-"""Behavior examples for the TypeScript logic ported to Python."""
+"""End-to-end tests for the deterministic official-template pipeline."""
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mia_dpp.idta import build_dpp, demo_propose, missing_required
-from mia_dpp.models import FieldMapping, MappingStatus
+import pytest
+from aas_core3 import jsonization, verification
+
+from mia_dpp.errors import MappingError
+from mia_dpp.idta import demo_propose, external_reference
+from mia_dpp.models import FieldMapping, MappingStatus, MappingTarget
+from mia_dpp.pipeline import build_dpp
+from mia_dpp.templates import OfficialTemplateRepository
+
+PRODUCT = (
+    "AFRISO gauge, model RF100-16, serial number 2024-8871, built 2024, "
+    "IP65, 0-16 bar, material number 63820."
+)
 
 
-def mapping(target: str, status: MappingStatus) -> FieldMapping:
-    return FieldMapping(
-        id=target,
-        source_field="SOURCE",
-        source_value="value",
-        target_element=target,
-        semantic_id="semantic-id",
-        confidence=0.9,
-        reasoning="test mapping",
-        status=status,
-    )
+def accepted_mappings(text: str = PRODUCT) -> tuple[str, list[FieldMapping]]:
+    proposal = demo_propose(text, OfficialTemplateRepository())
+    mappings = [
+        FieldMapping(
+            **mapping.model_dump(),
+            id=f"mapping-{index}",
+            status=MappingStatus.APPROVED,
+        )
+        for index, mapping in enumerate(proposal.mappings)
+    ]
+    return proposal.product_name, mappings
 
 
-def test_demo_proposes_the_current_pressure_gauge_fields() -> None:
-    proposal = demo_propose(
-        "Create a DPP for our AFRISO pressure gauge, model RF100-16, "
-        "serial number 2024-8871, built 2024, IP65, range 0-16 bar, "
-        "material number 63820."
-    )
+def test_demo_maps_evidence_to_official_and_wildcard_template_paths() -> None:
+    proposal = demo_propose(PRODUCT, OfficialTemplateRepository())
 
+    targets = {item.target_element: item.target for item in proposal.mappings}
     assert proposal.product_name == "RF100-16"
-    assert [item.target_element for item in proposal.mappings] == [
-        "ManufacturerName",
-        "SerialNumber",
-        "DegreeOfProtection",
-        "MeasuringRange",
-        "ManufacturerProductDesignation",
-        "OrderCode",
-        "YearOfConstruction",
-    ]
+    assert targets["ManufacturerName"].template_release == "3.0.1"
+    assert targets["ManufacturerName"].semantic_id.primary_value == ("0112/2///61987#ABA565#009")
+    assert targets["OrderCodeOfManufacturer"].template_path == (
+        "Nameplate",
+        "OrderCodeOfManufacturer",
+    )
+    assert targets["DegreeOfProtection"].template_path == (
+        "Nameplate",
+        "AssetSpecificProperties",
+        "ArbitraryProperty",
+    )
+    assert targets["DegreeOfProtection"].instance_path[-1] == "DegreeOfProtection"
+    assert targets["DegreeOfProtection"].wildcard
+    assert all(item.evidence_id.startswith("ev-") for item in proposal.mappings)
 
 
-def test_only_accepted_mappings_enter_the_dpp() -> None:
-    package = build_dpp(
-        "Demo product",
-        [
-            mapping("ManufacturerName", MappingStatus.APPROVED),
-            mapping("SerialNumber", MappingStatus.AUTO),
-            mapping("YearOfConstruction", MappingStatus.REVIEW),
-        ],
-        now=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+def test_pipeline_builds_a_repeatable_aas_core_verified_environment() -> None:
+    product_name, mappings = accepted_mappings()
+    repository = OfficialTemplateRepository()
+    first = build_dpp(
+        product_name,
+        mappings,
+        repository=repository,
+        now=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    second = build_dpp(
+        product_name,
+        list(reversed(mappings)),
+        repository=repository,
+        now=datetime(2027, 2, 3, tzinfo=UTC),
     )
 
-    elements = package.submodel["submodelElements"]
-    assert [element["idShort"] for element in elements] == [
-        "ManufacturerName",
-        "SerialNumber",
-    ]
-    assert package.generated_at == "2026-01-02T03:04:05.000Z"
-    assert package.passport_id == "urn:dpp:demo-product:mjwaid1k"
+    environment = jsonization.environment_from_jsonable(first.environment)
+    assert list(verification.verify(environment)) == []
+    assert first.artifact_sha256 == second.artifact_sha256
+    assert first.environment == second.environment
+    assert first.generated_at != second.generated_at
+    assert first.deployable
+    assert first.validation_report.valid
+    assert first.validation_report.findings[0].code == "IDTA-EXTERNAL-DROPIN"
+    elements = {item["idShort"]: item for item in first.submodel["submodelElements"]}
+    assert elements["ManufacturerName"]["modelType"] == "MultiLanguageProperty"
+    assert elements["ManufacturerName"]["value"] == [{"language": "en", "text": "AFRISO"}]
+    assert elements["URIOfTheProduct"]["value"].startswith("urn:mia:asset:")
 
 
-def test_missing_required_uses_the_current_acceptance_rule() -> None:
-    assert missing_required([mapping("ManufacturerName", MappingStatus.APPROVED)]) == [
-        "ManufacturerProductDesignation",
-        "SerialNumber",
-        "YearOfConstruction",
+def test_missing_required_template_elements_are_reported_and_block_deployment() -> None:
+    product_name, mappings = accepted_mappings(
+        "SCHUNK clamping module, order code JGZ-100-1, 2022."
+    )
+
+    package = build_dpp(
+        product_name,
+        mappings,
+        now=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    assert not package.deployable
+    assert not package.validation_report.valid
+    assert package.gap_report.blocks_deployment
+    assert [gap.template_path for gap in package.gap_report.gaps] == [
+        ("Nameplate", "ManufacturerProductDesignation")
     ]
+
+
+def test_client_cannot_replace_an_official_fixed_semantic_id() -> None:
+    product_name, mappings = accepted_mappings()
+    original = mappings[0]
+    forged_reference = external_reference("https://attacker.example/not-idta")
+    target_data = original.target.model_dump(by_alias=False)
+    target_data["semantic_id"] = forged_reference
+    forged_target = MappingTarget(**target_data)
+    mapping_data = original.model_dump(
+        exclude={"target", "semantic_id"},
+    )
+    forged = FieldMapping(
+        **mapping_data,
+        target=forged_target,
+        semantic_id=forged_reference.primary_value,
+    )
+
+    with pytest.raises(MappingError, match="semantic ID differs"):
+        build_dpp(product_name, [forged])
+
+
+def test_rejected_and_pending_mappings_do_not_enter_the_artifact() -> None:
+    product_name, mappings = accepted_mappings()
+    mappings[0] = mappings[0].model_copy(update={"status": MappingStatus.REJECTED})
+    mappings[1] = mappings[1].model_copy(update={"status": MappingStatus.REVIEW})
+
+    package = build_dpp(product_name, mappings)
+
+    rendered = str(package.environment)
+    assert mappings[0].source_value not in rendered
+    assert mappings[1].source_value not in rendered

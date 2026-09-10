@@ -1,10 +1,10 @@
-"""Tests for the chat behavior moved out of the Next.js API route."""
+"""Tests for offline chat orchestration and explainable review states."""
 
 from mia_dpp.chat import demo_turn
 from mia_dpp.models import ChatMessage, ChatRequest, GraphEntry, MappingStatus
 
 
-def test_demo_turn_proposes_the_same_mappings_and_review_states() -> None:
+def test_demo_turn_returns_official_targets_and_explainable_scores() -> None:
     response = demo_turn(
         ChatRequest(
             messages=(
@@ -21,47 +21,64 @@ def test_demo_turn_proposes_the_same_mappings_and_review_states() -> None:
 
     assert response.mode == "demo"
     assert response.proposal is not None
-    statuses = {
-        mapping.target_element: mapping.status for mapping in response.proposal.mappings
-    }
-    assert statuses["ManufacturerName"] is MappingStatus.AUTO
-    assert statuses["OrderCode"] is MappingStatus.REVIEW
-
-
-def test_verified_graph_mapping_is_reused() -> None:
-    response = demo_turn(
-        ChatRequest(
-            messages=(
-                ChatMessage(
-                    role="user",
-                    content="SCHUNK module, order code JGZ-100-1, 2022.",
-                ),
-            ),
-            graph=(
-                GraphEntry(
-                    source_field="MATNR",
-                    target_element="OrderCode",
-                    semantic_id="0173-1#02-AAO227#002",
-                    verified_at="2026-01-02T03:04:05Z",
-                    corrections=1,
-                ),
-            ),
-        )
+    serial = next(
+        item for item in response.proposal.mappings if item.target_element == "SerialNumber"
     )
+    order_code = next(
+        item
+        for item in response.proposal.mappings
+        if item.target_element == "OrderCodeOfManufacturer"
+    )
+    assert serial.status is MappingStatus.AUTO
+    assert order_code.status is MappingStatus.REVIEW
+    assert serial.semantic_id == "0112/2///61987#ABA951#009"
+    assert len(serial.confidence_assessment.factors) == 5
+    assert serial.confidence_assessment.remaining_uncertainty == (
+        "The current value appears in only one source and is not corroborated.",
+    )
+
+
+def test_history_reduces_target_ambiguity_but_does_not_corroborate_value() -> None:
+    request = ChatRequest(
+        messages=(
+            ChatMessage(
+                role="user",
+                content="SCHUNK module, order code JGZ-100-1, 2022.",
+            ),
+        ),
+        graph=(
+            GraphEntry(
+                source_field="MATNR",
+                target_element="OrderCodeOfManufacturer",
+                semantic_id="legacy-browser-value-is-not-trusted",
+                verified_at="2026-01-02T03:04:05Z",
+                corrections=4,
+            ),
+        ),
+    )
+
+    response = demo_turn(request)
 
     assert response.proposal is not None
     order_code = next(
-        item for item in response.proposal.mappings if item.target_element == "OrderCode"
+        item
+        for item in response.proposal.mappings
+        if item.target_element == "OrderCodeOfManufacturer"
     )
+    factors = {item.code: item for item in order_code.confidence_assessment.factors}
     assert order_code.from_graph
-    assert order_code.confidence == 0.99
-    assert order_code.status is MappingStatus.AUTO
+    assert factors["destination_ambiguity"].awarded == 0.22
+    assert factors["independent_corroboration"].awarded == 0.0
+    assert "not corroborated" in order_code.confidence_assessment.remaining_uncertainty[-1]
+    assert order_code.semantic_id != request.graph[0].semantic_id
 
 
-def test_generate_command_keeps_the_existing_chat_contract() -> None:
+def test_generate_command_keeps_the_workspace_contract() -> None:
     response = demo_turn(
         ChatRequest(messages=(ChatMessage(role="user", content="generate passport"),))
     )
 
     assert response.generate
     assert response.proposal is None
+    assert response.nameplate_elements
+    assert response.nameplate_elements[0].target.template_release == "3.0.1"
