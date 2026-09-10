@@ -31,6 +31,7 @@ submodule with `make refs` after a normal clone.
 | API/domain contracts | `backend/src/mia_dpp/models.py` | Pydantic rejects unknown or inconsistent data. |
 | Template ingestion | `templates.py` | Exact commit, path and content digest are checked. |
 | Website extraction | `extraction.py` | An approved `SiteAdapterSpec` drives CSS, XPath, metadata and JSON-LD rules. |
+| Website ingestion | `website.py` | Crawl4AI renders the page; MIA converts common structured fields into evidence and reuses the existing mapper. |
 | PDF preprocessing | `documents.py` | BaSyx PDF-to-AAS is isolated behind a text-preprocessor interface. |
 | Confidence | `confidence.py` | Five visible factors add up to the displayed score. |
 | Demo evidence | `idta.py` | Regex rules produce provenance-rich evidence and official mapping targets. |

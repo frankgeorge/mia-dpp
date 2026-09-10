@@ -97,7 +97,7 @@ class Crawl4AIPageLoader:
         if not isinstance(html, str) or not html:
             raise PageLoadError(f"Crawl4AI returned no HTML for {url!r}")
 
-        final_url = getattr(result, "url", None)
+        final_url = getattr(result, "redirected_url", None) or getattr(result, "url", None)
         return RenderedPage(
             url=final_url if isinstance(final_url, str) and final_url else url,
             html=html,

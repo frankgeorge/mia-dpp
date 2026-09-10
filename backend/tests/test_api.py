@@ -6,10 +6,15 @@ import asyncio
 from typing import Any
 
 import httpx
+import pytest
 
+import mia_dpp.api as api_module
 from mia_dpp.api import app
 from mia_dpp.chat import demo_turn
+from mia_dpp.extraction import RenderedPage
 from mia_dpp.models import ChatMessage, ChatRequest
+from mia_dpp.url_policy import ProductUrlPolicy
+from mia_dpp.website import WebsiteIngestionService
 
 
 def request(
@@ -126,3 +131,59 @@ def test_pydantic_rejects_unknown_request_fields() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_website_endpoint_feeds_provenance_into_dpp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "https://manufacturer.example/products/pg-16"
+    html = """
+    <html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Product","name":"Gauge PG-16",
+     "model":"PG-16","manufacturer":{"name":"Example Instruments GmbH"},
+     "serialNumber":"SN-2048","sku":"63820","productionDate":"2024"}
+    </script></head><body><h1>Gauge PG-16</h1></body></html>
+    """
+
+    class Loader:
+        async def load(self, requested_url: str) -> RenderedPage:
+            assert requested_url == url
+            return RenderedPage(url=url, html=html)
+
+    async def resolver(host: str, port: int) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    monkeypatch.setattr(
+        api_module,
+        "website_ingestion",
+        WebsiteIngestionService(
+            api_module.templates,
+            loader=Loader(),
+            url_policy=ProductUrlPolicy(resolver),
+        ),
+    )
+
+    imported = request("POST", "/api/website", {"url": url, "graph": []})
+
+    assert imported.status_code == 200
+    body = imported.json()
+    assert body["mode"] == "website"
+    assert body["sourceUrl"] == url
+    mappings = body["proposal"]["mappings"]
+    for index, mapping in enumerate(mappings):
+        mapping["id"] = f"website-{index}"
+        mapping["status"] = "approved"
+    generated = request(
+        "POST",
+        "/api/dpp",
+        {
+            "productName": body["proposal"]["productName"],
+            "mappings": mappings,
+            "evidence": body["evidence"],
+        },
+    )
+
+    assert generated.status_code == 200
+    package = generated.json()
+    assert package["deployable"] is True
+    assert {item["sourceUri"] for item in package["evidence"]} == {url}

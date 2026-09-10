@@ -19,13 +19,16 @@ and npm. Docker is optional.
 git clone --recurse-submodules git@github.com:frankgeorge/mia-dpp.git
 cd mia-dpp
 make install
+make crawl-setup
 make dev
 ```
 
 Open `http://127.0.0.1:3000`. `Ctrl-C` stops both processes started by
 `make dev`.
 
-No API key is needed: the included sample flow is deterministic and offline.
+No API key is needed: manual input and website-to-IDTA mapping are
+deterministic. Crawl4AI uses the locally installed Chromium browser to render
+submitted product pages.
 To let OpenRouter propose mappings, copy `.env.example` to `.env.local` and set
 `OPENROUTER_API_KEY`. The model still cannot choose authoritative semantic IDs,
 set confidence, compile AAS JSON, or bypass validation.
@@ -63,6 +66,7 @@ app/, components/              Next.js interface only
 backend/src/mia_dpp/models.py  MIA-owned Pydantic contracts
 backend/src/mia_dpp/extraction.py
                                approved website rules and Crawl4AI boundary
+backend/src/mia_dpp/website.py product-page text/provenance integration
 backend/src/mia_dpp/documents.py
                                optional PDF-to-AAS preprocessing boundary
 backend/src/mia_dpp/templates.py
@@ -77,9 +81,9 @@ standards/idta-submodel-templates/
 ```
 
 MIA does not copy upstream application source into its own package. `aas-core`
-is a locked Python dependency. Crawl4AI and BaSyx PDF-to-AAS are optional,
-isolated adapters. BaSyx is an external runtime. AASbyLLM and LangGraph remain
-reference ideas until a proven service needs them.
+and Crawl4AI are locked Python dependencies behind MIA-owned adapters. BaSyx
+PDF-to-AAS remains optional, and BaSyx is an external runtime. AASbyLLM and
+LangGraph remain reference ideas until a proven service needs them.
 
 See `docs/deterministic-backend.md` for a guided explanation of the code and
 the validation layers.
@@ -95,8 +99,9 @@ make down
 The frontend runs on port 3000 and the Python API on port 8000 by default.
 Override them with `FRONTEND_PORT`, `BACKEND_PORT`, and `API_URL` when needed.
 
-Current limits are explicit: only static/manual product data is wired into the
-workspace, automatic PDF fact mapping is not yet implemented, browser mapping
-memory is local, and Digital Nameplate's external Address Information drop-in
-is structurally present but reported as not deeply validated. No OPC-UA, MQTT,
-PLC, telemetry, or time-series path is included.
+Current limits are explicit: generic website ingestion recognizes common
+schema.org Product data and labelled specification tables; unusual sites still
+need an approved `SiteAdapterSpec`. Automatic PDF fact mapping is not yet
+implemented, browser mapping memory is local, and Digital Nameplate's external
+Address Information drop-in is structurally present but reported as not deeply
+validated. No OPC-UA, MQTT, PLC, telemetry, or time-series path is included.

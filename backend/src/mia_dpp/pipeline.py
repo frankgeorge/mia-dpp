@@ -35,6 +35,7 @@ class DeterministicDppPipeline:
         product_name: str,
         mappings: list[FieldMapping],
         *,
+        evidence: tuple[EvidenceRecord, ...] = (),
         now: datetime | None = None,
     ) -> DppPackage:
         """Build, verify and report one Digital Nameplate AAS environment."""
@@ -51,11 +52,16 @@ class DeterministicDppPipeline:
             moment = moment.replace(tzinfo=UTC)
         moment = moment.astimezone(UTC)
 
-        evidence = tuple(self._evidence(mapping, product_name, moment) for mapping in accepted)
+        selected_evidence = self._select_evidence(
+            accepted,
+            evidence,
+            product_name=product_name,
+            acquired_at=moment,
+        )
         package = ProductKnowledgePackage(
             product_id=f"product-{hashlib.sha256(product_name.encode()).hexdigest()[:24]}",
             product_name=product_name,
-            evidence=evidence,
+            evidence=selected_evidence,
         )
         template = self._repository.load("digital_nameplate")
         profile = TargetProfile(
@@ -93,7 +99,36 @@ class DeterministicDppPipeline:
             gap_report=gaps,
             validation_report=validation,
             deployable=validation.valid and not gaps.blocks_deployment,
+            evidence=selected_evidence,
         )
+
+    @classmethod
+    def _select_evidence(
+        cls,
+        mappings: list[FieldMapping],
+        supplied: tuple[EvidenceRecord, ...],
+        *,
+        product_name: str,
+        acquired_at: datetime,
+    ) -> tuple[EvidenceRecord, ...]:
+        if not supplied:
+            return tuple(cls._evidence(mapping, product_name, acquired_at) for mapping in mappings)
+        by_id = {item.id: item for item in supplied}
+        if len(by_id) != len(supplied):
+            raise MappingError("supplied evidence IDs must be unique")
+        selected: list[EvidenceRecord] = []
+        for mapping in mappings:
+            record = by_id.get(mapping.evidence_id)
+            if record is None:
+                raise MappingError(
+                    f"mapping refers to missing supplied evidence {mapping.evidence_id!r}"
+                )
+            if str(record.value) != mapping.source_value:
+                raise MappingError(
+                    f"mapping value differs from supplied evidence {mapping.evidence_id!r}"
+                )
+            selected.append(record)
+        return tuple(selected)
 
     @staticmethod
     def _evidence(
@@ -142,6 +177,7 @@ def build_dpp(
     mappings: list[FieldMapping],
     *,
     repository: OfficialTemplateRepository | None = None,
+    evidence: tuple[EvidenceRecord, ...] = (),
     now: datetime | None = None,
 ) -> DppPackage:
     """Compatibility entry point used by the FastAPI route and tests."""
@@ -149,5 +185,6 @@ def build_dpp(
     return DeterministicDppPipeline(repository or OfficialTemplateRepository()).build(
         product_name,
         mappings,
+        evidence=evidence,
         now=now,
     )

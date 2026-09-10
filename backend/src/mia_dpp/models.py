@@ -441,6 +441,7 @@ class DppPackage(WireModel):
     gap_report: GapReport
     validation_report: ValidationReport
     deployable: bool
+    evidence: tuple[EvidenceRecord, ...] = ()
 
 
 class DemoProposal(WireModel):
@@ -491,9 +492,24 @@ class ChatResponse(WireModel):
     nameplate_elements: tuple[NameplateElement, ...]
 
 
+class WebsiteIngestRequest(WireModel):
+    url: str = Field(min_length=10, max_length=2048, pattern=r"^https?://")
+    graph: tuple[GraphEntry, ...] = ()
+
+
+class WebsiteIngestResponse(WireModel):
+    reply: str
+    source_url: str
+    proposal: MappingProposal
+    evidence: tuple[EvidenceRecord, ...]
+    mode: Literal["website"] = "website"
+    nameplate_elements: tuple[NameplateElement, ...]
+
+
 class DppBuildRequest(WireModel):
     product_name: str
     mappings: tuple[FieldMapping, ...]
+    evidence: tuple[EvidenceRecord, ...] = ()
 
 
 class TemplateSummary(WireModel):

@@ -930,6 +930,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aas-core3-0" },
     { name = "beautifulsoup4" },
+    { name = "crawl4ai" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "lxml" },
@@ -940,9 +941,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-crawl = [
-    { name = "crawl4ai" },
-]
 pdf = [
     { name = "pdf2aas" },
 ]
@@ -961,7 +959,7 @@ dev = [
 requires-dist = [
     { name = "aas-core3-0", specifier = "==1.1.4" },
     { name = "beautifulsoup4", specifier = ">=4.12,<5" },
-    { name = "crawl4ai", marker = "extra == 'crawl'", specifier = "==0.9.3" },
+    { name = "crawl4ai", specifier = "==0.9.3" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "lxml", specifier = ">=5,<7" },
@@ -971,7 +969,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
-provides-extras = ["crawl", "pdf"]
+provides-extras = ["pdf"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -1,6 +1,36 @@
 export type MappingStatus = "auto" | "review" | "approved" | "rejected";
 export type Severity = "info" | "warning" | "error";
 export type ValidationCategory = "metamodel" | "template" | "policy";
+export type EvidenceStatus =
+  | "observed"
+  | "inferred"
+  | "verified"
+  | "conflicting"
+  | "rejected";
+
+export interface SourceLocation {
+  page: number | null;
+  selector: string | null;
+  jsonPointer: string | null;
+  excerpt: string | null;
+  table: string | null;
+  cell: string | null;
+}
+
+export interface EvidenceRecord {
+  id: string;
+  predicate: string;
+  value: unknown;
+  unit: string | null;
+  sourceUri: string;
+  sourceContentSha256: string;
+  sourceLocation: SourceLocation;
+  extractionMethod: string;
+  extractorName: string;
+  extractorVersion: string;
+  status: EvidenceStatus;
+  acquiredAt: string;
+}
 
 export interface ReferenceKey {
   type: string;
@@ -140,6 +170,7 @@ export interface DppPackage {
   gapReport: GapReport;
   validationReport: ValidationReport;
   deployable: boolean;
+  evidence: EvidenceRecord[];
 }
 
 export interface ChatMessage {
@@ -155,5 +186,17 @@ export interface ChatResponse {
   } | null;
   generate: boolean;
   mode: string;
+  nameplateElements: NameplateElement[];
+}
+
+export interface WebsiteIngestResponse {
+  reply: string;
+  sourceUrl: string;
+  proposal: {
+    productName: string;
+    mappings: ProposedFieldMapping[];
+  };
+  evidence: EvidenceRecord[];
+  mode: "website";
   nameplateElements: NameplateElement[];
 }

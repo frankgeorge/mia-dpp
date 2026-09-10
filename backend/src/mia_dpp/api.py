@@ -11,7 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from mia_dpp import __version__
 from mia_dpp.chat import demo_turn, live_turn
 from mia_dpp.config import Settings
-from mia_dpp.errors import MiaError
+from mia_dpp.errors import ExtractionError, MiaError
+from mia_dpp.extraction import (
+    ExtractionDependencyError,
+    PageLoadError,
+    ProductUrlRejectedError,
+)
 from mia_dpp.models import (
     ChatRequest,
     ChatResponse,
@@ -19,6 +24,8 @@ from mia_dpp.models import (
     DppPackage,
     HealthResponse,
     TemplateSummary,
+    WebsiteIngestRequest,
+    WebsiteIngestResponse,
 )
 from mia_dpp.pipeline import build_dpp
 from mia_dpp.templates import (
@@ -26,9 +33,11 @@ from mia_dpp.templates import (
     OfficialTemplateRepository,
     TemplateRepositoryError,
 )
+from mia_dpp.website import WebsiteIngestionService
 
 settings = Settings()
 templates = OfficialTemplateRepository(settings.standards_root)
+website_ingestion = WebsiteIngestionService(templates)
 
 app = FastAPI(
     title="MIA Digital Product Passport",
@@ -108,8 +117,27 @@ async def create_dpp(request: DppBuildRequest) -> DppPackage:
             request.product_name,
             list(request.mappings),
             repository=templates,
+            evidence=request.evidence,
         )
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except MiaError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/website", response_model=WebsiteIngestResponse)
+async def ingest_website(request: WebsiteIngestRequest) -> WebsiteIngestResponse:
+    """Fetch a public product page with Crawl4AI and propose reviewed mappings."""
+
+    try:
+        return await website_ingestion.ingest(request)
+    except ProductUrlRejectedError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ExtractionDependencyError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except PageLoadError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except ExtractionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except TemplateRepositoryError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error

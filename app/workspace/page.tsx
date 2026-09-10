@@ -4,11 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
   ChatMessage,
+  ChatResponse,
   DppPackage,
+  EvidenceRecord,
   FieldMapping,
   GraphEntry,
   NameplateElement,
   ProposedFieldMapping,
+  WebsiteIngestResponse,
 } from "@/lib/types";
 import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
@@ -35,10 +38,12 @@ const SAMPLES = [
 export default function Workspace() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [productName, setProductName] = useState("");
   const [dpp, setDpp] = useState<DppPackage | null>(null);
+  const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
   const [graph, setGraph] = useState<GraphEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
     NameplateElement[]
@@ -92,7 +97,7 @@ export default function Workspace() {
         body: JSON.stringify({ messages: next, graph }),
       });
       if (!res.ok) throw new Error(`Python backend returned ${res.status}`);
-      const data = await res.json();
+      const data = (await res.json()) as ChatResponse;
       setMode(data.mode ?? "");
       setNameplateElements(data.nameplateElements ?? []);
 
@@ -108,6 +113,7 @@ export default function Workspace() {
         );
         setProductName(generationProduct);
         setMappings(generationMappings);
+        setEvidence([]);
         setDpp(null);
         setTab("mappings");
       }
@@ -127,6 +133,67 @@ export default function Workspace() {
           role: "assistant",
           content:
             "That request didn't go through. Check your connection and send it again.",
+        },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function ingestWebsite() {
+    const url = websiteUrl.trim();
+    if (!url || busy) return;
+    setBusy(true);
+    setMessages((previous) => [
+      ...previous,
+      { role: "user", content: `Import product website: ${url}` },
+    ]);
+
+    try {
+      const response = await fetch(`${API_URL}/api/website`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, graph }),
+      });
+      const body = (await response.json()) as unknown;
+      if (!response.ok) {
+        const detail =
+          typeof body === "object" &&
+          body !== null &&
+          "detail" in body &&
+          typeof body.detail === "string"
+            ? body.detail
+            : null;
+        throw new Error(
+          detail ?? `Python backend returned ${response.status}`
+        );
+      }
+      const data = body as WebsiteIngestResponse;
+      const importedMappings: FieldMapping[] = data.proposal.mappings.map(
+        (mapping, index) => ({
+          ...mapping,
+          id: `${Date.now()}-website-${index}`,
+        })
+      );
+      setProductName(data.proposal.productName || "Website product");
+      setMappings(importedMappings);
+      setEvidence(data.evidence);
+      setNameplateElements(data.nameplateElements);
+      setMode(data.mode);
+      setDpp(null);
+      setTab("mappings");
+      setWebsiteUrl("");
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          content: `The product website could not be imported: ${message}`,
         },
       ]);
     } finally {
@@ -194,7 +261,8 @@ export default function Workspace() {
 
   async function generate(
     selectedProduct = productName,
-    selectedMappings = mappings
+    selectedMappings = mappings,
+    selectedEvidence = evidence
   ) {
     try {
       const response = await fetch(`${API_URL}/api/dpp`, {
@@ -203,6 +271,7 @@ export default function Workspace() {
         body: JSON.stringify({
           productName: selectedProduct || "Product",
           mappings: selectedMappings,
+          evidence: selectedEvidence,
         }),
       });
       if (!response.ok) {
@@ -266,6 +335,11 @@ export default function Workspace() {
               Live agent
             </span>
           )}
+          {mode === "website" && (
+            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
+              Website evidence
+            </span>
+          )}
           <button
             onClick={() => void generate()}
             disabled={ready === 0}
@@ -283,12 +357,12 @@ export default function Workspace() {
             {messages.length === 0 && (
               <div className="mx-auto max-w-md pt-6">
                 <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-                  Describe a product.
+                  Import or describe a product.
                 </h1>
                 <p className="mt-2 text-[15px] leading-relaxed text-muted">
-                  Manufacturer, model, serial number, year, plant, and any
-                  technical values you have. MIA maps it to the IDTA Digital
-                  Nameplate and stops wherever it needs your decision.
+                  Start from a public product page, or enter manufacturer,
+                  model, serial number and technical values manually. MIA stops
+                  wherever it needs your decision.
                 </p>
                 <div className="mt-8 space-y-3">
                   {SAMPLES.map((s) => (
@@ -340,6 +414,41 @@ export default function Workspace() {
           </div>
 
           <div className="shrink-0 p-4 pb-6">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void ingestWebsite();
+              }}
+              className="mx-auto mb-3 max-w-md"
+            >
+              <label
+                htmlFor="product-url"
+                className="mb-1.5 block text-[11px] font-medium text-muted"
+              >
+                Product website
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="product-url"
+                  type="url"
+                  required
+                  value={websiteUrl}
+                  onChange={(event) => setWebsiteUrl(event.target.value)}
+                  placeholder="https://manufacturer.com/products/model"
+                  className="min-w-0 flex-1 rounded-xl border border-hairline bg-white px-3 py-2.5 text-[13px] text-ink shadow-sm placeholder:text-muted focus:border-signal focus:outline-none focus:ring-4 focus:ring-signal/10"
+                />
+                <button
+                  type="submit"
+                  disabled={busy || !websiteUrl.trim()}
+                  className="rounded-xl border border-signal/30 bg-signalDim px-3 text-[12px] font-medium text-signal transition-colors hover:bg-signal/15 disabled:opacity-30"
+                >
+                  Import
+                </button>
+              </div>
+            </form>
+            <p className="mx-auto mb-2 max-w-md text-center text-[10px] uppercase tracking-wider text-muted">
+              or describe it manually
+            </p>
             <div className="mx-auto flex max-w-md items-end gap-2 rounded-[24px] border border-hairline bg-white p-1.5 shadow-sm transition-all focus-within:border-signal/50 focus-within:ring-4 focus-within:ring-signal/10">
               <textarea
                 value={input}

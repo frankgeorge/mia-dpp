@@ -149,8 +149,8 @@ PATTERNS = (
     ),
     PatternRule(
         re.compile(
-            r"\b(?:made in|manufactured in|hergestellt in)\s+"
-            r"([A-Za-zÄÖÜäöüß\s]{3,25})",
+            r"\b(?:made in|manufactured in|hergestellt in)\b[:\s]+"
+            r"([A-Za-zÄÖÜäöüß ]{2,25})",
             re.IGNORECASE,
         ),
         "LAND1",
@@ -160,8 +160,8 @@ PATTERNS = (
     ),
     PatternRule(
         re.compile(
-            r"\b(?:plant|werk|site|factory)\b[:\s]*"
-            r"([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-\s]{2,24})",
+            r"\b(?:plant|werk)\b[:\s]*"
+            r"([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\- ]{2,24})",
             re.IGNORECASE,
         ),
         "WERKS",
@@ -276,6 +276,7 @@ def demo_propose(
     repository: OfficialTemplateRepository,
     *,
     history: dict[tuple[str, str], int] | None = None,
+    allow_unlabelled_year: bool = True,
 ) -> DemoProposal:
     """Extract manual evidence and propose official-template mappings deterministically."""
 
@@ -315,13 +316,22 @@ def demo_propose(
             )
         )
 
-    manufacturer = next(
-        (
-            name
-            for name in KNOWN_MANUFACTURERS
-            if re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE)
-        ),
-        None,
+    labelled_manufacturer = re.search(
+        r"\b(?:manufacturer|brand|hersteller)\b[:\s-]+([^.;|\n]{2,80})",
+        text,
+        re.IGNORECASE,
+    )
+    manufacturer = (
+        labelled_manufacturer.group(1).strip()
+        if labelled_manufacturer
+        else next(
+            (
+                name
+                for name in KNOWN_MANUFACTURERS
+                if re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE)
+            ),
+            None,
+        )
     )
     if manufacturer:
         evidence = _evidence(
@@ -370,7 +380,9 @@ def demo_propose(
             destination_candidates=rule.destination_candidates,
         )
 
-    if not any(item.predicate == "product.year_of_construction" for item in evidence_records):
+    if allow_unlabelled_year and not any(
+        item.predicate == "product.year_of_construction" for item in evidence_records
+    ):
         year = re.search(r"\b(19[89]\d|20[0-4]\d)\b", text)
         if year:
             evidence = _evidence(

@@ -51,7 +51,7 @@ _KNOWN_ARBITRARY_TARGETS = (
 )
 
 
-def _catalog(repository: OfficialTemplateRepository) -> tuple[NameplateElement, ...]:
+def nameplate_catalog(repository: OfficialTemplateRepository) -> tuple[NameplateElement, ...]:
     template = repository.load("digital_nameplate")
     result: list[NameplateElement] = []
     for element in selectable_elements(template):
@@ -108,7 +108,7 @@ def demo_turn(
     """Run the offline deterministic path without any external service."""
 
     repository = repository or OfficialTemplateRepository()
-    catalog = _catalog(repository)
+    catalog = nameplate_catalog(repository)
     text = request.messages[-1].content if request.messages else ""
     wants_generate = bool(
         re.search(
@@ -240,7 +240,7 @@ async def live_turn(
     """Ask OpenRouter for proposals, then enforce targets and confidence in Python."""
 
     repository = repository or OfficialTemplateRepository()
-    catalog = _catalog(repository)
+    catalog = nameplate_catalog(repository)
     catalog_by_name = {item.name: item for item in catalog}
     graph_hint = ""
     if request.graph:
