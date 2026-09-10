@@ -93,7 +93,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* How it works (Die 4 Agenten) */}
+      {/* How it works */}
       <section id="how" className="mx-auto max-w-shell px-6 py-32">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <h2 className="text-[36px] font-black leading-tight tracking-tight md:text-[46px]">
@@ -214,11 +214,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA */}
+      {/* CTA - Schrift deutlich verkleinert */}
       <section className="relative overflow-hidden bg-ink py-32 text-white mt-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(11,95,208,0.3)_0%,transparent_70%)]"></div>
         <div className="relative z-10 mx-auto max-w-shell px-6 text-center">
-          <h2 className="mx-auto max-w-2xl text-[40px] font-black leading-tight tracking-tight md:text-[56px]">
+          <h2 className="mx-auto max-w-2xl text-[32px] font-black leading-tight tracking-tight md:text-[40px]">
             Make a passport for one of your products right now.
           </h2>
           <p className="mx-auto mt-6 max-w-md text-[18px] leading-relaxed text-white/70 font-medium">

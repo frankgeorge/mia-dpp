@@ -47,7 +47,7 @@ export default function Workspace() {
       if (data.proposal) {
         setProductName(data.proposal.productName || "Product");
         
-        // FEATURE 4 LOGIK: Beweis-Sätze generieren!
+        // FEATURE 4 LOGIK: Beweis-Sätze (Data Provenance) generieren
         const newMappings = data.proposal.mappings.map((m: any, i: number) => {
           const lowerText = t.toLowerCase();
           const lowerVal = m.sourceValue.toLowerCase();
@@ -67,7 +67,7 @@ export default function Workspace() {
       if (data.generate) await generate();
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
     } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "Connection error." }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "Connection error. Make sure your Python backend is running." }]);
     } finally { setBusy(false); }
   }
 
@@ -147,13 +147,20 @@ export default function Workspace() {
         <section className="relative flex w-[40%] flex-col overflow-hidden rounded-[2rem] border border-hairline bg-white shadow-xl">
           <div className="flex-1 overflow-y-auto p-6 scroll-quiet">
             {messages.length === 0 && (
-              <div className="mt-8 flex flex-col items-center text-center">
-                <h2 className="text-[22px] font-bold tracking-tight">Describe a product.</h2>
-                <div className="mt-8 w-full space-y-3">
+              <div className="mx-auto max-w-md pt-6">
+                <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
+                  Describe a product.
+                </h1>
+                <p className="mt-2 text-[15px] leading-relaxed text-muted">
+                  Manufacturer, model, serial number, year, plant, and any
+                  technical values you have. MIA maps it to the IDTA Digital
+                  Nameplate and stops wherever it needs your decision.
+                </p>
+                <div className="mt-8 space-y-3">
                   {SAMPLES.map((s) => (
                     <button key={s.label} onClick={() => send(s.text)} className="w-full rounded-2xl border border-hairline bg-gray-50/50 p-4 text-left transition-all hover:border-signal/30 hover:bg-signal/5 hover:shadow-sm">
                       <p className="font-semibold text-signal">{s.label}</p>
-                      <p className="mt-1 line-clamp-1 text-[13px] text-gray-500">{s.text}</p>
+                      <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted">{s.text}</p>
                     </button>
                   ))}
                 </div>
