@@ -9,15 +9,20 @@ import type {
   EvidenceRecord,
   FieldMapping,
   GraphEntry,
+  MappingResult,
   NameplateElement,
   ProposedFieldMapping,
   WebsiteIngestResponse,
+  WorkflowEvent,
 } from "@/lib/types";
+import { EvidencePanel } from "@/components/EvidencePanel";
 import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
+import { WorkflowTrace } from "@/components/WorkflowTrace";
 
 const GRAPH_KEY = "mia.graph.v1";
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
+type WorkspaceTab = "mappings" | "evidence" | "process" | "graph";
 
 const SAMPLES = [
   {
@@ -43,12 +48,14 @@ export default function Workspace() {
   const [productName, setProductName] = useState("");
   const [dpp, setDpp] = useState<DppPackage | null>(null);
   const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
+  const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
+  const [workflowEvents, setWorkflowEvents] = useState<WorkflowEvent[]>([]);
   const [graph, setGraph] = useState<GraphEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
     NameplateElement[]
   >([]);
   const [mode, setMode] = useState<string>("");
-  const [tab, setTab] = useState<"mappings" | "graph">("mappings");
+  const [tab, setTab] = useState<WorkspaceTab>("mappings");
   const graphReadyRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -113,6 +120,8 @@ export default function Workspace() {
         setProductName(generationProduct);
         setMappings(generationMappings);
         setEvidence([]);
+        setMappingResult(null);
+        setWorkflowEvents([]);
         setDpp(null);
         setTab("mappings");
       }
@@ -177,6 +186,8 @@ export default function Workspace() {
       setProductName(data.proposal.productName || "Website product");
       setMappings(importedMappings);
       setEvidence(data.evidence);
+      setMappingResult(data.mappingResult);
+      setWorkflowEvents(data.workflowEvents);
       setNameplateElements(data.nameplateElements);
       setMode(data.mode);
       setDpp(null);
@@ -293,6 +304,14 @@ export default function Workspace() {
   const ready = mappings.filter(
     (m) => m.status === "approved" || m.status === "auto"
   ).length;
+  const websiteAutoMapped =
+    mappingResult?.mapped.filter((mapping) => mapping.status === "auto")
+      .length ?? 0;
+  const websiteNeedsReview = mappingResult
+    ? mappingResult.ambiguous.length +
+      mappingResult.mapped.filter((mapping) => mapping.status === "review")
+        .length
+    : 0;
   const present = new Set(
     mappings
       .filter(
@@ -424,7 +443,7 @@ export default function Workspace() {
                 htmlFor="product-url"
                 className="mb-1.5 block text-[11px] font-medium text-muted"
               >
-                Product website
+                Direct product page URL
               </label>
               <div className="flex gap-2">
                 <input
@@ -486,7 +505,9 @@ export default function Workspace() {
         <section className="flex min-h-0 flex-1 flex-col bg-mist">
           <div className="flex shrink-0 items-center justify-between border-b border-hairline bg-paper px-5">
             <div className="flex">
-              {(["mappings", "graph"] as const).map((t) => (
+              {(
+                ["mappings", "evidence", "process", "graph"] as WorkspaceTab[]
+              ).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -494,7 +515,12 @@ export default function Workspace() {
                     tab === t ? "text-signal" : "text-muted hover:text-ink"
                   }`}
                 >
-                  {t === "graph" ? "Integration Graph" : "Mappings"}
+                  {tabLabel(t)}
+                  {t === "evidence" && evidence.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                      {evidence.length}
+                    </span>
+                  )}
                   {t === "graph" && graph.length > 0 && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
                       {graph.length}
@@ -526,9 +552,36 @@ export default function Workspace() {
               ) : (
                 <div className="space-y-5">
                   <div className="flex flex-wrap gap-3">
-                    <Stat label="Ready" value={ready} tone="ok" />
-                    <Stat label="Needs you" value={pending} tone="warn" />
-                    <Stat label="Gaps" value={gaps.length} tone="plain" />
+                    {mappingResult ? (
+                      <>
+                        <Stat
+                          label="Extracted facts"
+                          value={evidence.length}
+                          tone="plain"
+                        />
+                        <Stat
+                          label="Mapped automatically"
+                          value={websiteAutoMapped}
+                          tone="ok"
+                        />
+                        <Stat
+                          label="Needs semantic reasoning/review"
+                          value={websiteNeedsReview}
+                          tone="warn"
+                        />
+                        <Stat
+                          label="Currently unmatched"
+                          value={mappingResult.unmatchedEvidenceIds.length}
+                          tone="plain"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Stat label="Ready" value={ready} tone="ok" />
+                        <Stat label="Needs you" value={pending} tone="warn" />
+                        <Stat label="Gaps" value={gaps.length} tone="plain" />
+                      </>
+                    )}
                   </div>
 
                   {gaps.length > 0 && (
@@ -560,6 +613,13 @@ export default function Workspace() {
                   {dpp && <DppView dpp={dpp} />}
                 </div>
               )
+            ) : tab === "evidence" ? (
+              <EvidencePanel
+                evidence={evidence}
+                mappingResult={mappingResult}
+              />
+            ) : tab === "process" ? (
+              <WorkflowTrace events={workflowEvents} />
             ) : graph.length === 0 ? (
               <Empty
                 title="The graph is empty"
@@ -601,6 +661,13 @@ export default function Workspace() {
       </div>
     </div>
   );
+}
+
+function tabLabel(tab: WorkspaceTab): string {
+  if (tab === "graph") return "Integration Graph";
+  if (tab === "process") return "Process";
+  if (tab === "evidence") return "Evidence";
+  return "Mappings";
 }
 
 function Stat({

@@ -20,6 +20,10 @@ export interface SourceLocation {
 export interface EvidenceRecord {
   id: string;
   predicate: string;
+  /** Label exactly as presented by the source, before semantic mapping. */
+  sourceLabel: string | null;
+  /** Optional understood meaning; null means MIA has not assigned one. */
+  canonicalPredicate: string | null;
   value: unknown;
   unit: string | null;
   sourceUri: string;
@@ -107,6 +111,31 @@ export interface FieldMapping {
 }
 
 export type ProposedFieldMapping = Omit<FieldMapping, "id">;
+
+export interface ProductKnowledgePackage {
+  productId: string;
+  productName: string;
+  sourceArtifactIds: string[];
+  evidence: EvidenceRecord[];
+}
+
+export interface MappingResult {
+  mapped: ProposedFieldMapping[];
+  ambiguous: ProposedFieldMapping[];
+  unmatchedEvidenceIds: string[];
+}
+
+export interface WorkflowEvent {
+  id: string;
+  stage: string;
+  status: "done" | "failed";
+  startedAt: string;
+  completedAt: string;
+  inputCount: number;
+  outputCount: number;
+  summary: string;
+  metadata: Record<string, unknown>;
+}
 
 export interface NameplateElement {
   name: string;
@@ -197,6 +226,9 @@ export interface WebsiteIngestResponse {
     mappings: ProposedFieldMapping[];
   };
   evidence: EvidenceRecord[];
+  knowledgePackage: ProductKnowledgePackage;
+  mappingResult: MappingResult;
+  workflowEvents: WorkflowEvent[];
   mode: "website";
   nameplateElements: NameplateElement[];
 }
