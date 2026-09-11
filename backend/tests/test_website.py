@@ -156,14 +156,48 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
         "source.fetch",
         "facts.extract",
         "evidence.normalize",
+        "templates.load",
+        "requirements.build",
         "mapping.deterministic",
+        "coverage.analyze",
     ]
     assert response.workflow_events[1].output_count == len(response.evidence)
-    mapping_event = response.workflow_events[-1]
+    assert response.workflow_events[3].output_count == 2
+    assert response.workflow_events[4].output_count == len(
+        response.coverage_report.inventory.requirements
+    )
+    mapping_event = response.workflow_events[5]
     assert mapping_event.input_count == len(response.evidence)
     assert mapping_event.metadata["unmatched"] == len(
         response.mapping_result.unmatched_evidence_ids
     )
+    coverage = response.coverage_report
+    assert [item.key for item in coverage.inventory.selected_templates] == [
+        "digital_nameplate",
+        "technical_data",
+    ]
+    assert coverage.analyzed_evidence_ids == tuple(item.id for item in response.evidence)
+    assert coverage.statistics.selected_templates == 2
+    assert coverage.statistics.requirements == len(coverage.coverage) == 79
+    assert coverage.statistics.required_requirements == 9
+    assert response.workflow_events[-1].output_count == 79
+
+
+def test_website_coverage_accepts_an_explicit_template_selection() -> None:
+    response = asyncio.run(
+        service().ingest(
+            WebsiteIngestRequest(
+                url=PRODUCT_URL,
+                template_keys=("technical_data",),
+            )
+        )
+    )
+
+    assert [item.key for item in response.coverage_report.inventory.selected_templates] == [
+        "technical_data"
+    ]
+    assert response.coverage_report.statistics.selected_templates == 1
+    assert response.coverage_report.statistics.requirements == 48
 
 
 def test_same_value_is_not_attached_to_the_wrong_json_ld_field() -> None:

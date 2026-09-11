@@ -13,6 +13,9 @@ direct product URL
   -> provenance-rich EvidenceRecord collection
   -> deterministic mapping attempt
   -> mapped, ambiguous, and unmatched outcomes
+  -> selected official IDTA templates
+  -> stable RequirementInventory
+  -> deterministic CoverageReport
 ```
 
 Fact extraction and mapping are deliberately separate. Every useful extracted
@@ -44,6 +47,33 @@ temperature, dimensions, and weight can be extracted even when the current
 mapper has no official target for them. The Evidence view labels these facts as
 unmatched instead of hiding them.
 
+## Requirement coverage
+
+Website analysis selects Digital Nameplate 3.0.1 and Technical Data 2.0.1 by
+default. API clients can instead submit a non-empty `templateKeys` list using
+any template registered by `OfficialTemplateRepository`.
+
+Requirements are generated recursively from normalized official
+`TemplateElement` metadata. Their IDs are deterministic hashes of template key,
+release, and path. MIA does not maintain hand-written copies of either template.
+
+Coverage distinguishes:
+
+- `satisfied`: an authoritative deterministic match exists;
+- `candidate`: one plausible deterministic match needs resolution;
+- `ambiguous`: values or target meanings compete;
+- `missing`: no current supporting evidence was found.
+
+`One` and `OneToMany` cardinalities are globally required only when all parent
+structures are also mandatory. A mandatory child below an optional parent is
+shown as conditional. Missing optional or conditional requirements do not count
+as required gaps.
+
+Collections and lists provide paths and grouping; they are not treated as
+scalar source fields. Opaque structural leaves remain visible. Wildcard
+extension points do not absorb arbitrary evidence through text similarity: a
+concrete deterministic mapping is required.
+
 ## Known limitations
 
 - The submitted URL must be a direct product page. Site-wide crawling, catalogue
@@ -56,6 +86,13 @@ unmatched instead of hiding them.
 - The deterministic mapper covers only its existing rules and the pinned
   Digital Nameplate template. It does not yet perform general semantic matching
   against every IDTA submodel.
+- Coverage analyzes both pinned templates, but compilation remains Digital
+  Nameplate-only. Multi-submodel compilation is intentionally deferred.
+- Technical Data contains generic wildcard extension points rather than a fixed
+  field such as `NominalVoltage`. MIA therefore retains supply-voltage evidence
+  but does not invent an official target or semantic identifier for it.
+- Conditional requirements are reported but are not dynamically activated when
+  an optional repeated structure is partially populated yet.
 - MIA retains source facts but does not persist the full acquired HTML after the
   request. The content hash provides identity; durable source-archive storage is
   a future concern.
@@ -78,6 +115,7 @@ so test results do not depend on the internet or a third-party website.
 ## Deferred architecture
 
 Future semantic matchers, human-review strategies, and LangGraph orchestration
-can consume `ProductKnowledgePackage`, `MappingResult`, and `WorkflowEvent`
-without changing website extraction. No framework-specific message or graph
-state is part of these domain contracts.
+can consume `ProductKnowledgePackage`, `MappingResult`, `CoverageReport`, and
+`WorkflowEvent` without changing website extraction. `CoverageResolutionStrategy`
+accepts unresolved coverage and referenced evidence without rereading HTML. No
+framework-specific message or graph state is part of these domain contracts.

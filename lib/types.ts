@@ -1,6 +1,12 @@
 export type MappingStatus = "auto" | "review" | "approved" | "rejected";
 export type Severity = "info" | "warning" | "error";
 export type ValidationCategory = "metamodel" | "template" | "policy";
+export type RequirementKind = "value" | "structural";
+export type CoverageStatus =
+  | "satisfied"
+  | "candidate"
+  | "ambiguous"
+  | "missing";
 export type EvidenceStatus =
   | "observed"
   | "inferred"
@@ -119,6 +125,66 @@ export interface ProductKnowledgePackage {
   evidence: EvidenceRecord[];
 }
 
+export interface Requirement {
+  id: string;
+  templateKey: string;
+  templateRelease: string;
+  templatePath: string[];
+  idShort: string | null;
+  semanticId: SemanticReference | null;
+  supplementalSemanticIds: SemanticReference[];
+  modelType: string;
+  valueType: string | null;
+  cardinality: "One" | "ZeroToOne" | "OneToMany" | "ZeroToMany" | null;
+  kind: RequirementKind;
+  required: boolean;
+  conditional: boolean;
+  unit: string | null;
+  allowedValues: string[];
+  description: string | null;
+  wildcard: boolean;
+}
+
+export interface RequirementInventory {
+  selectedTemplates: TemplateRelease[];
+  requirements: Requirement[];
+}
+
+export interface RequirementCoverage {
+  requirementId: string;
+  status: CoverageStatus;
+  supportingEvidenceIds: string[];
+  candidateEvidenceIds: string[];
+  matchMethod: string;
+  explanation: string;
+}
+
+export interface CoverageStatistics {
+  selectedTemplates: number;
+  requirements: number;
+  requiredRequirements: number;
+  requiredSatisfied: number;
+  requiredCandidate: number;
+  requiredAmbiguous: number;
+  requiredMissing: number;
+  optionalRequirements: number;
+  optionalSatisfied: number;
+  optionalCandidate: number;
+  optionalAmbiguous: number;
+  optionalMissing: number;
+  evidenceRecords: number;
+  evidenceUsed: number;
+  unmatchedEvidence: number;
+}
+
+export interface CoverageReport {
+  inventory: RequirementInventory;
+  coverage: RequirementCoverage[];
+  analyzedEvidenceIds: string[];
+  unmatchedEvidenceIds: string[];
+  statistics: CoverageStatistics;
+}
+
 export interface MappingResult {
   mapped: ProposedFieldMapping[];
   ambiguous: ProposedFieldMapping[];
@@ -228,6 +294,7 @@ export interface WebsiteIngestResponse {
   evidence: EvidenceRecord[];
   knowledgePackage: ProductKnowledgePackage;
   mappingResult: MappingResult;
+  coverageReport: CoverageReport;
   workflowEvents: WorkflowEvent[];
   mode: "website";
   nameplateElements: NameplateElement[];

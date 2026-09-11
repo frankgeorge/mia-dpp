@@ -5,6 +5,7 @@ import Link from "next/link";
 import type {
   ChatMessage,
   ChatResponse,
+  CoverageReport,
   DppPackage,
   EvidenceRecord,
   FieldMapping,
@@ -15,6 +16,7 @@ import type {
   WebsiteIngestResponse,
   WorkflowEvent,
 } from "@/lib/types";
+import { CoveragePanel } from "@/components/CoveragePanel";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
@@ -22,7 +24,12 @@ import { WorkflowTrace } from "@/components/WorkflowTrace";
 
 const GRAPH_KEY = "mia.graph.v1";
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
-type WorkspaceTab = "mappings" | "evidence" | "process" | "graph";
+type WorkspaceTab =
+  | "mappings"
+  | "evidence"
+  | "coverage"
+  | "process"
+  | "graph";
 
 const SAMPLES = [
   {
@@ -49,6 +56,7 @@ export default function Workspace() {
   const [dpp, setDpp] = useState<DppPackage | null>(null);
   const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
+  const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
   const [workflowEvents, setWorkflowEvents] = useState<WorkflowEvent[]>([]);
   const [graph, setGraph] = useState<GraphEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
@@ -121,6 +129,7 @@ export default function Workspace() {
         setMappings(generationMappings);
         setEvidence([]);
         setMappingResult(null);
+        setCoverageReport(null);
         setWorkflowEvents([]);
         setDpp(null);
         setTab("mappings");
@@ -187,6 +196,7 @@ export default function Workspace() {
       setMappings(importedMappings);
       setEvidence(data.evidence);
       setMappingResult(data.mappingResult);
+      setCoverageReport(data.coverageReport);
       setWorkflowEvents(data.workflowEvents);
       setNameplateElements(data.nameplateElements);
       setMode(data.mode);
@@ -506,7 +516,13 @@ export default function Workspace() {
           <div className="flex shrink-0 items-center justify-between border-b border-hairline bg-paper px-5">
             <div className="flex">
               {(
-                ["mappings", "evidence", "process", "graph"] as WorkspaceTab[]
+                [
+                  "mappings",
+                  "evidence",
+                  "coverage",
+                  "process",
+                  "graph",
+                ] as WorkspaceTab[]
               ).map((t) => (
                 <button
                   key={t}
@@ -519,6 +535,11 @@ export default function Workspace() {
                   {t === "evidence" && evidence.length > 0 && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
                       {evidence.length}
+                    </span>
+                  )}
+                  {t === "coverage" && coverageReport && (
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                      {coverageReport.statistics.requirements}
                     </span>
                   )}
                   {t === "graph" && graph.length > 0 && (
@@ -618,6 +639,8 @@ export default function Workspace() {
                 evidence={evidence}
                 mappingResult={mappingResult}
               />
+            ) : tab === "coverage" ? (
+              <CoveragePanel report={coverageReport} evidence={evidence} />
             ) : tab === "process" ? (
               <WorkflowTrace events={workflowEvents} />
             ) : graph.length === 0 ? (
@@ -666,6 +689,7 @@ export default function Workspace() {
 function tabLabel(tab: WorkspaceTab): string {
   if (tab === "graph") return "Integration Graph";
   if (tab === "process") return "Process";
+  if (tab === "coverage") return "Coverage";
   if (tab === "evidence") return "Evidence";
   return "Mappings";
 }

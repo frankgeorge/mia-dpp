@@ -169,6 +169,12 @@ def test_website_endpoint_feeds_provenance_into_dpp(
     body = imported.json()
     assert body["mode"] == "website"
     assert body["sourceUrl"] == url
+    assert [item["key"] for item in body["coverageReport"]["inventory"]["selectedTemplates"]] == [
+        "digital_nameplate",
+        "technical_data",
+    ]
+    assert body["coverageReport"]["statistics"]["requirements"] == 79
+    assert body["workflowEvents"][-1]["stage"] == "coverage.analyze"
     mappings = body["proposal"]["mappings"]
     for index, mapping in enumerate(mappings):
         mapping["id"] = f"website-{index}"

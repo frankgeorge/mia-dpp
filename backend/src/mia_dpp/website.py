@@ -6,6 +6,7 @@ import hashlib
 from datetime import UTC, datetime
 
 from mia_dpp.chat import nameplate_catalog
+from mia_dpp.coverage import CoverageAnalyzer
 from mia_dpp.errors import ExtractionError
 from mia_dpp.evidence import EvidenceNormalizer
 from mia_dpp.extraction import Crawl4AIPageLoader, PageLoader, RenderedPage
@@ -16,6 +17,7 @@ from mia_dpp.models import (
     WebsiteIngestResponse,
     WorkflowEvent,
 )
+from mia_dpp.requirements import build_requirement_inventory
 from mia_dpp.source_artifacts import raw_website_artifact
 from mia_dpp.templates import OfficialTemplateRepository
 from mia_dpp.url_policy import ProductUrlPolicy
@@ -36,6 +38,7 @@ class WebsiteIngestionService:
         fact_extractor: WebsiteFactExtractor | None = None,
         evidence_normalizer: EvidenceNormalizer | None = None,
         mapping_strategy: MappingStrategy | None = None,
+        coverage_analyzer: CoverageAnalyzer | None = None,
     ) -> None:
         self._repository = repository
         self._loader = loader or Crawl4AIPageLoader()
@@ -43,6 +46,7 @@ class WebsiteIngestionService:
         self._fact_extractor = fact_extractor or WebsiteFactExtractor()
         self._evidence_normalizer = evidence_normalizer or EvidenceNormalizer()
         self._mapping_strategy = mapping_strategy or DeterministicWebsiteMapper(repository)
+        self._coverage_analyzer = coverage_analyzer or CoverageAnalyzer()
 
     async def ingest(self, request: WebsiteIngestRequest) -> WebsiteIngestResponse:
         events: list[WorkflowEvent] = []
@@ -98,6 +102,42 @@ class WebsiteIngestionService:
             )
         )
 
+        templates_started = datetime.now(UTC)
+        selected_templates = tuple(self._repository.load(key) for key in request.template_keys)
+        events.append(
+            completed_event(
+                stage="templates.load",
+                started_at=templates_started,
+                input_count=len(request.template_keys),
+                output_count=len(selected_templates),
+                summary=f"Loaded {len(selected_templates)} pinned official IDTA templates.",
+                metadata={
+                    "templates": [
+                        {
+                            "key": template.release.key,
+                            "release": template.release.release,
+                        }
+                        for template in selected_templates
+                    ]
+                },
+            )
+        )
+
+        requirements_started = datetime.now(UTC)
+        inventory = build_requirement_inventory(selected_templates)
+        events.append(
+            completed_event(
+                stage="requirements.build",
+                started_at=requirements_started,
+                input_count=len(selected_templates),
+                output_count=len(inventory.requirements),
+                summary=(
+                    f"Built {len(inventory.requirements)} stable requirements from official "
+                    "template metadata."
+                ),
+            )
+        )
+
         mapping_started = datetime.now(UTC)
         history = {
             (entry.source_field.casefold(), entry.target_element): max(entry.corrections, 1)
@@ -124,6 +164,35 @@ class WebsiteIngestionService:
             )
         )
 
+        coverage_started = datetime.now(UTC)
+        coverage_report = self._coverage_analyzer.analyze(
+            package,
+            inventory,
+            mapping_result=mapping_result,
+        )
+        statistics = coverage_report.statistics
+        events.append(
+            completed_event(
+                stage="coverage.analyze",
+                started_at=coverage_started,
+                input_count=len(evidence) + len(inventory.requirements),
+                output_count=len(coverage_report.coverage),
+                summary=(
+                    f"Coverage has {statistics.required_satisfied} required satisfied, "
+                    f"{statistics.required_candidate} candidate, "
+                    f"{statistics.required_ambiguous} ambiguous, and "
+                    f"{statistics.required_missing} missing."
+                ),
+                metadata={
+                    "satisfied": (statistics.required_satisfied + statistics.optional_satisfied),
+                    "candidate": (statistics.required_candidate + statistics.optional_candidate),
+                    "ambiguous": (statistics.required_ambiguous + statistics.optional_ambiguous),
+                    "missing": statistics.required_missing + statistics.optional_missing,
+                    "unmatchedEvidence": statistics.unmatched_evidence,
+                },
+            )
+        )
+
         return WebsiteIngestResponse(
             reply=(
                 f"Crawl4AI fetched {page.url}. MIA retained {len(evidence)} facts: "
@@ -136,6 +205,7 @@ class WebsiteIngestionService:
             evidence=evidence,
             knowledge_package=package,
             mapping_result=mapping_result,
+            coverage_report=coverage_report,
             workflow_events=tuple(events),
             nameplate_elements=nameplate_catalog(self._repository),
         )

@@ -24,7 +24,21 @@ from mia_dpp.models import (
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _TOKEN = re.compile(r"[a-z0-9]+")
-_STOPWORDS = frozenset({"manufacturer", "product", "of", "the"})
+_STOPWORDS = frozenset(
+    {
+        "code",
+        "data",
+        "general",
+        "information",
+        "manufacturer",
+        "name",
+        "number",
+        "of",
+        "product",
+        "the",
+        "type",
+    }
+)
 _STRONG_ALIASES: dict[str, frozenset[str]] = {
     "brand": frozenset({"manufacturer name"}),
     "manufacturer": frozenset({"manufacturer name"}),

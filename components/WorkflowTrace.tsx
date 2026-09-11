@@ -4,7 +4,10 @@ const STAGE_LABELS: Record<string, string> = {
   "source.fetch": "Fetch page",
   "facts.extract": "Extract candidate facts",
   "evidence.normalize": "Normalize evidence",
+  "templates.load": "Load target templates",
+  "requirements.build": "Build requirement inventory",
   "mapping.deterministic": "Deterministic mapping",
+  "coverage.analyze": "Analyze deterministic coverage",
 };
 
 export function WorkflowTrace({ events }: { events: WorkflowEvent[] }) {
@@ -57,6 +60,14 @@ export function WorkflowTrace({ events }: { events: WorkflowEvent[] }) {
                   {numberMetadata(event.metadata.mapped)} mapped ·{" "}
                   {numberMetadata(event.metadata.ambiguous)} ambiguous ·{" "}
                   {numberMetadata(event.metadata.unmatched)} unmatched
+                </p>
+              )}
+              {event.stage === "coverage.analyze" && (
+                <p className="mt-2 font-mono text-[11px] text-ink/75">
+                  {numberMetadata(event.metadata.satisfied)} satisfied ·{" "}
+                  {numberMetadata(event.metadata.candidate)} candidate ·{" "}
+                  {numberMetadata(event.metadata.ambiguous)} ambiguous ·{" "}
+                  {numberMetadata(event.metadata.missing)} missing
                 </p>
               )}
             </div>
