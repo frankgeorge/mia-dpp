@@ -33,6 +33,20 @@ To let OpenRouter propose mappings, copy `.env.example` to `.env.local` and set
 `OPENROUTER_API_KEY`. The model still cannot choose authoritative semantic IDs,
 set confidence, compile AAS JSON, or bypass validation.
 
+With an OpenRouter key, the workspace uses a resumable LangGraph workflow:
+
+```text
+conversation → website tools → evidence ledger → IDTA coverage
+             → semantic proposals → human review → resume
+```
+
+The chat can explain MIA and accept a product URL directly. Website acquisition,
+fact extraction and coverage remain deterministic. The model sees only retained
+evidence and official requirement identifiers, and every additional semantic
+mapping pauses for explicit approval or rejection. The MVP checkpointer is
+in-memory, so conversation threads survive requests but reset when the Python
+process restarts; a durable checkpointer is the next deployment step.
+
 Run `make help` to see the short command list. The most useful checks are:
 
 ```bash

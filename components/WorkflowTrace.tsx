@@ -8,6 +8,7 @@ const STAGE_LABELS: Record<string, string> = {
   "requirements.build": "Build requirement inventory",
   "mapping.deterministic": "Deterministic mapping",
   "coverage.analyze": "Analyze deterministic coverage",
+  "reasoning.semantic": "Semantic reasoning",
 };
 
 export function WorkflowTrace({ events }: { events: WorkflowEvent[] }) {

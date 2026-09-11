@@ -284,6 +284,21 @@ export interface ChatResponse {
   nameplateElements: NameplateElement[];
 }
 
+export interface SemanticReviewItem {
+  id: string;
+  requirementId: string;
+  mapping: ProposedFieldMapping;
+}
+
+export interface AgentResponse {
+  threadId: string;
+  reply: string;
+  status: "completed" | "awaiting_review";
+  mode: "agent" | "configuration_required";
+  websiteResult: WebsiteIngestResponse | null;
+  reviewItems: SemanticReviewItem[];
+}
+
 export interface WebsiteIngestResponse {
   reply: string;
   sourceUrl: string;

@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
+  AgentResponse,
   ChatMessage,
-  ChatResponse,
   CoverageReport,
   DppPackage,
   EvidenceRecord,
@@ -12,8 +12,7 @@ import type {
   GraphEntry,
   MappingResult,
   NameplateElement,
-  ProposedFieldMapping,
-  WebsiteIngestResponse,
+  SemanticReviewItem,
   WorkflowEvent,
 } from "@/lib/types";
 import { CoveragePanel } from "@/components/CoveragePanel";
@@ -63,6 +62,8 @@ export default function Workspace() {
     NameplateElement[]
   >([]);
   const [mode, setMode] = useState<string>("");
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [semanticReview, setSemanticReview] = useState<SemanticReviewItem[]>([]);
   const [tab, setTab] = useState<WorkspaceTab>("mappings");
   const graphReadyRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -97,7 +98,7 @@ export default function Workspace() {
 
   async function send(text: string) {
     const t = text.trim();
-    if (!t || busy) return;
+    if (!t || busy || semanticReview.length > 0) return;
 
     const next: ChatMessage[] = [...messages, { role: "user", content: t }];
     setMessages(next);
@@ -105,39 +106,19 @@ export default function Workspace() {
     setBusy(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/chat`, {
+      const res = await fetch(`${API_URL}/api/agent/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, graph }),
+        body: JSON.stringify({ threadId, message: t, graph }),
       });
-      if (!res.ok) throw new Error(`Python backend returned ${res.status}`);
-      const data = (await res.json()) as ChatResponse;
-      setMode(data.mode ?? "");
-      setNameplateElements(data.nameplateElements ?? []);
-
-      let generationProduct = productName;
-      let generationMappings = mappings;
-      if (data.proposal) {
-        generationProduct = data.proposal.productName || "Product";
-        generationMappings = (data.proposal.mappings ?? []).map(
-          (m: ProposedFieldMapping, i: number) => ({
-            ...m,
-            id: `${Date.now()}-${i}`,
-          })
-        );
-        setProductName(generationProduct);
-        setMappings(generationMappings);
-        setEvidence([]);
-        setMappingResult(null);
-        setCoverageReport(null);
-        setWorkflowEvents([]);
-        setDpp(null);
-        setTab("mappings");
+      const body = (await res.json()) as AgentResponse | { detail?: string };
+      if (!res.ok) {
+        throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${res.status}`);
       }
-
-      if (data.generate) {
-        await generate(generationProduct, generationMappings);
-      }
+      const data = body as AgentResponse;
+      setThreadId(data.threadId);
+      setMode(data.mode);
+      if (data.websiteResult) applyAgentWebsiteResult(data);
 
       setMessages((prev) => [
         ...prev,
@@ -159,7 +140,7 @@ export default function Workspace() {
 
   async function ingestWebsite() {
     const url = websiteUrl.trim();
-    if (!url || busy) return;
+    if (!url || busy || semanticReview.length > 0) return;
     setBusy(true);
     setMessages((previous) => [
       ...previous,
@@ -167,10 +148,14 @@ export default function Workspace() {
     ]);
 
     try {
-      const response = await fetch(`${API_URL}/api/website`, {
+      const response = await fetch(`${API_URL}/api/agent/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, graph }),
+        body: JSON.stringify({
+          threadId,
+          message: `Import product website: ${url}`,
+          graph,
+        }),
       });
       const body = (await response.json()) as unknown;
       if (!response.ok) {
@@ -185,23 +170,10 @@ export default function Workspace() {
           detail ?? `Python backend returned ${response.status}`
         );
       }
-      const data = body as WebsiteIngestResponse;
-      const importedMappings: FieldMapping[] = data.proposal.mappings.map(
-        (mapping, index) => ({
-          ...mapping,
-          id: `${Date.now()}-website-${index}`,
-        })
-      );
-      setProductName(data.proposal.productName || "Website product");
-      setMappings(importedMappings);
-      setEvidence(data.evidence);
-      setMappingResult(data.mappingResult);
-      setCoverageReport(data.coverageReport);
-      setWorkflowEvents(data.workflowEvents);
-      setNameplateElements(data.nameplateElements);
+      const data = body as AgentResponse;
+      setThreadId(data.threadId);
       setMode(data.mode);
-      setDpp(null);
-      setTab("mappings");
+      applyAgentWebsiteResult(data);
       setWebsiteUrl("");
       setMessages((previous) => [
         ...previous,
@@ -215,6 +187,82 @@ export default function Workspace() {
           role: "assistant",
           content: `The product website could not be imported: ${message}`,
         },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function applyAgentWebsiteResult(data: AgentResponse) {
+    const website = data.websiteResult;
+    if (!website) return;
+    const deterministic: FieldMapping[] = website.proposal.mappings.map(
+      (mapping, index) => ({
+        ...mapping,
+        id: `${Date.now()}-website-${index}`,
+      })
+    );
+    const semantic: FieldMapping[] = data.reviewItems.map((item) => ({
+      ...item.mapping,
+      id: item.id,
+    }));
+    setProductName(website.proposal.productName || "Website product");
+    setMappings([...deterministic, ...semantic]);
+    setSemanticReview(data.status === "awaiting_review" ? data.reviewItems : []);
+    setEvidence(website.evidence);
+    setMappingResult(website.mappingResult);
+    setCoverageReport(website.coverageReport);
+    setWorkflowEvents(website.workflowEvents);
+    setNameplateElements(website.nameplateElements);
+    setDpp(null);
+    setTab("mappings");
+  }
+
+  async function confirmSemanticReview() {
+    if (!threadId || semanticReview.length === 0 || busy) return;
+    const decisions = semanticReview.map((item) => {
+      const mapping = mappings.find((candidate) => candidate.id === item.id);
+      return {
+        reviewId: item.id,
+        decision: mapping?.status === "approved" ? "approve" : "reject",
+      };
+    });
+    const undecided = semanticReview.some((item) => {
+      const status = mappings.find((candidate) => candidate.id === item.id)?.status;
+      return status !== "approved" && status !== "rejected";
+    });
+    if (undecided) return;
+
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_URL}/api/agent/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId, decisions }),
+      });
+      const body = (await response.json()) as AgentResponse | { detail?: string };
+      if (!response.ok) {
+        throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${response.status}`);
+      }
+      const data = body as AgentResponse;
+      const reviewed = new Map(data.reviewItems.map((item) => [item.id, item.mapping.status]));
+      setMappings((previous) =>
+        previous.map((mapping) =>
+          reviewed.has(mapping.id)
+            ? { ...mapping, status: reviewed.get(mapping.id)! }
+            : mapping
+        )
+      );
+      setSemanticReview([]);
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: `The semantic review could not be saved: ${message}` },
       ]);
     } finally {
       setBusy(false);
@@ -320,7 +368,10 @@ export default function Workspace() {
   const websiteNeedsReview = mappingResult
     ? mappingResult.ambiguous.length +
       mappingResult.mapped.filter((mapping) => mapping.status === "review")
-        .length
+        .length +
+      mappings.filter(
+        (mapping) => mapping.id.startsWith("review-") && mapping.status === "review"
+      ).length
     : 0;
   const present = new Set(
     mappings
@@ -366,6 +417,16 @@ export default function Workspace() {
           {mode === "website" && (
             <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
               Website evidence
+            </span>
+          )}
+          {mode === "agent" && (
+            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
+              LangGraph agent
+            </span>
+          )}
+          {mode === "configuration_required" && (
+            <span className="rounded-full bg-warn/10 px-2.5 py-1 font-mono text-[11px] text-warn">
+              LLM key required
             </span>
           )}
           <button
@@ -467,7 +528,7 @@ export default function Workspace() {
                 />
                 <button
                   type="submit"
-                  disabled={busy || !websiteUrl.trim()}
+                  disabled={busy || semanticReview.length > 0 || !websiteUrl.trim()}
                   className="rounded-xl border border-signal/30 bg-signalDim px-3 text-[12px] font-medium text-signal transition-colors hover:bg-signal/15 disabled:opacity-30"
                 >
                   Import
@@ -480,6 +541,7 @@ export default function Workspace() {
             <div className="mx-auto flex max-w-md items-end gap-2 rounded-[24px] border border-hairline bg-white p-1.5 shadow-sm transition-all focus-within:border-signal/50 focus-within:ring-4 focus-within:ring-signal/10">
               <textarea
                 value={input}
+                disabled={semanticReview.length > 0}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -488,12 +550,16 @@ export default function Workspace() {
                   }
                 }}
                 rows={1}
-                placeholder="Describe the product..."
+                placeholder={
+                  semanticReview.length > 0
+                    ? "Finish the semantic review to continue"
+                    : "Ask MIA or paste a product URL..."
+                }
                 className="max-h-32 flex-1 resize-none bg-transparent px-4 py-2.5 text-[14px] leading-relaxed text-ink placeholder:text-muted focus:outline-none"
               />
               <button
                 onClick={() => send(input)}
-                disabled={busy || !input.trim()}
+                disabled={busy || semanticReview.length > 0 || !input.trim()}
                 className="mb-0.5 mr-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink text-white transition-transform hover:scale-105 disabled:scale-100 disabled:opacity-25"
                 aria-label="Send message"
               >
@@ -604,6 +670,29 @@ export default function Workspace() {
                       </>
                     )}
                   </div>
+
+                  {semanticReview.length > 0 && (
+                    <div className="rounded-xl border border-signal/20 bg-signal/5 p-4 shadow-sm">
+                      <p className="text-[13px] font-semibold text-ink">
+                        Human semantic review required
+                      </p>
+                      <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+                        The LangGraph workflow is paused. Approve or reject every
+                        model proposal below, then resume it. Model suggestions are
+                        never authoritative by themselves.
+                      </p>
+                      <button
+                        onClick={() => void confirmSemanticReview()}
+                        disabled={semanticReview.some((item) => {
+                          const status = mappings.find((mapping) => mapping.id === item.id)?.status;
+                          return status !== "approved" && status !== "rejected";
+                        })}
+                        className="mt-3 rounded-full bg-ink px-4 py-1.5 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        Save decisions and resume
+                      </button>
+                    </div>
+                  )}
 
                   {gaps.length > 0 && (
                     <div className="rounded-xl border border-warn/20 bg-warn/[0.04] p-4 shadow-sm">
