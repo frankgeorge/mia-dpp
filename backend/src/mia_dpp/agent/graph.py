@@ -29,7 +29,7 @@ from mia_dpp.domain.workflow import AgentRunStatus
 from mia_dpp.llm.conversation import ChatMessage
 from mia_dpp.llm.reasoning import ReasoningService
 from mia_dpp.resolution.coverage import CoverageAnalyzer
-from mia_dpp.sources.website import WebsiteIngestionService
+from mia_dpp.resolution.website import WebsiteIngestionService
 from mia_dpp.tools.semantic import SemanticTool
 from mia_dpp.tools.source import SourceTool
 

@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.graph import MiaAgentWorkflow
 from mia_dpp.config import Settings
+from mia_dpp.integrations.openrouter import OpenRouterReasoningService
 from mia_dpp.llm.reasoning import (
-    OpenRouterReasoningService,
     ReasoningService,
     UnconfiguredReasoningService,
 )
-from mia_dpp.sources.website import WebsiteIngestionService
+from mia_dpp.resolution.website import WebsiteIngestionService
 
 
 @dataclass(frozen=True)

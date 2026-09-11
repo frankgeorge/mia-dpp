@@ -7,6 +7,10 @@ from typing import Any, cast
 
 import httpx
 
+from mia_dpp.llm.conversation import ConversationLLM
+from mia_dpp.llm.reasoning import CompositeReasoningService
+from mia_dpp.llm.semantic import SemanticLLM
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
@@ -53,3 +57,21 @@ class OpenRouterClient:
         if not isinstance(decoded, dict):
             raise ValueError(f"tool {tool_name} returned a non-object payload")
         return cast(dict[str, object], decoded)
+
+
+class OpenRouterReasoningService(CompositeReasoningService):
+    """Assemble MIA's LLM roles over the OpenRouter transport."""
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        conversation_model: str,
+        semantic_model: str,
+        timeout: float = 90.0,
+    ) -> None:
+        client = OpenRouterClient(api_key, timeout=timeout)
+        super().__init__(
+            ConversationLLM(client, model=conversation_model),
+            SemanticLLM(client, model=semantic_model),
+        )

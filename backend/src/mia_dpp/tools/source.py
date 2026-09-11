@@ -1,7 +1,7 @@
 """Agent-facing product source ingestion capability."""
 
 from mia_dpp.api.schemas import WebsiteIngestRequest, WebsiteIngestResponse
-from mia_dpp.sources.website import WebsiteIngestionService
+from mia_dpp.resolution.website import WebsiteIngestionService
 
 
 class SourceTool:

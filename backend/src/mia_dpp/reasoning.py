@@ -4,8 +4,8 @@ import json
 
 import httpx
 
+from mia_dpp.integrations.openrouter import OpenRouterReasoningService
 from mia_dpp.llm.reasoning import (
-    OpenRouterReasoningService,
     ReasoningService,
     UnconfiguredReasoningService,
 )

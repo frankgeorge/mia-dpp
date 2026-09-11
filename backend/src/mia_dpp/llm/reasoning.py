@@ -7,7 +7,6 @@ from typing import Protocol
 
 from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.domain.mappings import CoverageReport, SemanticMatchDecision
-from mia_dpp.integrations.openrouter import OpenRouterClient
 from mia_dpp.llm.conversation import ChatMessage, ConversationDecision, ConversationLLM
 from mia_dpp.llm.semantic import SemanticLLM
 
@@ -48,20 +47,16 @@ class UnconfiguredReasoningService:
         return ()
 
 
-class OpenRouterReasoningService:
-    """Compatibility facade composing two provider-neutral LLM roles."""
+class CompositeReasoningService:
+    """Combine conversation and semantic roles behind the agent boundary."""
 
     def __init__(
         self,
-        api_key: str,
-        *,
-        conversation_model: str,
-        semantic_model: str,
-        timeout: float = 90.0,
+        conversation: ConversationLLM,
+        semantic: SemanticLLM,
     ) -> None:
-        client = OpenRouterClient(api_key, timeout=timeout)
-        self._conversation = ConversationLLM(client, model=conversation_model)
-        self._semantic = SemanticLLM(client, model=semantic_model)
+        self._conversation = conversation
+        self._semantic = semantic
 
     @property
     def configured(self) -> bool:
