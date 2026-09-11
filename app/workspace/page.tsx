@@ -6,6 +6,7 @@ import type {
   AgentResponse,
   ChatMessage,
   CoverageReport,
+  CompletionSummary,
   DppPackage,
   EvidenceRecord,
   FieldMapping,
@@ -56,6 +57,7 @@ export default function Workspace() {
   const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
   const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
+  const [completionSummary, setCompletionSummary] = useState<CompletionSummary | null>(null);
   const [workflowEvents, setWorkflowEvents] = useState<WorkflowEvent[]>([]);
   const [graph, setGraph] = useState<GraphEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
@@ -212,6 +214,7 @@ export default function Workspace() {
     setEvidence(website.evidence);
     setMappingResult(website.mappingResult);
     setCoverageReport(website.coverageReport);
+    setCompletionSummary(website.completionSummary);
     setWorkflowEvents(website.workflowEvents);
     setNameplateElements(website.nameplateElements);
     setDpp(null);
@@ -729,7 +732,7 @@ export default function Workspace() {
                 mappingResult={mappingResult}
               />
             ) : tab === "coverage" ? (
-              <CoveragePanel report={coverageReport} evidence={evidence} />
+              <CoveragePanel report={coverageReport} evidence={evidence} completion={completionSummary} />
             ) : tab === "process" ? (
               <WorkflowTrace events={workflowEvents} />
             ) : graph.length === 0 ? (

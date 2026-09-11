@@ -6,6 +6,7 @@ import hashlib
 from datetime import UTC, datetime
 
 from mia_dpp.chat import nameplate_catalog
+from mia_dpp.completion import build_completion_summary
 from mia_dpp.coverage import CoverageAnalyzer
 from mia_dpp.errors import ExtractionError
 from mia_dpp.evidence import EvidenceNormalizer
@@ -170,6 +171,7 @@ class WebsiteIngestionService:
             inventory,
             mapping_result=mapping_result,
         )
+        completion_summary = build_completion_summary(coverage_report, mapping_result)
         statistics = coverage_report.statistics
         events.append(
             completed_event(
@@ -206,6 +208,7 @@ class WebsiteIngestionService:
             knowledge_package=package,
             mapping_result=mapping_result,
             coverage_report=coverage_report,
+            completion_summary=completion_summary,
             workflow_events=tuple(events),
             nameplate_elements=nameplate_catalog(self._repository),
         )

@@ -182,6 +182,34 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
     assert coverage.statistics.required_requirements == 9
     assert response.workflow_events[-1].output_count == 79
 
+    completion = response.completion_summary
+    assert completion.source.total_discovered == len(response.evidence)
+    assert completion.source.automatically_resolved == len(
+        [item for item in response.proposal.mappings if item.status is MappingStatus.AUTO]
+    )
+    by_template = {item.template_key: item for item in completion.fixed_templates}
+    assert by_template["digital_nameplate"].mandatory_total == 4
+    assert by_template["technical_data"].mandatory_total == 4
+    assert completion.technical_data.discovered > 0
+
+
+def test_completion_never_counts_structure_or_wildcards_as_missing_fields() -> None:
+    response = asyncio.run(service().ingest(WebsiteIngestRequest(url=PRODUCT_URL)))
+    inventory = response.coverage_report.inventory.requirements
+    fixed_count = sum(item.kind.value == "value" and not item.wildcard for item in inventory)
+
+    completion = response.completion_summary
+    assert (
+        sum(item.mandatory_total + item.optional_total for item in completion.fixed_templates)
+        == fixed_count
+    )
+    assert fixed_count < len(inventory)
+    assert all(
+        item.id_short != "ArbitraryProperty"
+        for item in inventory
+        if item.kind.value == "value" and not item.wildcard
+    )
+
 
 def test_website_coverage_accepts_an_explicit_template_selection() -> None:
     response = asyncio.run(

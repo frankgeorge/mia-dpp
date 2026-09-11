@@ -523,6 +523,46 @@ class CoverageReport(WireModel):
         return self
 
 
+class SourceFactStatistics(WireModel):
+    """Evidence outcomes, counted independently from template requirements."""
+
+    total_discovered: int = Field(ge=0)
+    automatically_resolved: int = Field(ge=0)
+    accepted_after_review: int = Field(ge=0)
+    pending_review: int = Field(ge=0)
+    unresolved: int = Field(ge=0)
+    rejected_proposals: int = Field(ge=0)
+
+
+class FixedTemplateCompletion(WireModel):
+    """Completion of real, scalar fields in one official template."""
+
+    template_key: str
+    template_name: str
+    mandatory_total: int = Field(ge=0)
+    mandatory_filled: int = Field(ge=0)
+    mandatory_missing: int = Field(ge=0)
+    optional_total: int = Field(ge=0)
+    optional_filled: int = Field(ge=0)
+    optional_missing: int = Field(ge=0)
+
+
+class TechnicalDataCompletion(WireModel):
+    """Source-led technical facts; wildcard slots are never missing fields."""
+
+    discovered: int = Field(ge=0)
+    resolved: int = Field(ge=0)
+    unresolved: int = Field(ge=0)
+
+
+class CompletionSummary(WireModel):
+    """Human-oriented accounting across source, fixed targets, and extensions."""
+
+    source: SourceFactStatistics
+    fixed_templates: tuple[FixedTemplateCompletion, ...]
+    technical_data: TechnicalDataCompletion
+
+
 class TargetProfile(WireModel):
     """Versioned choice of one official target for deterministic compilation."""
 
@@ -783,6 +823,7 @@ class WebsiteIngestResponse(WireModel):
     knowledge_package: ProductKnowledgePackage
     mapping_result: MappingResult
     coverage_report: CoverageReport
+    completion_summary: CompletionSummary
     workflow_events: tuple[WorkflowEvent, ...]
     mode: Literal["website"] = "website"
     nameplate_elements: tuple[NameplateElement, ...]

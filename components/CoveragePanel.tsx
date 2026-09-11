@@ -1,4 +1,5 @@
 import type {
+  CompletionSummary,
   CoverageReport,
   CoverageStatus,
   EvidenceRecord,
@@ -9,9 +10,11 @@ import type {
 export function CoveragePanel({
   report,
   evidence,
+  completion,
 }: {
   report: CoverageReport | null;
   evidence: EvidenceRecord[];
+  completion: CompletionSummary | null;
 }) {
   if (!report) {
     return (
@@ -26,8 +29,6 @@ export function CoveragePanel({
   const coverageByRequirement = new Map(
     report.coverage.map((item) => [item.requirementId, item])
   );
-  const statistics = report.statistics;
-
   return (
     <div className="space-y-6">
       <div>
@@ -35,37 +36,31 @@ export function CoveragePanel({
           Coverage compares source evidence with official template expectations.
           Candidates are not approved mappings.
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <Counter label="Templates selected" value={statistics.selectedTemplates} />
-          <Counter label="Requirements" value={statistics.requirements} />
-          <Counter
-            label="Required satisfied"
-            value={statistics.requiredSatisfied}
-            tone="ok"
-          />
-          <Counter
-            label="Required unresolved"
-            value={statistics.requiredCandidate + statistics.requiredAmbiguous}
-            tone="warn"
-          />
-          <Counter
-            label="Required missing"
-            value={statistics.requiredMissing}
-            tone="danger"
-          />
-          <Counter
-            label="Optional satisfied"
-            value={statistics.optionalSatisfied}
-            tone="ok"
-          />
-          <Counter
-            label="Optional unresolved"
-            value={statistics.optionalCandidate + statistics.optionalAmbiguous}
-            tone="warn"
-          />
-          <Counter label="Optional missing" value={statistics.optionalMissing} />
-          <Counter label="Unmatched evidence" value={statistics.unmatchedEvidence} />
-        </div>
+        {completion && (
+          <div className="mt-4 space-y-3">
+            <SummaryGroup title="Source facts">
+              <Counter label="Discovered" value={completion.source.totalDiscovered} />
+              <Counter label="Resolved" value={completion.source.automaticallyResolved + completion.source.acceptedAfterReview} tone="ok" />
+              <Counter label="Awaiting review" value={completion.source.pendingReview} tone="warn" />
+              <Counter label="Unresolved" value={completion.source.unresolved} />
+            </SummaryGroup>
+            {completion.fixedTemplates.map((template) => (
+              <SummaryGroup key={template.templateKey} title={template.templateName}>
+                <Counter label="Mandatory filled" value={template.mandatoryFilled} tone="ok" />
+                <Counter label="Mandatory total" value={template.mandatoryTotal} />
+                <Counter label="Mandatory missing" value={template.mandatoryMissing} tone="danger" />
+                <Counter label="Optional filled" value={template.optionalFilled} tone="ok" />
+                <Counter label="Optional total" value={template.optionalTotal} />
+                <Counter label="Optional missing" value={template.optionalMissing} />
+              </SummaryGroup>
+            ))}
+            <SummaryGroup title="Technical Data">
+              <Counter label="Discovered" value={completion.technicalData.discovered} />
+              <Counter label="Resolved" value={completion.technicalData.resolved} tone="ok" />
+              <Counter label="Unresolved" value={completion.technicalData.unresolved} tone="warn" />
+            </SummaryGroup>
+          </div>
+        )}
       </div>
 
       {report.inventory.selectedTemplates.map((template) => {
@@ -105,6 +100,21 @@ export function CoveragePanel({
         );
       })}
     </div>
+  );
+}
+
+function SummaryGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h2 className="mb-2 text-[12px] font-semibold text-ink">{title}</h2>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{children}</div>
+    </section>
   );
 }
 
