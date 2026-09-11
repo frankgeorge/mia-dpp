@@ -3,9 +3,34 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
-from mia_dpp.domain.contracts import ChatMessage, ConversationDecision
+from pydantic import Field, model_validator
+
+from mia_dpp.domain.base import WireModel
 from mia_dpp.llm.client import LLMClient
+
+
+class ChatMessage(WireModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ConversationDecision(WireModel):
+    """Typed result of the conversational intake model."""
+
+    intent: Literal["chat", "ingest_website"]
+    reply: str = Field(min_length=1)
+    url: str | None = None
+
+    @model_validator(mode="after")
+    def website_intent_has_url(self) -> ConversationDecision:
+        if self.intent == "ingest_website" and not self.url:
+            raise ValueError("website ingestion intent requires a URL")
+        if self.intent == "chat" and self.url is not None:
+            raise ValueError("chat intent cannot include a URL")
+        return self
+
 
 SYSTEM_PROMPT = """You are MIA, an assistant for building evidence-backed Digital Product
 Passports and Asset Administration Shells. Explain that MIA can ingest a direct public

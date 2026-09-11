@@ -1,6 +1,7 @@
 """Agent-facing semantic proposal capability."""
 
-from mia_dpp.domain.contracts import CoverageReport, ProductKnowledgePackage, SemanticMatchDecision
+from mia_dpp.domain.evidence import ProductKnowledgePackage
+from mia_dpp.domain.mappings import CoverageReport, SemanticMatchDecision
 from mia_dpp.llm.reasoning import ReasoningService
 
 

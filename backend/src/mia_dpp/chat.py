@@ -7,10 +7,13 @@ import re
 
 import httpx
 
-from mia_dpp.confidence import (
-    MatchQuality,
-    ValueFormatQuality,
-    assess_mapping_confidence,
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.api.schemas import ChatRequest, ChatResponse
+from mia_dpp.domain.mappings import (
+    MappingProposal,
+    MappingStatus,
+    NameplateElement,
+    ProposedFieldMapping,
 )
 from mia_dpp.idta import (
     ARBITRARY_PROPERTY_PATH,
@@ -18,15 +21,11 @@ from mia_dpp.idta import (
     mapping_target,
     selectable_elements,
 )
-from mia_dpp.models import (
-    ChatRequest,
-    ChatResponse,
-    MappingProposal,
-    MappingStatus,
-    NameplateElement,
-    ProposedFieldMapping,
+from mia_dpp.resolution.confidence import (
+    MatchQuality,
+    ValueFormatQuality,
+    assess_mapping_confidence,
 )
-from mia_dpp.templates import OfficialTemplateRepository
 
 MODEL = "deepseek/deepseek-v3.2"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"

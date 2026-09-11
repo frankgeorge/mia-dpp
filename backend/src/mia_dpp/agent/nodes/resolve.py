@@ -9,13 +9,13 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from mia_dpp.agent.state import AgentState
+from mia_dpp.api.schemas import WebsiteIngestResponse
 from mia_dpp.domain.completion import build_completion_summary
-from mia_dpp.domain.contracts import (
+from mia_dpp.domain.mappings import (
     MappingResult,
     MappingStatus,
     ProposedFieldMapping,
     SemanticReviewItem,
-    WebsiteIngestResponse,
 )
 from mia_dpp.idta import mapping_target
 from mia_dpp.resolution.confidence import (

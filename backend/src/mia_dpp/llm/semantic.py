@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import json
 
-from mia_dpp.domain.contracts import (
-    CoverageReport,
-    CoverageStatus,
-    ProductKnowledgePackage,
-    RequirementKind,
-    SemanticMatchDecision,
-)
+from mia_dpp.domain.evidence import ProductKnowledgePackage
+from mia_dpp.domain.mappings import CoverageReport, CoverageStatus, SemanticMatchDecision
+from mia_dpp.domain.targets import RequirementKind
 from mia_dpp.llm.client import LLMClient
 
 SYSTEM_PROMPT = """You are MIA's semantic mapping assistant. Match manufacturer evidence

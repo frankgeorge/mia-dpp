@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from mia_dpp.canonical import sha256_json
-from mia_dpp.domain.contracts import (
+from mia_dpp.domain.evidence import (
     DocumentReference,
     EvidenceRecord,
     EvidenceStatus,

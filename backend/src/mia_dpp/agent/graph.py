@@ -18,15 +18,15 @@ from mia_dpp.agent.nodes.intake import IntakeNodes
 from mia_dpp.agent.nodes.resolve import ResolveNodes
 from mia_dpp.agent.nodes.review import ReviewNodes
 from mia_dpp.agent.state import AgentState
-from mia_dpp.domain.contracts import (
+from mia_dpp.api.schemas import (
     AgentMessageRequest,
     AgentResponse,
     AgentReviewRequest,
-    AgentRunStatus,
-    ChatMessage,
-    SemanticReviewItem,
     WebsiteIngestResponse,
 )
+from mia_dpp.domain.mappings import SemanticReviewItem
+from mia_dpp.domain.workflow import AgentRunStatus
+from mia_dpp.llm.conversation import ChatMessage
 from mia_dpp.llm.reasoning import ReasoningService
 from mia_dpp.resolution.coverage import CoverageAnalyzer
 from mia_dpp.sources.website import WebsiteIngestionService

@@ -12,25 +12,21 @@ import re
 from dataclasses import dataclass
 from re import Pattern
 
-from mia_dpp.confidence import (
+from mia_dpp.aas.templates import OfficialTemplateRepository, resolve_element
+from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation
+from mia_dpp.domain.mappings import DemoProposal, MappingDraft, MappingTarget
+from mia_dpp.domain.targets import (
+    ReferenceKey,
+    SemanticReference,
+    SubmodelTemplate,
+    TemplateElement,
+)
+from mia_dpp.errors import MappingError
+from mia_dpp.resolution.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.errors import MappingError
-from mia_dpp.models import (
-    DemoProposal,
-    EvidenceRecord,
-    EvidenceStatus,
-    MappingDraft,
-    MappingTarget,
-    ReferenceKey,
-    SemanticReference,
-    SourceLocation,
-    SubmodelTemplate,
-    TemplateElement,
-)
-from mia_dpp.templates import OfficialTemplateRepository, resolve_element
 
 
 def external_reference(value: str) -> SemanticReference:

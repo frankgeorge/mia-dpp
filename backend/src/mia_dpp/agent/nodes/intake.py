@@ -7,11 +7,9 @@ import re
 from typing import Literal
 
 from mia_dpp.agent.state import AgentState
-from mia_dpp.domain.contracts import (
-    ChatMessage,
-    GraphEntry,
-    WebsiteIngestRequest,
-)
+from mia_dpp.api.schemas import WebsiteIngestRequest
+from mia_dpp.domain.mappings import GraphEntry
+from mia_dpp.llm.conversation import ChatMessage
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 

@@ -1,11 +1,22 @@
-"""Stable API module exposing the configured FastAPI application.
+"""Stable, lazily configured FastAPI application boundary."""
 
-The module alias preserves existing ``mia_dpp.api`` imports and test
-monkeypatching while route implementation lives in ``api.routes``.
-"""
+from __future__ import annotations
 
-import sys
+from typing import Any
 
-from mia_dpp.api import routes as _routes
+_ROUTE_EXPORTS = {
+    "app",
+    "settings",
+    "templates",
+    "website_ingestion",
+    "reasoning",
+    "agent_workflow",
+}
 
-sys.modules[__name__] = _routes
+
+def __getattr__(name: str) -> Any:
+    if name not in _ROUTE_EXPORTS:
+        raise AttributeError(name)
+    from mia_dpp.api import routes
+
+    return getattr(routes, name)

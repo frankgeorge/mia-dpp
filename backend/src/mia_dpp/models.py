@@ -1,7 +1,11 @@
-"""Backward-compatible aggregate import for MIA models.
+"""Backward-compatible aggregate imports for legacy MIA callers."""
 
-New code should import from focused feature modules. Legacy callers can keep
-their existing imports while the public contract remains stable.
-"""
-
-from mia_dpp.domain.contracts import *  # noqa: F403
+from mia_dpp.aas.models import *  # noqa: F403
+from mia_dpp.api.schemas import *  # noqa: F403
+from mia_dpp.domain.base import *  # noqa: F403
+from mia_dpp.domain.completion import *  # noqa: F403
+from mia_dpp.domain.evidence import *  # noqa: F403
+from mia_dpp.domain.mappings import *  # noqa: F403
+from mia_dpp.domain.targets import *  # noqa: F403
+from mia_dpp.domain.workflow import *  # noqa: F403
+from mia_dpp.llm.conversation import *  # noqa: F403

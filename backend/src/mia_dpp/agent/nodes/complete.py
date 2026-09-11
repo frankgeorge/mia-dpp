@@ -11,18 +11,11 @@ from typing import Literal
 from langgraph.types import interrupt
 
 from mia_dpp.agent.state import AgentState
+from mia_dpp.api.schemas import WebsiteIngestResponse
 from mia_dpp.domain.completion import actionable_fixed_requirements, build_completion_summary
-from mia_dpp.domain.contracts import (
-    EvidenceRecord,
-    EvidenceStatus,
-    MappingResult,
-    MappingStatus,
-    ProposedFieldMapping,
-    Requirement,
-    SourceLocation,
-    SourceType,
-    WebsiteIngestResponse,
-)
+from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
+from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
+from mia_dpp.domain.targets import Requirement
 from mia_dpp.idta import mapping_target
 from mia_dpp.resolution.confidence import (
     MatchQuality,

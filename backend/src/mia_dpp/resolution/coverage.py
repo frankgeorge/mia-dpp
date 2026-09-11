@@ -8,19 +8,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from mia_dpp.domain.contracts import (
+from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
+from mia_dpp.domain.mappings import (
     CoverageReport,
     CoverageStatistics,
     CoverageStatus,
-    EvidenceRecord,
     MappingResult,
     MappingStatus,
-    ProductKnowledgePackage,
-    Requirement,
     RequirementCoverage,
-    RequirementInventory,
-    RequirementKind,
 )
+from mia_dpp.domain.targets import Requirement, RequirementInventory, RequirementKind
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _TOKEN = re.compile(r"[a-z0-9]+")

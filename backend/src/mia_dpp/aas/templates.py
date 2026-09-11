@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from mia_dpp.domain.contracts import (
+from mia_dpp.domain.targets import (
     Cardinality,
     ReferenceKey,
     SemanticReference,

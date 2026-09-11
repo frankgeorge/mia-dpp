@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mia_dpp import __version__
 from mia_dpp.aas.build import build_dpp
+from mia_dpp.aas.models import DppPackage
 from mia_dpp.aas.templates import (
     STANDARDS_REPOSITORY_COMMIT,
     TemplateRepositoryError,
@@ -21,14 +22,13 @@ from mia_dpp.api.schemas import (
     ChatRequest,
     ChatResponse,
     DppBuildRequest,
-    DppPackage,
     HealthResponse,
-    TemplateSummary,
     WebsiteIngestRequest,
     WebsiteIngestResponse,
 )
 from mia_dpp.bootstrap import build_application
 from mia_dpp.chat import demo_turn, live_turn
+from mia_dpp.domain.targets import TemplateSummary
 from mia_dpp.errors import ExtractionError, MiaError
 from mia_dpp.sources.extraction import (
     ExtractionDependencyError,
@@ -117,7 +117,10 @@ async def agent_message(request: AgentMessageRequest) -> AgentResponse:
     """Run or continue one conversational MIA workflow thread."""
 
     try:
-        return await agent_workflow.message(request)
+        import mia_dpp.api as api_package
+
+        workflow = getattr(api_package, "agent_workflow", agent_workflow)
+        return await workflow.message(request)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:
@@ -167,7 +170,10 @@ async def ingest_website(request: WebsiteIngestRequest) -> WebsiteIngestResponse
     """Fetch a public product page with Crawl4AI and propose reviewed mappings."""
 
     try:
-        return await website_ingestion.ingest(request)
+        import mia_dpp.api as api_package
+
+        ingestion = getattr(api_package, "website_ingestion", website_ingestion)
+        return await ingestion.ingest(request)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:

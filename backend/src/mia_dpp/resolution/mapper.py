@@ -7,12 +7,8 @@ from typing import ClassVar, Protocol
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.chat import CONFIDENCE_THRESHOLD
-from mia_dpp.domain.contracts import (
-    EvidenceRecord,
-    MappingResult,
-    MappingStatus,
-    ProposedFieldMapping,
-)
+from mia_dpp.domain.evidence import EvidenceRecord
+from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
 from mia_dpp.idta import demo_propose, mapping_target
 from mia_dpp.resolution.confidence import (
     MatchQuality,

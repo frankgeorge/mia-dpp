@@ -10,19 +10,14 @@ from datetime import UTC, datetime
 from langgraph.types import interrupt
 
 from mia_dpp.agent.state import AgentState
+from mia_dpp.api.schemas import AgentReviewDecision, AgentReviewRequest, WebsiteIngestResponse
 from mia_dpp.domain.completion import build_completion_summary
-from mia_dpp.domain.contracts import (
-    AgentReviewDecision,
-    AgentReviewRequest,
-    EvidenceRecord,
-    EvidenceStatus,
+from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
+from mia_dpp.domain.mappings import (
     MappingResult,
     MappingStatus,
     ProposedFieldMapping,
     SemanticReviewItem,
-    SourceLocation,
-    SourceType,
-    WebsiteIngestResponse,
 )
 from mia_dpp.idta import mapping_target
 

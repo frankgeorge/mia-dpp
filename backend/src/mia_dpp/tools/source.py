@@ -1,6 +1,6 @@
 """Agent-facing product source ingestion capability."""
 
-from mia_dpp.domain.contracts import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.api.schemas import WebsiteIngestRequest, WebsiteIngestResponse
 from mia_dpp.sources.website import WebsiteIngestionService
 
 

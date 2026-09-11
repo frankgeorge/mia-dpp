@@ -7,8 +7,8 @@ from typing import Any, cast
 
 import httpx
 
+from mia_dpp.aas.models import AasArtifact, DeploymentResult, ValidationReport
 from mia_dpp.canonical import sha256_json
-from mia_dpp.domain.contracts import AasArtifact, DeploymentResult, ValidationReport
 from mia_dpp.errors import DeploymentError
 
 

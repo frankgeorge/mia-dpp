@@ -6,19 +6,21 @@ import hashlib
 from datetime import UTC, datetime
 
 from mia_dpp.aas import AasCompiler, AasValidator, gap_report_from_validation
+from mia_dpp.aas.models import DppPackage
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.domain.contracts import (
-    ApprovedMapping,
-    DppPackage,
+from mia_dpp.domain.evidence import (
     EvidenceRecord,
     EvidenceStatus,
+    ProductKnowledgePackage,
+    SourceLocation,
+)
+from mia_dpp.domain.mappings import (
+    ApprovedMapping,
     FieldMapping,
     MappingSpecification,
     MappingStatus,
-    ProductKnowledgePackage,
-    SourceLocation,
-    TargetProfile,
 )
+from mia_dpp.domain.targets import TargetProfile
 from mia_dpp.errors import MappingError
 
 

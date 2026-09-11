@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from mia_dpp.domain.contracts import (
+from mia_dpp.domain.evidence import (
     EvidenceRecord,
     EvidenceStatus,
     ExtractionRule,

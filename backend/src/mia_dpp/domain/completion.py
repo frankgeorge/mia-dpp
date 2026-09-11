@@ -1,21 +1,55 @@
-"""Human-oriented completion accounting over retained evidence and targets."""
+"""Completion models and deterministic completion accounting."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from mia_dpp.domain.contracts import (
-    CompletionSummary,
-    CoverageReport,
-    EvidenceRecord,
-    FixedTemplateCompletion,
-    MappingResult,
-    MappingStatus,
-    Requirement,
-    RequirementKind,
-    SourceFactStatistics,
-    TechnicalDataCompletion,
-)
+from pydantic import Field
+
+from mia_dpp.domain.base import WireModel
+from mia_dpp.domain.evidence import EvidenceRecord
+from mia_dpp.domain.mappings import CoverageReport, MappingResult, MappingStatus
+from mia_dpp.domain.targets import Requirement, RequirementKind
+
+
+class SourceFactStatistics(WireModel):
+    """Evidence outcomes, counted independently from template requirements."""
+
+    total_discovered: int = Field(ge=0)
+    automatically_resolved: int = Field(ge=0)
+    accepted_after_review: int = Field(ge=0)
+    pending_review: int = Field(ge=0)
+    unresolved: int = Field(ge=0)
+    rejected_proposals: int = Field(ge=0)
+
+
+class FixedTemplateCompletion(WireModel):
+    """Completion of real, scalar fields in one official template."""
+
+    template_key: str
+    template_name: str
+    mandatory_total: int = Field(ge=0)
+    mandatory_filled: int = Field(ge=0)
+    mandatory_missing: int = Field(ge=0)
+    optional_total: int = Field(ge=0)
+    optional_filled: int = Field(ge=0)
+    optional_missing: int = Field(ge=0)
+
+
+class TechnicalDataCompletion(WireModel):
+    """Source-led technical facts; wildcard slots are never missing fields."""
+
+    discovered: int = Field(ge=0)
+    resolved: int = Field(ge=0)
+    unresolved: int = Field(ge=0)
+
+
+class CompletionSummary(WireModel):
+    """Human-oriented accounting across source, fixed targets, and extensions."""
+
+    source: SourceFactStatistics
+    fixed_templates: tuple[FixedTemplateCompletion, ...]
+    technical_data: TechnicalDataCompletion
 
 
 def actionable_fixed_requirements(report: CoverageReport) -> tuple[Requirement, ...]:

@@ -5,18 +5,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from mia_dpp.models import (
-    AasArtifact,
-    DeploymentResult,
+from mia_dpp.aas.models import AasArtifact, DeploymentResult, ValidationReport
+from mia_dpp.domain.evidence import (
     DocumentReference,
     EvidenceRecord,
-    MappingSpecification,
     ProductKnowledgePackage,
     SiteAdapterSpec,
-    SubmodelTemplate,
-    TemplateRelease,
-    ValidationReport,
 )
+from mia_dpp.domain.mappings import MappingSpecification
+from mia_dpp.domain.targets import SubmodelTemplate, TemplateRelease
 
 
 class WebsiteExtractor(Protocol):

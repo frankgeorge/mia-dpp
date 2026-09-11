@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
-from mia_dpp.domain.contracts import (
+from mia_dpp.domain.targets import (
     Cardinality,
     Requirement,
     RequirementInventory,

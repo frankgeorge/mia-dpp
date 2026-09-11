@@ -5,15 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from mia_dpp.domain.contracts import (
-    ChatMessage,
-    ConversationDecision,
-    CoverageReport,
-    ProductKnowledgePackage,
-    SemanticMatchDecision,
-)
+from mia_dpp.domain.evidence import ProductKnowledgePackage
+from mia_dpp.domain.mappings import CoverageReport, SemanticMatchDecision
 from mia_dpp.integrations.openrouter import OpenRouterClient
-from mia_dpp.llm.conversation import ConversationLLM
+from mia_dpp.llm.conversation import ChatMessage, ConversationDecision, ConversationLLM
 from mia_dpp.llm.semantic import SemanticLLM
 
 
