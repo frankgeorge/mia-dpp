@@ -28,7 +28,7 @@ from mia_dpp.models import (
 )
 from mia_dpp.templates import OfficialTemplateRepository
 
-MODEL = "deepseek/deepseek-chat-v3-0324"
+MODEL = "deepseek/deepseek-v3.2"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 CONFIDENCE_THRESHOLD = 0.85
 

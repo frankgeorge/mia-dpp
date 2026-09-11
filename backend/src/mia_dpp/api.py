@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from mia_dpp import __version__
+from mia_dpp.agent_workflow import MiaAgentWorkflow
 from mia_dpp.chat import demo_turn, live_turn
 from mia_dpp.config import Settings
 from mia_dpp.errors import ExtractionError, MiaError
@@ -18,6 +19,9 @@ from mia_dpp.extraction import (
     ProductUrlRejectedError,
 )
 from mia_dpp.models import (
+    AgentMessageRequest,
+    AgentResponse,
+    AgentReviewRequest,
     ChatRequest,
     ChatResponse,
     DppBuildRequest,
@@ -28,6 +32,7 @@ from mia_dpp.models import (
     WebsiteIngestResponse,
 )
 from mia_dpp.pipeline import build_dpp
+from mia_dpp.reasoning import OpenRouterReasoningService, UnconfiguredReasoningService
 from mia_dpp.templates import (
     STANDARDS_REPOSITORY_COMMIT,
     OfficialTemplateRepository,
@@ -38,6 +43,16 @@ from mia_dpp.website import WebsiteIngestionService
 settings = Settings()
 templates = OfficialTemplateRepository(settings.standards_root)
 website_ingestion = WebsiteIngestionService(templates)
+reasoning = (
+    OpenRouterReasoningService(
+        settings.openrouter_api_key.get_secret_value(),
+        conversation_model=settings.conversation_model,
+        semantic_model=settings.semantic_model,
+    )
+    if settings.openrouter_api_key is not None
+    else UnconfiguredReasoningService()
+)
+agent_workflow = MiaAgentWorkflow(templates, website_ingestion, reasoning)
 
 app = FastAPI(
     title="MIA Digital Product Passport",
@@ -106,6 +121,39 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.post("/api/agent/messages", response_model=AgentResponse)
+async def agent_message(request: AgentMessageRequest) -> AgentResponse:
+    """Run or continue one conversational MIA workflow thread."""
+
+    try:
+        return await agent_workflow.message(request)
+    except ProductUrlRejectedError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ExtractionDependencyError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except PageLoadError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=502, detail=f"agent reasoning failed: {error}") from error
+    except ExtractionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except TemplateRepositoryError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.post("/api/agent/review", response_model=AgentResponse)
+async def agent_review(request: AgentReviewRequest) -> AgentResponse:
+    """Resume a paused workflow with explicit human semantic decisions."""
+
+    try:
+        return await agent_workflow.review(request)
+    except (KeyError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=422,
+            detail=f"review could not be applied: {error}",
+        ) from error
 
 
 @app.post("/api/dpp", response_model=DppPackage)

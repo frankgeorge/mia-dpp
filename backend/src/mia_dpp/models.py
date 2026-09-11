@@ -81,6 +81,11 @@ class CoverageStatus(StrEnum):
     MISSING = "missing"
 
 
+class AgentRunStatus(StrEnum):
+    COMPLETED = "completed"
+    AWAITING_REVIEW = "awaiting_review"
+
+
 class ExtractionSource(StrEnum):
     CSS = "css"
     XPATH = "xpath"
@@ -792,6 +797,72 @@ class WebsiteIngestResponse(WireModel):
         if self.coverage_report.analyzed_evidence_ids != tuple(item.id for item in self.evidence):
             raise ValueError("coverageReport must analyze every evidence record in order")
         return self
+
+
+class ConversationDecision(WireModel):
+    """Typed result of the conversational intake model."""
+
+    intent: Literal["chat", "ingest_website"]
+    reply: str = Field(min_length=1)
+    url: str | None = None
+
+    @model_validator(mode="after")
+    def website_intent_has_url(self) -> ConversationDecision:
+        if self.intent == "ingest_website" and not self.url:
+            raise ValueError("website ingestion intent requires a URL")
+        if self.intent == "chat" and self.url is not None:
+            raise ValueError("chat intent cannot include a URL")
+        return self
+
+
+class SemanticMatchDecision(WireModel):
+    """Provider-neutral semantic suggestion constrained to existing domain IDs."""
+
+    evidence_id: str = Field(min_length=1)
+    requirement_id: str = Field(pattern=r"^req-[0-9a-f]{24}$")
+    reasoning: str = Field(min_length=1, max_length=600)
+
+
+class SemanticReviewItem(WireModel):
+    """One semantic proposal that must be accepted or rejected by a person."""
+
+    id: str = Field(pattern=r"^review-[0-9a-f]{24}$")
+    requirement_id: str = Field(pattern=r"^req-[0-9a-f]{24}$")
+    mapping: ProposedFieldMapping
+
+
+class AgentMessageRequest(WireModel):
+    thread_id: str | None = Field(default=None, min_length=8, max_length=128)
+    message: str = Field(min_length=1, max_length=4096)
+    graph: tuple[GraphEntry, ...] = ()
+
+
+class AgentReviewDecision(WireModel):
+    review_id: str = Field(pattern=r"^review-[0-9a-f]{24}$")
+    decision: Literal["approve", "reject"]
+
+
+class AgentReviewRequest(WireModel):
+    thread_id: str = Field(min_length=8, max_length=128)
+    decisions: tuple[AgentReviewDecision, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def review_ids_are_unique(self) -> AgentReviewRequest:
+        identifiers = [item.review_id for item in self.decisions]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("review decisions must be unique")
+        return self
+
+
+class AgentResponse(WireModel):
+    """One resumable MIA graph result returned to the workspace."""
+
+    thread_id: str
+    reply: str
+    status: AgentRunStatus
+    mode: Literal["agent", "configuration_required"] = "agent"
+    website_result: WebsiteIngestResponse | None = None
+    review_items: tuple[SemanticReviewItem, ...] = ()
 
 
 class DppBuildRequest(WireModel):

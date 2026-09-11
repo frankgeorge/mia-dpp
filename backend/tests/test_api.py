@@ -12,7 +12,12 @@ import mia_dpp.api as api_module
 from mia_dpp.api import app
 from mia_dpp.chat import demo_turn
 from mia_dpp.extraction import RenderedPage
-from mia_dpp.models import ChatMessage, ChatRequest
+from mia_dpp.models import (
+    AgentResponse,
+    AgentRunStatus,
+    ChatMessage,
+    ChatRequest,
+)
 from mia_dpp.url_policy import ProductUrlPolicy
 from mia_dpp.website import WebsiteIngestionService
 
@@ -69,6 +74,29 @@ def test_chat_endpoint_runs_without_an_external_key() -> None:
     assert body["mode"] == "demo"
     assert body["proposal"]["productName"] == "SDE5"
     assert body["proposal"]["mappings"][0]["confidenceAssessment"]["factors"]
+
+
+def test_agent_message_endpoint_returns_a_resumable_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Agent:
+        async def message(self, request: object) -> AgentResponse:
+            return AgentResponse(
+                thread_id="thread-api-test",
+                reply="Please provide a product URL.",
+                status=AgentRunStatus.COMPLETED,
+            )
+
+    monkeypatch.setattr(api_module, "agent_workflow", Agent())
+    response = request(
+        "POST",
+        "/api/agent/messages",
+        {"message": "What can MIA do?", "graph": []},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["threadId"] == "thread-api-test"
+    assert response.json()["status"] == "completed"
 
 
 def test_dpp_endpoint_returns_full_verified_environment_and_reports() -> None:

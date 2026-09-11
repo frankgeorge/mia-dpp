@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     )
 
     openrouter_api_key: SecretStr | None = None
+    conversation_model: str = Field(
+        default="deepseek/deepseek-v3.2",
+        validation_alias="MIA_CONVERSATION_MODEL",
+    )
+    semantic_model: str = Field(
+        default="deepseek/deepseek-v3.2",
+        validation_alias="MIA_SEMANTIC_MODEL",
+    )
     standards_root: Path = Field(
         default=REPOSITORY_ROOT / "standards" / "idta-submodel-templates",
         validation_alias="MIA_STANDARDS_ROOT",
