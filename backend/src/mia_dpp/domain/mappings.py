@@ -1,0 +1,41 @@
+"""Mapping, review, confidence, and coverage contracts."""
+
+from mia_dpp.domain.contracts import (
+    ApprovedMapping,
+    ConfidenceAssessment,
+    ConfidenceFactor,
+    CoverageReport,
+    CoverageStatistics,
+    CoverageStatus,
+    FieldMapping,
+    MappingDraft,
+    MappingProposal,
+    MappingResult,
+    MappingSpecification,
+    MappingStatus,
+    MappingTarget,
+    ProposedFieldMapping,
+    RequirementCoverage,
+    SemanticMatchDecision,
+    SemanticReviewItem,
+)
+
+__all__ = [
+    "ApprovedMapping",
+    "ConfidenceAssessment",
+    "ConfidenceFactor",
+    "CoverageReport",
+    "CoverageStatistics",
+    "CoverageStatus",
+    "FieldMapping",
+    "MappingDraft",
+    "MappingProposal",
+    "MappingResult",
+    "MappingSpecification",
+    "MappingStatus",
+    "MappingTarget",
+    "ProposedFieldMapping",
+    "RequirementCoverage",
+    "SemanticMatchDecision",
+    "SemanticReviewItem",
+]
