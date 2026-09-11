@@ -10,7 +10,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from mia_dpp.models import CandidateFact, RawSourceArtifact, SourceLocation
+from mia_dpp.domain.evidence import CandidateFact, RawSourceArtifact, SourceLocation
 
 EXTRACTOR_VERSION = "1"
 _YEAR = re.compile(r"\b((?:19|20)\d{2})\b")

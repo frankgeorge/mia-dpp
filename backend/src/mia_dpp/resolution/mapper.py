@@ -5,16 +5,20 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import ClassVar, Protocol
 
+from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.chat import CONFIDENCE_THRESHOLD
-from mia_dpp.confidence import MatchQuality, ValueFormatQuality, assess_mapping_confidence
-from mia_dpp.idta import demo_propose, mapping_target
-from mia_dpp.models import (
+from mia_dpp.domain.contracts import (
     EvidenceRecord,
     MappingResult,
     MappingStatus,
     ProposedFieldMapping,
 )
-from mia_dpp.templates import OfficialTemplateRepository
+from mia_dpp.idta import demo_propose, mapping_target
+from mia_dpp.resolution.confidence import (
+    MatchQuality,
+    ValueFormatQuality,
+    assess_mapping_confidence,
+)
 
 MappingHistory = Mapping[tuple[str, str], int]
 

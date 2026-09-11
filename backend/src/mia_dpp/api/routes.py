@@ -1,4 +1,4 @@
-"""FastAPI boundary for the deterministic MIA backend."""
+"""FastAPI routes translating HTTP requests into MIA capabilities."""
 
 from __future__ import annotations
 
@@ -9,16 +9,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from mia_dpp import __version__
-from mia_dpp.agent_workflow import MiaAgentWorkflow
-from mia_dpp.chat import demo_turn, live_turn
-from mia_dpp.config import Settings
-from mia_dpp.errors import ExtractionError, MiaError
-from mia_dpp.extraction import (
-    ExtractionDependencyError,
-    PageLoadError,
-    ProductUrlRejectedError,
+from mia_dpp.aas.build import build_dpp
+from mia_dpp.aas.templates import (
+    STANDARDS_REPOSITORY_COMMIT,
+    TemplateRepositoryError,
 )
-from mia_dpp.models import (
+from mia_dpp.api.schemas import (
     AgentMessageRequest,
     AgentResponse,
     AgentReviewRequest,
@@ -31,28 +27,21 @@ from mia_dpp.models import (
     WebsiteIngestRequest,
     WebsiteIngestResponse,
 )
-from mia_dpp.pipeline import build_dpp
-from mia_dpp.reasoning import OpenRouterReasoningService, UnconfiguredReasoningService
-from mia_dpp.templates import (
-    STANDARDS_REPOSITORY_COMMIT,
-    OfficialTemplateRepository,
-    TemplateRepositoryError,
+from mia_dpp.bootstrap import build_application
+from mia_dpp.chat import demo_turn, live_turn
+from mia_dpp.errors import ExtractionError, MiaError
+from mia_dpp.sources.extraction import (
+    ExtractionDependencyError,
+    PageLoadError,
+    ProductUrlRejectedError,
 )
-from mia_dpp.website import WebsiteIngestionService
 
-settings = Settings()
-templates = OfficialTemplateRepository(settings.standards_root)
-website_ingestion = WebsiteIngestionService(templates)
-reasoning = (
-    OpenRouterReasoningService(
-        settings.openrouter_api_key.get_secret_value(),
-        conversation_model=settings.conversation_model,
-        semantic_model=settings.semantic_model,
-    )
-    if settings.openrouter_api_key is not None
-    else UnconfiguredReasoningService()
-)
-agent_workflow = MiaAgentWorkflow(templates, website_ingestion, reasoning)
+application = build_application()
+settings = application.settings
+templates = application.templates
+website_ingestion = application.website_ingestion
+reasoning = application.reasoning
+agent_workflow = application.agent_workflow
 
 app = FastAPI(
     title="MIA Digital Product Passport",

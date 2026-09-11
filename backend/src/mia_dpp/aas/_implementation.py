@@ -10,9 +10,9 @@ from typing import Any, cast
 
 from aas_core3 import jsonization, verification
 
+from mia_dpp.aas.templates import OfficialTemplateRepository, resolve_element
 from mia_dpp.canonical import sha256_json
-from mia_dpp.errors import CompilationError, MappingError
-from mia_dpp.models import (
+from mia_dpp.domain.contracts import (
     AasArtifact,
     ApprovedMapping,
     Cardinality,
@@ -29,7 +29,7 @@ from mia_dpp.models import (
     ValidationFinding,
     ValidationReport,
 )
-from mia_dpp.templates import OfficialTemplateRepository, resolve_element
+from mia_dpp.errors import CompilationError, MappingError
 
 _VALUE_MODEL_TYPES = {"Property", "MultiLanguageProperty", "Range", "File", "Blob"}
 _CONTAINER_MODEL_TYPES = {"SubmodelElementCollection", "SubmodelElementList", "Entity"}

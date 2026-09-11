@@ -6,8 +6,8 @@ import hashlib
 from datetime import UTC, datetime
 
 from mia_dpp.aas import AasCompiler, AasValidator, gap_report_from_validation
-from mia_dpp.errors import MappingError
-from mia_dpp.models import (
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.contracts import (
     ApprovedMapping,
     DppPackage,
     EvidenceRecord,
@@ -19,7 +19,7 @@ from mia_dpp.models import (
     SourceLocation,
     TargetProfile,
 )
-from mia_dpp.templates import OfficialTemplateRepository
+from mia_dpp.errors import MappingError
 
 
 class DeterministicDppPipeline:

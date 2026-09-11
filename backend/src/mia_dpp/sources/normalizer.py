@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from mia_dpp.models import CandidateFact, EvidenceRecord, EvidenceStatus, RawSourceArtifact
+from mia_dpp.domain.evidence import CandidateFact, EvidenceRecord, EvidenceStatus, RawSourceArtifact
 
 EXTRACTOR_NAME = "mia-website-fact-extractor"
 EXTRACTOR_VERSION = "1"

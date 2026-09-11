@@ -15,8 +15,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from mia_dpp.errors import ExtractionError
-from mia_dpp.models import (
+from mia_dpp.domain.contracts import (
     EvidenceRecord,
     EvidenceStatus,
     ExtractionRule,
@@ -24,6 +23,7 @@ from mia_dpp.models import (
     SiteAdapterSpec,
     SourceLocation,
 )
+from mia_dpp.errors import ExtractionError
 
 EXTRACTOR_NAME = "mia-html-evidence"
 EXTRACTOR_VERSION = "1"

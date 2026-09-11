@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mia_dpp.models import RawSourceArtifact, SourceType
+from mia_dpp.domain.evidence import RawSourceArtifact, SourceType
 from mia_dpp.sources.extraction import RenderedPage
 
 

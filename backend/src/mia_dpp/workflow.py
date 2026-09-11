@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from pydantic import JsonValue
 
-from mia_dpp.models import WorkflowEvent, WorkflowStatus
+from mia_dpp.domain.contracts import WorkflowEvent, WorkflowStatus
 
 
 def completed_event(

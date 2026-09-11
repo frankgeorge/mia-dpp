@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from mia_dpp.models import (
+from mia_dpp.domain.contracts import (
     CompletionSummary,
     CoverageReport,
     EvidenceRecord,

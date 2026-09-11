@@ -5,25 +5,25 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
+from mia_dpp.aas.requirements import build_requirement_inventory
+from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.chat import nameplate_catalog
-from mia_dpp.completion import build_completion_summary
-from mia_dpp.coverage import CoverageAnalyzer
-from mia_dpp.errors import ExtractionError
-from mia_dpp.models import (
+from mia_dpp.domain.completion import build_completion_summary
+from mia_dpp.domain.contracts import (
     MappingProposal,
     ProductKnowledgePackage,
     WebsiteIngestRequest,
     WebsiteIngestResponse,
     WorkflowEvent,
 )
-from mia_dpp.requirements import build_requirement_inventory
+from mia_dpp.errors import ExtractionError
+from mia_dpp.resolution.coverage import CoverageAnalyzer
+from mia_dpp.resolution.mapper import DeterministicWebsiteMapper, MappingStrategy
 from mia_dpp.sources.artifacts import raw_website_artifact
 from mia_dpp.sources.extraction import Crawl4AIPageLoader, PageLoader, RenderedPage
 from mia_dpp.sources.normalizer import EvidenceNormalizer
 from mia_dpp.sources.url_policy import ProductUrlPolicy
 from mia_dpp.sources.website_facts import WebsiteFactExtractor
-from mia_dpp.templates import OfficialTemplateRepository
-from mia_dpp.website_mapping import DeterministicWebsiteMapper, MappingStrategy
 from mia_dpp.workflow import completed_event
 
 

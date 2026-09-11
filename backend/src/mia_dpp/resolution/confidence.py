@@ -12,7 +12,7 @@ from typing import Annotated
 
 from pydantic import Field, validate_call
 
-from mia_dpp.models import ConfidenceAssessment, ConfidenceFactor
+from mia_dpp.domain.mappings import ConfidenceAssessment, ConfidenceFactor
 
 
 class MatchQuality(StrEnum):

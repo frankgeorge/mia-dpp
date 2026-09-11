@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from mia_dpp.models import (
+from mia_dpp.domain.contracts import (
     CoverageReport,
     CoverageStatistics,
     CoverageStatus,

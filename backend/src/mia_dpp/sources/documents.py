@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from mia_dpp.canonical import sha256_json
-from mia_dpp.errors import ConfigurationError, ExtractionError
-from mia_dpp.models import (
+from mia_dpp.domain.contracts import (
     DocumentReference,
     EvidenceRecord,
     EvidenceStatus,
     SourceLocation,
 )
+from mia_dpp.errors import ConfigurationError, ExtractionError
 
 
 class TextPreprocessor(Protocol):
