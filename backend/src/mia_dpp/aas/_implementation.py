@@ -1,4 +1,4 @@
-"""Deterministic official-template projection, AAS compilation and validation."""
+"""Shared implementation for deterministic AAS compilation and validation."""
 
 from __future__ import annotations
 
