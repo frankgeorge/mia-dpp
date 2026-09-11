@@ -15,22 +15,30 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from mia_dpp.completion import build_completion_summary
 from mia_dpp.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
+from mia_dpp.coverage import CoverageAnalyzer
 from mia_dpp.idta import mapping_target
 from mia_dpp.models import (
     AgentMessageRequest,
     AgentResponse,
+    AgentReviewDecision,
     AgentReviewRequest,
     AgentRunStatus,
     ChatMessage,
+    EvidenceRecord,
+    EvidenceStatus,
     GraphEntry,
+    MappingResult,
     MappingStatus,
     ProposedFieldMapping,
     SemanticReviewItem,
+    SourceLocation,
+    SourceType,
     WebsiteIngestRequest,
     WebsiteIngestResponse,
 )
@@ -69,6 +77,8 @@ class MiaAgentWorkflow:
         self._repository = repository
         self._website_ingestion = website_ingestion
         self._reasoning = reasoning
+        self._coverage_analyzer = CoverageAnalyzer()
+        self._pending_chat: dict[str, list[ChatMessage]] = {}
         builder = StateGraph(AgentState)
         builder.add_node("intake", self._intake)
         builder.add_node("website_ingestion", self._ingest_website)
@@ -91,6 +101,10 @@ class MiaAgentWorkflow:
 
     async def message(self, request: AgentMessageRequest) -> AgentResponse:
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
+        if request.thread_id:
+            snapshot = await self._graph.aget_state(self._config(thread_id))
+            if snapshot.next and snapshot.values.get("review_items"):
+                return await self._message_during_review(thread_id, request, snapshot.values)
         state: AgentState = {
             "messages": [{"role": "user", "content": request.message}],
             "user_message": request.message,
@@ -103,12 +117,39 @@ class MiaAgentWorkflow:
         result = await self._graph.ainvoke(state, self._config(thread_id))
         return self._response(thread_id, result)
 
+    async def _message_during_review(
+        self,
+        thread_id: str,
+        request: AgentMessageRequest,
+        state: dict[str, Any],
+    ) -> AgentResponse:
+        """Keep conversation available without consuming the review interrupt."""
+
+        stored = self._pending_chat.setdefault(thread_id, [])
+        history = tuple(
+            [ChatMessage.model_validate(item) for item in state.get("messages", [])]
+            + stored
+            + [ChatMessage(role="user", content=request.message)]
+        )
+        decision = await self._reasoning.converse(history)
+        stored.extend(
+            [
+                ChatMessage(role="user", content=request.message),
+                ChatMessage(role="assistant", content=decision.reply),
+            ]
+        )
+        response_state = dict(state)
+        response_state["reply"] = decision.reply
+        response_state["status"] = "awaiting_review"
+        return self._response(thread_id, response_state)
+
     async def review(self, request: AgentReviewRequest) -> AgentResponse:
         command: Command[Any] = Command(resume=request.model_dump(mode="json"))
         result = await self._graph.ainvoke(
             command,
             self._config(request.thread_id),
         )
+        self._pending_chat.pop(request.thread_id, None)
         return self._response(request.thread_id, result)
 
     async def _intake(self, state: AgentState) -> AgentState:
@@ -165,6 +206,30 @@ class MiaAgentWorkflow:
         requirements = {item.id: item for item in website.coverage_report.inventory.requirements}
         evidence = {item.id: item for item in website.evidence}
         review_items: list[SemanticReviewItem] = []
+        by_target = {
+            (item.template_key, item.template_release, item.template_path): item
+            for item in requirements.values()
+        }
+        for proposal in (*website.mapping_result.mapped, *website.mapping_result.ambiguous):
+            if proposal.status is not MappingStatus.REVIEW:
+                continue
+            requirement = by_target.get(
+                (
+                    proposal.target.template_key,
+                    proposal.target.template_release,
+                    proposal.target.template_path,
+                )
+            )
+            if requirement is None:
+                continue
+            identity = f"{requirement.id}\0{proposal.evidence_id}"
+            review_items.append(
+                SemanticReviewItem(
+                    id="review-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
+                    requirement_id=requirement.id,
+                    mapping=proposal,
+                )
+            )
         for decision in decisions:
             requirement = requirements.get(decision.requirement_id)
             record = evidence.get(decision.evidence_id)
@@ -264,32 +329,21 @@ class MiaAgentWorkflow:
                 {
                     "type": "semantic_mapping_review",
                     "reviewItems": [item.model_dump(mode="json") for item in items],
-                    "allowedDecisions": ["approve", "reject"],
+                    "allowedDecisions": ["approve", "correct", "reject"],
                 }
             )
         )
         if submission.thread_id == "":
             raise ValueError("thread ID is required")
-        decisions = {item.review_id: item.decision for item in submission.decisions}
+        decisions = {item.review_id: item for item in submission.decisions}
         expected = {item.id for item in items}
         if set(decisions) != expected:
             raise ValueError("a decision is required for every semantic proposal")
+        website = WebsiteIngestResponse.model_validate(state["website_result"])
         reviewed = [
-            item.model_copy(
-                update={
-                    "mapping": item.mapping.model_copy(
-                        update={
-                            "status": (
-                                MappingStatus.APPROVED
-                                if decisions[item.id] == "approve"
-                                else MappingStatus.REJECTED
-                            )
-                        }
-                    )
-                }
-            )
-            for item in items
+            self._apply_review_decision(item, decisions[item.id], website) for item in items
         ]
+        website = self._reconcile_review(website, reviewed)
         approved = sum(item.mapping.status is MappingStatus.APPROVED for item in reviewed)
         reply = (
             f"Review saved: {approved} semantic mapping"
@@ -297,11 +351,127 @@ class MiaAgentWorkflow:
             "Approved mappings can now participate in deterministic compilation."
         )
         return {
+            "website_result": website.model_dump(mode="json"),
             "review_items": [item.model_dump(mode="json") for item in reviewed],
             "reply": reply,
             "messages": [{"role": "assistant", "content": reply}],
             "status": "completed",
         }
+
+    def _apply_review_decision(
+        self,
+        item: SemanticReviewItem,
+        decision: AgentReviewDecision,
+        website: WebsiteIngestResponse,
+    ) -> SemanticReviewItem:
+        if decision.decision == "reject":
+            return item.model_copy(
+                update={
+                    "mapping": item.mapping.model_copy(update={"status": MappingStatus.REJECTED})
+                }
+            )
+        if decision.decision == "approve":
+            return item.model_copy(
+                update={
+                    "mapping": item.mapping.model_copy(update={"status": MappingStatus.APPROVED})
+                }
+            )
+
+        requirement_id = decision.corrected_requirement_id or item.requirement_id
+        requirements = {
+            requirement.id: requirement
+            for requirement in website.coverage_report.inventory.requirements
+        }
+        requirement = requirements.get(requirement_id)
+        if requirement is None or requirement.semantic_id is None or requirement.wildcard:
+            raise ValueError("corrected target must be a fixed official requirement")
+        target = mapping_target(
+            self._repository.load(requirement.template_key),
+            requirement.template_path,
+        )
+        mapping = item.mapping
+        if decision.corrected_value is not None:
+            record = self._human_correction_evidence(
+                mapping,
+                decision.corrected_value,
+            )
+            package = website.knowledge_package.model_copy(
+                update={"evidence": (*website.knowledge_package.evidence, record)}
+            )
+            website.knowledge_package = package
+            website.evidence = package.evidence
+            mapping = mapping.model_copy(
+                update={
+                    "evidence_id": record.id,
+                    "source_value": decision.corrected_value,
+                }
+            )
+        mapping = mapping.model_copy(
+            update={
+                "target_element": target.id_short,
+                "semantic_id": target.semantic_id.primary_value,
+                "target": target,
+                "status": MappingStatus.APPROVED,
+                "reasoning": (
+                    "Corrected and approved by the human reviewer. "
+                    + (decision.comment or "The official target was validated by MIA.")
+                ),
+            }
+        )
+        return SemanticReviewItem(id=item.id, requirement_id=requirement_id, mapping=mapping)
+
+    def _human_correction_evidence(
+        self,
+        mapping: ProposedFieldMapping,
+        value: str,
+    ) -> EvidenceRecord:
+        acquired_at = datetime.now(UTC)
+        identity = f"{mapping.evidence_id}\0{value}\0{acquired_at.isoformat()}"
+        return EvidenceRecord(
+            id="ev-human-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
+            predicate="human.correction",
+            source_label=mapping.source_field,
+            value=value,
+            source_type=SourceType.HUMAN,
+            source_uri="mia://conversation/review",
+            source_content_sha256=hashlib.sha256(value.encode()).hexdigest(),
+            source_location=SourceLocation(excerpt=value),
+            extraction_method="human_review_correction",
+            extractor_name="mia-human-review",
+            extractor_version="1",
+            status=EvidenceStatus.VERIFIED,
+            acquired_at=acquired_at,
+        )
+
+    def _reconcile_review(
+        self,
+        website: WebsiteIngestResponse,
+        reviewed: list[SemanticReviewItem],
+    ) -> WebsiteIngestResponse:
+        base = [
+            item
+            for item in (*website.mapping_result.mapped, *website.mapping_result.ambiguous)
+            if item.status is MappingStatus.AUTO
+        ]
+        approved = [
+            item.mapping for item in reviewed if item.mapping.status is MappingStatus.APPROVED
+        ]
+        mapped_ids = {item.evidence_id for item in (*base, *approved)}
+        unmatched = tuple(item.id for item in website.evidence if item.id not in mapped_ids)
+        result = MappingResult(mapped=(*base, *approved), unmatched_evidence_ids=unmatched)
+        coverage = self._coverage_analyzer.analyze(
+            website.knowledge_package,
+            website.coverage_report.inventory,
+            mapping_result=result,
+        )
+        return website.model_copy(
+            update={
+                "proposal": website.proposal.model_copy(update={"mappings": result.mapped}),
+                "mapping_result": result,
+                "coverage_report": coverage,
+                "completion_summary": build_completion_summary(coverage, result),
+            }
+        )
 
     def _response(self, thread_id: str, state: dict[str, Any]) -> AgentResponse:
         website = state.get("website_result")

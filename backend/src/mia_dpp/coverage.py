@@ -148,7 +148,7 @@ class CoverageAnalyzer:
             )
             if requirement is None or proposal.evidence_id not in evidence_by_id:
                 continue
-            if proposal.status is MappingStatus.AUTO:
+            if proposal.status in {MappingStatus.AUTO, MappingStatus.APPROVED}:
                 match = _Match(
                     rank=2,
                     method="exact_mapping",
@@ -156,7 +156,7 @@ class CoverageAnalyzer:
                         "The existing deterministic mapper selected this exact template path."
                     ),
                 )
-            else:
+            elif proposal.status is MappingStatus.REVIEW:
                 match = _Match(
                     rank=1,
                     method="mapping_review_candidate",
@@ -165,6 +165,8 @@ class CoverageAnalyzer:
                         "review threshold was not met."
                     ),
                 )
+            else:
+                continue
             CoverageAnalyzer._record(matches, requirement.id, proposal.evidence_id, match)
 
         for proposal in mapping_result.ambiguous:

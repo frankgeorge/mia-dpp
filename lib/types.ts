@@ -32,6 +32,7 @@ export interface EvidenceRecord {
   canonicalPredicate: string | null;
   value: unknown;
   unit: string | null;
+  sourceType: "website" | "human";
   sourceUri: string;
   sourceContentSha256: string;
   sourceLocation: SourceLocation;
@@ -314,6 +315,14 @@ export interface SemanticReviewItem {
   id: string;
   requirementId: string;
   mapping: ProposedFieldMapping;
+}
+
+export interface AgentReviewDecision {
+  reviewId: string;
+  decision: "approve" | "correct" | "reject";
+  correctedRequirementId?: string | null;
+  correctedValue?: string | null;
+  comment?: string | null;
 }
 
 export interface AgentResponse {

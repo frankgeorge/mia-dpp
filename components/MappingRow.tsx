@@ -12,9 +12,17 @@ export function MappingRow({
   mapping: FieldMapping;
   elements: NameplateElement[];
   onDecide: (id: string, status: "approved" | "rejected") => void;
-  onCorrect: (id: string, target: NameplateElement) => void;
+  onCorrect: (
+    id: string,
+    target: NameplateElement,
+    correctedValue?: string
+  ) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [targetPath, setTargetPath] = useState(
+    m.target.instancePath.join("/")
+  );
+  const [correctedValue, setCorrectedValue] = useState(m.sourceValue);
   const pct = Math.round(m.confidence * 100);
   const missingPct = Math.max(0, 100 - pct);
   const strong = m.confidence >= 0.85;
@@ -119,32 +127,25 @@ export function MappingRow({
             onClick={() => setEditing(true)}
             className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-mist"
           >
-            Change target
+            Correct
           </button>
           <button
             onClick={() => onDecide(m.id, "rejected")}
             className="px-1 text-[12px] text-muted transition-colors hover:text-ink"
           >
-            Discard
+            Reject
           </button>
         </div>
       )}
 
       {editing && (
-        <div className="mt-3">
+        <div className="mt-3 space-y-2">
           <label className="text-[12px] text-muted">
             Map this field to
             <select
               autoFocus
-              defaultValue={m.target.instancePath.join("/")}
-              onChange={(e) => {
-                const target = elements.find(
-                  (element) =>
-                    element.target.instancePath.join("/") === e.target.value
-                );
-                if (target) onCorrect(m.id, target);
-                setEditing(false);
-              }}
+              value={targetPath}
+              onChange={(e) => setTargetPath(e.target.value)}
               className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2 font-mono text-[12px] focus:border-signal focus:outline-none"
             >
               {elements.map((e) => (
@@ -158,6 +159,35 @@ export function MappingRow({
               ))}
             </select>
           </label>
+          <label className="block text-[12px] text-muted">
+            Corrected value
+            <input
+              value={correctedValue}
+              onChange={(event) => setCorrectedValue(event.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2 text-[12px] text-ink focus:border-signal focus:outline-none"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                const target = elements.find(
+                  (element) =>
+                    element.target.instancePath.join("/") === targetPath
+                );
+                if (target) onCorrect(m.id, target, correctedValue);
+                setEditing(false);
+              }}
+              className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-medium text-white"
+            >
+              Save correction
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="px-2 text-[12px] text-muted"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

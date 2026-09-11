@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
+  AgentReviewDecision,
   AgentResponse,
   ChatMessage,
   CoverageReport,
@@ -66,6 +67,9 @@ export default function Workspace() {
   const [mode, setMode] = useState<string>("");
   const [threadId, setThreadId] = useState<string | null>(null);
   const [semanticReview, setSemanticReview] = useState<SemanticReviewItem[]>([]);
+  const [reviewDecisions, setReviewDecisions] = useState<
+    Record<string, AgentReviewDecision>
+  >({});
   const [tab, setTab] = useState<WorkspaceTab>("mappings");
   const graphReadyRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -100,7 +104,7 @@ export default function Workspace() {
 
   async function send(text: string) {
     const t = text.trim();
-    if (!t || busy || semanticReview.length > 0) return;
+    if (!t || busy) return;
 
     const next: ChatMessage[] = [...messages, { role: "user", content: t }];
     setMessages(next);
@@ -120,7 +124,9 @@ export default function Workspace() {
       const data = body as AgentResponse;
       setThreadId(data.threadId);
       setMode(data.mode);
-      if (data.websiteResult) applyAgentWebsiteResult(data);
+      if (data.websiteResult && semanticReview.length === 0) {
+        applyAgentWebsiteResult(data);
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -198,19 +204,30 @@ export default function Workspace() {
   function applyAgentWebsiteResult(data: AgentResponse) {
     const website = data.websiteResult;
     if (!website) return;
+    const mappingKey = (mapping: Omit<FieldMapping, "id">) =>
+      `${mapping.evidenceId}|${mapping.target.templateKey}|${mapping.target.templatePath.join("/")}`;
+    const reviewByMapping = new Map(
+      data.reviewItems.map((item) => [mappingKey(item.mapping), item])
+    );
     const deterministic: FieldMapping[] = website.proposal.mappings.map(
       (mapping, index) => ({
-        ...mapping,
-        id: `${Date.now()}-website-${index}`,
+        ...(reviewByMapping.get(mappingKey(mapping))?.mapping ?? mapping),
+        id:
+          reviewByMapping.get(mappingKey(mapping))?.id ??
+          `${Date.now()}-website-${index}`,
       })
     );
-    const semantic: FieldMapping[] = data.reviewItems.map((item) => ({
-      ...item.mapping,
-      id: item.id,
-    }));
+    const proposalKeys = new Set(website.proposal.mappings.map(mappingKey));
+    const semantic: FieldMapping[] = data.reviewItems
+      .filter((item) => !proposalKeys.has(mappingKey(item.mapping)))
+      .map((item) => ({
+        ...item.mapping,
+        id: item.id,
+      }));
     setProductName(website.proposal.productName || "Website product");
     setMappings([...deterministic, ...semantic]);
     setSemanticReview(data.status === "awaiting_review" ? data.reviewItems : []);
+    if (data.status === "awaiting_review") setReviewDecisions({});
     setEvidence(website.evidence);
     setMappingResult(website.mappingResult);
     setCoverageReport(website.coverageReport);
@@ -223,17 +240,11 @@ export default function Workspace() {
 
   async function confirmSemanticReview() {
     if (!threadId || semanticReview.length === 0 || busy) return;
-    const decisions = semanticReview.map((item) => {
-      const mapping = mappings.find((candidate) => candidate.id === item.id);
-      return {
-        reviewId: item.id,
-        decision: mapping?.status === "approved" ? "approve" : "reject",
-      };
+    const decisions = semanticReview.flatMap((item) => {
+      const decision = reviewDecisions[item.id];
+      return decision ? [decision] : [];
     });
-    const undecided = semanticReview.some((item) => {
-      const status = mappings.find((candidate) => candidate.id === item.id)?.status;
-      return status !== "approved" && status !== "rejected";
-    });
+    const undecided = decisions.length !== semanticReview.length;
     if (undecided) return;
 
     setBusy(true);
@@ -248,15 +259,9 @@ export default function Workspace() {
         throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${response.status}`);
       }
       const data = body as AgentResponse;
-      const reviewed = new Map(data.reviewItems.map((item) => [item.id, item.mapping.status]));
-      setMappings((previous) =>
-        previous.map((mapping) =>
-          reviewed.has(mapping.id)
-            ? { ...mapping, status: reviewed.get(mapping.id)! }
-            : mapping
-        )
-      );
+      applyAgentWebsiteResult(data);
       setSemanticReview([]);
+      setReviewDecisions({});
       setMessages((previous) => [
         ...previous,
         { role: "assistant", content: data.reply },
@@ -277,10 +282,23 @@ export default function Workspace() {
       prev.map((m) => (m.id === id ? { ...m, status } : m))
     );
     const m = mappings.find((x) => x.id === id);
+    if (semanticReview.some((item) => item.id === id)) {
+      setReviewDecisions((previous) => ({
+        ...previous,
+        [id]: {
+          reviewId: id,
+          decision: status === "approved" ? "approve" : "reject",
+        },
+      }));
+    }
     if (m && status === "approved") writeToGraph(m);
   }
 
-  function correct(id: string, selected: NameplateElement) {
+  function correct(
+    id: string,
+    selected: NameplateElement,
+    correctedValue?: string
+  ) {
     const mapping = mappings.find((item) => item.id === id);
     if (!mapping) return;
     const corrected: FieldMapping = {
@@ -288,12 +306,31 @@ export default function Workspace() {
       targetElement: selected.name,
       semanticId: selected.semanticId,
       target: selected.target,
+      sourceValue: correctedValue?.trim() || mapping.sourceValue,
       status: "approved",
       reasoning: "Corrected by you, and saved to the Integration Graph.",
     };
     setMappings((previous) =>
       previous.map((item) => (item.id === id ? corrected : item))
     );
+    if (semanticReview.some((item) => item.id === id) && coverageReport) {
+      const requirement = coverageReport.inventory.requirements.find(
+        (item) =>
+          item.templateKey === selected.target.templateKey &&
+          item.templatePath.join("/") === selected.target.templatePath.join("/")
+      );
+      if (requirement) {
+        setReviewDecisions((previous) => ({
+          ...previous,
+          [id]: {
+            reviewId: id,
+            decision: "correct",
+            correctedRequirementId: requirement.id,
+            correctedValue: correctedValue?.trim() || null,
+          },
+        }));
+      }
+    }
     writeToGraph(corrected);
   }
 
@@ -544,7 +581,6 @@ export default function Workspace() {
             <div className="mx-auto flex max-w-md items-end gap-2 rounded-[24px] border border-hairline bg-white p-1.5 shadow-sm transition-all focus-within:border-signal/50 focus-within:ring-4 focus-within:ring-signal/10">
               <textarea
                 value={input}
-                disabled={semanticReview.length > 0}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -553,16 +589,12 @@ export default function Workspace() {
                   }
                 }}
                 rows={1}
-                placeholder={
-                  semanticReview.length > 0
-                    ? "Finish the semantic review to continue"
-                    : "Ask MIA or paste a product URL..."
-                }
+                placeholder="Ask MIA, clarify a review, or paste a product URL..."
                 className="max-h-32 flex-1 resize-none bg-transparent px-4 py-2.5 text-[14px] leading-relaxed text-ink placeholder:text-muted focus:outline-none"
               />
               <button
                 onClick={() => send(input)}
-                disabled={busy || semanticReview.length > 0 || !input.trim()}
+                disabled={busy || !input.trim()}
                 className="mb-0.5 mr-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink text-white transition-transform hover:scale-105 disabled:scale-100 disabled:opacity-25"
                 aria-label="Send message"
               >
@@ -680,16 +712,14 @@ export default function Workspace() {
                         Human semantic review required
                       </p>
                       <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
-                        The LangGraph workflow is paused. Approve or reject every
-                        model proposal below, then resume it. Model suggestions are
-                        never authoritative by themselves.
+                        Approve, correct, or reject every proposal below. You can
+                        keep chatting with MIA while the review remains pending.
                       </p>
                       <button
                         onClick={() => void confirmSemanticReview()}
-                        disabled={semanticReview.some((item) => {
-                          const status = mappings.find((mapping) => mapping.id === item.id)?.status;
-                          return status !== "approved" && status !== "rejected";
-                        })}
+                        disabled={semanticReview.some(
+                          (item) => !reviewDecisions[item.id]
+                        )}
                         className="mt-3 rounded-full bg-ink px-4 py-1.5 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-30"
                       >
                         Save decisions and resume

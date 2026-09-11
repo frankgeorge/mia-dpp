@@ -62,6 +62,7 @@ class EvidenceStatus(StrEnum):
 
 class SourceType(StrEnum):
     WEBSITE = "website"
+    HUMAN = "human"
 
 
 class WorkflowStatus(StrEnum):
@@ -237,6 +238,7 @@ class EvidenceRecord(WireModel):
     )
     value: JsonValue
     unit: str | None = None
+    source_type: SourceType = SourceType.WEBSITE
     source_uri: str = Field(min_length=1)
     source_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_location: SourceLocation
@@ -880,7 +882,25 @@ class AgentMessageRequest(WireModel):
 
 class AgentReviewDecision(WireModel):
     review_id: str = Field(pattern=r"^review-[0-9a-f]{24}$")
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "correct", "reject"]
+    corrected_requirement_id: str | None = Field(
+        default=None,
+        pattern=r"^req-[0-9a-f]{24}$",
+    )
+    corrected_value: str | None = Field(default=None, min_length=1, max_length=4096)
+    comment: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def correction_has_a_change(self) -> AgentReviewDecision:
+        if self.decision == "correct" and not (
+            self.corrected_requirement_id or self.corrected_value
+        ):
+            raise ValueError("a correction must change the target or value")
+        if self.decision != "correct" and (
+            self.corrected_requirement_id is not None or self.corrected_value is not None
+        ):
+            raise ValueError("only a correction may include a corrected target or value")
+        return self
 
 
 class AgentReviewRequest(WireModel):

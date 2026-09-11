@@ -19,6 +19,7 @@ from mia_dpp.models import (
     MappingStatus,
     ProductKnowledgePackage,
     SemanticMatchDecision,
+    SourceType,
 )
 from mia_dpp.templates import OfficialTemplateRepository
 from mia_dpp.url_policy import ProductUrlPolicy
@@ -127,16 +128,18 @@ def test_url_runs_tools_then_pauses_and_resumes_human_review() -> None:
     }
     assert pending.website_result.workflow_events[-1].stage == "reasoning.semantic"
 
+    decisions = tuple(
+        AgentReviewDecision(
+            review_id=item.id,
+            decision="approve" if item.id == proposal.id else "reject",
+        )
+        for item in pending.review_items
+    )
     completed = asyncio.run(
         agent.review(
             AgentReviewRequest(
                 thread_id=pending.thread_id,
-                decisions=(
-                    AgentReviewDecision(
-                        review_id=proposal.id,
-                        decision="approve",
-                    ),
-                ),
+                decisions=decisions,
             )
         )
     )
@@ -144,3 +147,87 @@ def test_url_runs_tools_then_pauses_and_resumes_human_review() -> None:
     assert completed.status is AgentRunStatus.COMPLETED
     assert completed.review_items[0].mapping.status is MappingStatus.APPROVED
     assert "1 semantic mapping approved" in completed.reply
+    assert completed.website_result is not None
+    assert proposal.mapping.evidence_id not in {
+        *completed.website_result.mapping_result.unmatched_evidence_ids,
+    }
+
+
+def test_chat_remains_available_without_consuming_pending_review() -> None:
+    reasoning = FakeReasoningService()
+    agent = workflow(reasoning)
+    pending = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))
+
+    reply = asyncio.run(
+        agent.message(
+            AgentMessageRequest(
+                thread_id=pending.thread_id,
+                message="No, 52161 would be an order number.",
+            )
+        )
+    )
+
+    assert reply.status is AgentRunStatus.AWAITING_REVIEW
+    assert [item.id for item in reply.review_items] == [item.id for item in pending.review_items]
+    assert reply.website_result == pending.website_result
+    assert reasoning.conversations[-1][-1].content == "No, 52161 would be an order number."
+
+
+def test_rejection_keeps_source_evidence_unmatched() -> None:
+    agent = workflow(FakeReasoningService())
+    pending = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))
+    rejected_ids = {item.mapping.evidence_id for item in pending.review_items}
+    completed = asyncio.run(
+        agent.review(
+            AgentReviewRequest(
+                thread_id=pending.thread_id,
+                decisions=tuple(
+                    AgentReviewDecision(review_id=item.id, decision="reject")
+                    for item in pending.review_items
+                ),
+            )
+        )
+    )
+
+    assert completed.website_result is not None
+    assert rejected_ids <= {item.id for item in completed.website_result.evidence}
+    assert rejected_ids <= set(completed.website_result.mapping_result.unmatched_evidence_ids)
+    assert all(item.mapping.status is MappingStatus.REJECTED for item in completed.review_items)
+
+
+def test_correction_uses_official_target_and_creates_human_evidence_for_new_value() -> None:
+    agent = workflow(FakeReasoningService())
+    pending = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))
+    assert pending.website_result is not None
+    selected = pending.review_items[0]
+    corrected_requirement = next(
+        item
+        for item in pending.website_result.coverage_report.inventory.requirements
+        if item.template_key == "digital_nameplate" and item.id_short == "ManufacturerProductFamily"
+    )
+    decisions = tuple(
+        AgentReviewDecision(
+            review_id=item.id,
+            decision="correct" if item.id == selected.id else "reject",
+            corrected_requirement_id=(corrected_requirement.id if item.id == selected.id else None),
+            corrected_value="TankControl 25 LTE" if item.id == selected.id else None,
+        )
+        for item in pending.review_items
+    )
+
+    completed = asyncio.run(
+        agent.review(AgentReviewRequest(thread_id=pending.thread_id, decisions=decisions))
+    )
+
+    assert completed.website_result is not None
+    corrected = next(item for item in completed.review_items if item.id == selected.id)
+    assert corrected.mapping.status is MappingStatus.APPROVED
+    assert corrected.mapping.target_element == "ManufacturerProductFamily"
+    assert corrected.mapping.source_value == "TankControl 25 LTE"
+    human = next(
+        item
+        for item in completed.website_result.evidence
+        if item.id == corrected.mapping.evidence_id
+    )
+    assert human.source_type is SourceType.HUMAN
+    assert selected.mapping.evidence_id in {item.id for item in completed.website_result.evidence}
