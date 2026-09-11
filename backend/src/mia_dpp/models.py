@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import (
@@ -57,6 +58,15 @@ class EvidenceStatus(StrEnum):
     VERIFIED = "verified"
     CONFLICTING = "conflicting"
     REJECTED = "rejected"
+
+
+class SourceType(StrEnum):
+    WEBSITE = "website"
+
+
+class WorkflowStatus(StrEnum):
+    DONE = "done"
+    FAILED = "failed"
 
 
 class ExtractionSource(StrEnum):
@@ -118,6 +128,44 @@ class SourceLocation(WireModel):
     cell: str | None = None
 
 
+class RawSourceArtifact(WireModel):
+    """Exact source acquired by an adapter, before facts or AAS semantics exist."""
+
+    id: str = Field(min_length=1)
+    source_uri: str = Field(min_length=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquired_at: AwareDatetime
+    media_type: str = Field(min_length=1)
+    source_type: SourceType
+    content: str = Field(min_length=1, repr=False, exclude=True)
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def hash_matches_content(self) -> RawSourceArtifact:
+        if sha256(self.content.encode("utf-8")).hexdigest() != self.content_sha256:
+            raise ValueError("source content does not match contentSha256")
+        return self
+
+
+class CandidateFact(WireModel):
+    """A useful source-labelled value before semantic mapping."""
+
+    id: str = Field(min_length=1)
+    source_artifact_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    value: JsonValue
+    unit: str | None = None
+    source_location: SourceLocation
+    extraction_method: str = Field(min_length=1)
+    raw_context: str | None = None
+
+    @model_validator(mode="after")
+    def fact_has_a_value(self) -> CandidateFact:
+        if self.value is None:
+            raise ValueError("candidate fact must contain a value")
+        return self
+
+
 class ConfidenceFactor(WireModel):
     """One visible contribution to a deterministic confidence score."""
 
@@ -165,6 +213,11 @@ class EvidenceRecord(WireModel):
 
     id: str = Field(min_length=1)
     predicate: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    source_label: str | None = None
+    canonical_predicate: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
     value: JsonValue
     unit: str | None = None
     source_uri: str = Field(min_length=1)
@@ -225,6 +278,7 @@ class ProductKnowledgePackage(WireModel):
 
     product_id: str = Field(min_length=1)
     product_name: str = Field(min_length=1)
+    source_artifact_ids: tuple[str, ...] = ()
     evidence: tuple[EvidenceRecord, ...]
 
     @model_validator(mode="after")
@@ -344,6 +398,42 @@ class FieldMapping(MappingDraft):
 
 class ProposedFieldMapping(MappingDraft):
     status: MappingStatus
+
+
+class MappingResult(WireModel):
+    """Downstream mapping outcome; unmatched evidence remains in the knowledge package."""
+
+    mapped: tuple[ProposedFieldMapping, ...] = ()
+    ambiguous: tuple[ProposedFieldMapping, ...] = ()
+    unmatched_evidence_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def evidence_outcomes_are_unique(self) -> MappingResult:
+        identifiers = [item.evidence_id for item in (*self.mapped, *self.ambiguous)]
+        identifiers.extend(self.unmatched_evidence_ids)
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("an evidence record must have exactly one mapping outcome")
+        return self
+
+
+class WorkflowEvent(WireModel):
+    """Framework-neutral record of one execution stage that actually ran."""
+
+    id: str = Field(min_length=1)
+    stage: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    status: WorkflowStatus
+    started_at: AwareDatetime
+    completed_at: AwareDatetime
+    input_count: int = Field(ge=0)
+    output_count: int = Field(ge=0)
+    summary: str = Field(min_length=1)
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def completion_follows_start(self) -> WorkflowEvent:
+        if self.completed_at < self.started_at:
+            raise ValueError("workflow event completedAt cannot precede startedAt")
+        return self
 
 
 class ApprovedMapping(WireModel):
@@ -502,8 +592,20 @@ class WebsiteIngestResponse(WireModel):
     source_url: str
     proposal: MappingProposal
     evidence: tuple[EvidenceRecord, ...]
+    knowledge_package: ProductKnowledgePackage
+    mapping_result: MappingResult
+    workflow_events: tuple[WorkflowEvent, ...]
     mode: Literal["website"] = "website"
     nameplate_elements: tuple[NameplateElement, ...]
+
+    @model_validator(mode="after")
+    def legacy_evidence_matches_knowledge_package(self) -> WebsiteIngestResponse:
+        if self.evidence != self.knowledge_package.evidence:
+            raise ValueError("evidence must match knowledgePackage.evidence")
+        proposal = (*self.mapping_result.mapped, *self.mapping_result.ambiguous)
+        if self.proposal.mappings != proposal:
+            raise ValueError("proposal mappings must match mappingResult")
+        return self
 
 
 class DppBuildRequest(WireModel):
