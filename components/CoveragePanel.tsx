@@ -65,7 +65,10 @@ export function CoveragePanel({
 
       {report.inventory.selectedTemplates.map((template) => {
         const requirements = report.inventory.requirements.filter(
-          (item) => item.templateKey === template.key
+          (item) =>
+            item.templateKey === template.key &&
+            item.kind === "value" &&
+            !item.wildcard
         );
         return (
           <section key={`${template.key}-${template.release}`}>
@@ -79,7 +82,7 @@ export function CoveragePanel({
                 </p>
               </div>
               <span className="font-mono text-[11px] text-muted">
-                {requirements.length} requirements
+                {requirements.length} fixed value fields
               </span>
             </div>
             <div className="space-y-3">

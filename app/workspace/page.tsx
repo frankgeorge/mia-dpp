@@ -66,6 +66,7 @@ export default function Workspace() {
   >([]);
   const [mode, setMode] = useState<string>("");
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
   const [semanticReview, setSemanticReview] = useState<SemanticReviewItem[]>([]);
   const [reviewDecisions, setReviewDecisions] = useState<
     Record<string, AgentReviewDecision>
@@ -123,6 +124,7 @@ export default function Workspace() {
       }
       const data = body as AgentResponse;
       setThreadId(data.threadId);
+      setAgentStatus(data.status);
       setMode(data.mode);
       if (data.websiteResult && semanticReview.length === 0) {
         applyAgentWebsiteResult(data);
@@ -180,6 +182,7 @@ export default function Workspace() {
       }
       const data = body as AgentResponse;
       setThreadId(data.threadId);
+      setAgentStatus(data.status);
       setMode(data.mode);
       applyAgentWebsiteResult(data);
       setWebsiteUrl("");
@@ -259,6 +262,7 @@ export default function Workspace() {
         throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${response.status}`);
       }
       const data = body as AgentResponse;
+      setAgentStatus(data.status);
       applyAgentWebsiteResult(data);
       setSemanticReview([]);
       setReviewDecisions({});
@@ -365,6 +369,13 @@ export default function Workspace() {
         m.status === "rejected" ? m : { ...m, status: "approved" }
       )
     );
+    setReviewDecisions((previous) => {
+      const next = { ...previous };
+      for (const item of semanticReview) {
+        next[item.id] = { reviewId: item.id, decision: "approve" };
+      }
+      return next;
+    });
   }
 
   async function generate(
@@ -527,6 +538,22 @@ export default function Workspace() {
                   </div>
                 </div>
               ))}
+              {agentStatus === "awaiting_optional_choice" && !busy && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => void send("Continue with current data")}
+                    className="rounded-full bg-ink px-4 py-2 text-[12px] font-medium text-white"
+                  >
+                    Continue with current data
+                  </button>
+                  <button
+                    onClick={() => void send("Add optional information")}
+                    className="rounded-full border border-hairline bg-white px-4 py-2 text-[12px] font-medium text-ink"
+                  >
+                    Add optional information
+                  </button>
+                </div>
+              )}
               {busy && (
                 <div className="flex gap-1.5 py-2 pl-2">
                   {[0, 1, 2].map((i) => (
@@ -640,7 +667,11 @@ export default function Workspace() {
                   )}
                   {t === "coverage" && coverageReport && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
-                      {coverageReport.statistics.requirements}
+                      {completionSummary?.fixedTemplates.reduce(
+                        (total, item) =>
+                          total + item.mandatoryTotal + item.optionalTotal,
+                        0
+                      ) ?? coverageReport.statistics.requirements}
                     </span>
                   )}
                   {t === "graph" && graph.length > 0 && (

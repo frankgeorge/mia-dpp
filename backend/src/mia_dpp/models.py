@@ -85,6 +85,8 @@ class CoverageStatus(StrEnum):
 class AgentRunStatus(StrEnum):
     COMPLETED = "completed"
     AWAITING_REVIEW = "awaiting_review"
+    AWAITING_INPUT = "awaiting_input"
+    AWAITING_OPTIONAL_CHOICE = "awaiting_optional_choice"
 
 
 class ExtractionSource(StrEnum):

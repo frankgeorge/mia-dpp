@@ -68,6 +68,15 @@ class WebsiteFactExtractor:
                 location=SourceLocation(selector="title", excerpt=value[:240]),
             )
 
+        self._append(
+            facts,
+            source,
+            label="Product page URL",
+            value=source.source_uri,
+            method="source_metadata",
+            location=SourceLocation(excerpt=source.source_uri[:240]),
+        )
+
         for index, term in enumerate(soup.find_all("dt")):
             value_node = term.find_next_sibling("dd")
             if value_node is not None:

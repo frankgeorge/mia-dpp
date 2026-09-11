@@ -76,6 +76,15 @@ class FakeReasoningService:
         )
 
 
+class NoProposalReasoningService(FakeReasoningService):
+    async def propose_semantic_matches(
+        self,
+        package: ProductKnowledgePackage,
+        coverage: CoverageReport,
+    ) -> tuple[SemanticMatchDecision, ...]:
+        return ()
+
+
 def workflow(reasoning: FakeReasoningService) -> MiaAgentWorkflow:
     repository = OfficialTemplateRepository()
     website = WebsiteIngestionService(
@@ -144,9 +153,9 @@ def test_url_runs_tools_then_pauses_and_resumes_human_review() -> None:
         )
     )
 
-    assert completed.status is AgentRunStatus.COMPLETED
+    assert completed.status is AgentRunStatus.AWAITING_INPUT
     assert completed.review_items[0].mapping.status is MappingStatus.APPROVED
-    assert "1 semantic mapping approved" in completed.reply
+    assert "finished processing" in completed.reply
     assert completed.website_result is not None
     assert proposal.mapping.evidence_id not in {
         *completed.website_result.mapping_result.unmatched_evidence_ids,
@@ -171,6 +180,37 @@ def test_chat_remains_available_without_consuming_pending_review() -> None:
     assert [item.id for item in reply.review_items] == [item.id for item in pending.review_items]
     assert reply.website_result == pending.website_result
     assert reasoning.conversations[-1][-1].content == "No, 52161 would be an order number."
+
+
+def test_source_review_finishes_before_optional_or_missing_field_questions() -> None:
+    agent = workflow(FakeReasoningService())
+    review = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))
+    assert review.status is AgentRunStatus.AWAITING_REVIEW
+    assert "review" in review.reply.casefold()
+
+    completed_source = asyncio.run(
+        agent.review(
+            AgentReviewRequest(
+                thread_id=review.thread_id,
+                decisions=tuple(
+                    AgentReviewDecision(review_id=item.id, decision="approve")
+                    for item in review.review_items
+                ),
+            )
+        )
+    )
+
+    assert completed_source.status is AgentRunStatus.AWAITING_OPTIONAL_CHOICE
+    assert completed_source.website_result is not None
+    nameplate = next(
+        item
+        for item in completed_source.website_result.completion_summary.fixed_templates
+        if item.template_key == "digital_nameplate"
+    )
+    assert nameplate.mandatory_missing == 0
+    assert not any(
+        item.source_type is SourceType.HUMAN for item in completed_source.website_result.evidence
+    )
 
 
 def test_rejection_keeps_source_evidence_unmatched() -> None:
@@ -231,3 +271,102 @@ def test_correction_uses_official_target_and_creates_human_evidence_for_new_valu
     )
     assert human.source_type is SourceType.HUMAN
     assert selected.mapping.evidence_id in {item.id for item in completed.website_result.evidence}
+
+
+def test_missing_mandatory_answers_become_evidence_and_resume_same_thread() -> None:
+    class SparseLoader:
+        async def load(self, url: str) -> RenderedPage:
+            return RenderedPage(
+                url=url,
+                html="""
+                <html><head><title>Controller</title></head><body>
+                  <dl><dt>Manufacturer</dt><dd>Example GmbH</dd></dl>
+                </body></html>
+                """,
+            )
+
+    repository = OfficialTemplateRepository()
+    agent = MiaAgentWorkflow(
+        repository,
+        WebsiteIngestionService(
+            repository,
+            loader=SparseLoader(),
+            url_policy=ProductUrlPolicy(public_resolver),
+        ),
+        NoProposalReasoningService(),
+    )
+
+    review = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))
+    assert review.status is AgentRunStatus.AWAITING_REVIEW
+    first = asyncio.run(
+        agent.review(
+            AgentReviewRequest(
+                thread_id=review.thread_id,
+                decisions=tuple(
+                    AgentReviewDecision(review_id=item.id, decision="approve")
+                    for item in review.review_items
+                ),
+            )
+        )
+    )
+    assert first.status is AgentRunStatus.AWAITING_INPUT
+    assert "manufacturer product designation" in first.reply.casefold()
+
+    second = asyncio.run(
+        agent.message(
+            AgentMessageRequest(
+                thread_id=first.thread_id,
+                message="Controller X",
+            )
+        )
+    )
+    assert second.thread_id == first.thread_id
+    assert second.status is AgentRunStatus.AWAITING_INPUT
+    assert second.website_result is not None
+    human = [
+        item for item in second.website_result.evidence if item.source_type is SourceType.HUMAN
+    ]
+    assert len(human) == 1
+    assert human[0].value == "Controller X"
+    assert "manufacturer product designation" not in second.reply.casefold()
+
+    third = asyncio.run(
+        agent.message(
+            AgentMessageRequest(
+                thread_id=first.thread_id,
+                message="ORDER-42",
+            )
+        )
+    )
+    assert third.status is AgentRunStatus.AWAITING_OPTIONAL_CHOICE
+    assert third.website_result is not None
+    assert third.website_result.completion_summary.fixed_templates[0].mandatory_missing == 0
+
+    ready = asyncio.run(
+        agent.message(
+            AgentMessageRequest(
+                thread_id=first.thread_id,
+                message="Continue with current data",
+            )
+        )
+    )
+    assert ready.status is AgentRunStatus.COMPLETED
+    assert ready.thread_id == first.thread_id
+
+
+def test_unavailable_answer_is_not_asked_repeatedly() -> None:
+    agent = workflow(FakeReasoningService())
+    pending = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))
+    decisions = tuple(
+        AgentReviewDecision(review_id=item.id, decision="reject") for item in pending.review_items
+    )
+    question = asyncio.run(
+        agent.review(AgentReviewRequest(thread_id=pending.thread_id, decisions=decisions))
+    )
+    assert question.status is AgentRunStatus.AWAITING_INPUT
+    first_question = question.reply
+
+    next_question = asyncio.run(
+        agent.message(AgentMessageRequest(thread_id=pending.thread_id, message="unavailable"))
+    )
+    assert next_question.reply != first_question

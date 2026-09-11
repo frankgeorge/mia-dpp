@@ -15,7 +15,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from mia_dpp.completion import build_completion_summary
+from mia_dpp.completion import actionable_fixed_requirements, build_completion_summary
 from mia_dpp.confidence import (
     MatchQuality,
     ValueFormatQuality,
@@ -36,6 +36,7 @@ from mia_dpp.models import (
     MappingResult,
     MappingStatus,
     ProposedFieldMapping,
+    Requirement,
     SemanticReviewItem,
     SourceLocation,
     SourceType,
@@ -62,7 +63,16 @@ class AgentState(TypedDict, total=False):
     website_url: str
     website_result: dict[str, Any] | None
     review_items: list[dict[str, Any]]
-    status: Literal["completed", "awaiting_review"]
+    status: Literal[
+        "completed",
+        "awaiting_review",
+        "awaiting_input",
+        "awaiting_optional_choice",
+    ]
+    active_requirement_id: str
+    completion_phase: Literal["mandatory", "optional"]
+    asked_requirement_ids: list[str]
+    optional_enabled: bool
 
 
 class MiaAgentWorkflow:
@@ -94,17 +104,46 @@ class MiaAgentWorkflow:
         builder.add_conditional_edges(
             "semantic_resolution",
             self._after_semantics,
-            {"review": "human_review", "done": END},
+            {"review": "human_review", "completion": "assess_completion"},
         )
-        builder.add_edge("human_review", END)
+        builder.add_edge("human_review", "assess_completion")
+        builder.add_node("assess_completion", self._assess_completion)
+        builder.add_node("human_completion", self._human_completion)
+        builder.add_node("optional_choice", self._optional_choice)
+        builder.add_conditional_edges(
+            "assess_completion",
+            self._after_completion_assessment,
+            {
+                "input": "human_completion",
+                "optional": "optional_choice",
+                "done": END,
+            },
+        )
+        builder.add_edge("human_completion", "assess_completion")
+        builder.add_conditional_edges(
+            "optional_choice",
+            self._after_optional_choice,
+            {"input": "human_completion", "done": END},
+        )
         self._graph = builder.compile(checkpointer=InMemorySaver())
 
     async def message(self, request: AgentMessageRequest) -> AgentResponse:
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
         if request.thread_id:
             snapshot = await self._graph.aget_state(self._config(thread_id))
-            if snapshot.next and snapshot.values.get("review_items"):
-                return await self._message_during_review(thread_id, request, snapshot.values)
+            if snapshot.next:
+                if "human_review" in snapshot.next and snapshot.values.get("review_items"):
+                    return await self._message_during_review(thread_id, request, snapshot.values)
+                if "human_completion" in snapshot.next:
+                    return await self._resume_with_message(
+                        thread_id,
+                        {"answer": request.message},
+                    )
+                if "optional_choice" in snapshot.next:
+                    return await self._resume_with_message(
+                        thread_id,
+                        {"choice": request.message},
+                    )
         state: AgentState = {
             "messages": [{"role": "user", "content": request.message}],
             "user_message": request.message,
@@ -112,9 +151,22 @@ class MiaAgentWorkflow:
             "configured": self._reasoning.configured,
             "website_result": None,
             "review_items": [],
+            "asked_requirement_ids": [],
+            "optional_enabled": False,
             "status": "completed",
         }
         result = await self._graph.ainvoke(state, self._config(thread_id))
+        return self._response(thread_id, result)
+
+    async def _resume_with_message(
+        self,
+        thread_id: str,
+        payload: dict[str, str],
+    ) -> AgentResponse:
+        result = await self._graph.ainvoke(
+            Command(resume=payload),
+            self._config(thread_id),
+        )
         return self._response(thread_id, result)
 
     async def _message_during_review(
@@ -271,6 +323,39 @@ class MiaAgentWorkflow:
             already_used.add(record.id)
             existing_paths.add(target.instance_path)
 
+        if review_items:
+            existing_outcome_ids = {
+                item.evidence_id
+                for item in (
+                    *website.mapping_result.mapped,
+                    *website.mapping_result.ambiguous,
+                )
+            }
+            semantic_review_mappings = tuple(
+                item.mapping
+                for item in review_items
+                if item.mapping.evidence_id not in existing_outcome_ids
+            )
+            reviewed_ids = {
+                item.mapping.evidence_id for item in review_items
+            } | existing_outcome_ids
+            summary_result = MappingResult(
+                mapped=(*website.mapping_result.mapped, *semantic_review_mappings),
+                ambiguous=website.mapping_result.ambiguous,
+                unmatched_evidence_ids=tuple(
+                    item.id for item in website.evidence if item.id not in reviewed_ids
+                ),
+            )
+            website = website.model_copy(
+                update={
+                    "completion_summary": build_completion_summary(
+                        website.coverage_report,
+                        summary_result,
+                        website.evidence,
+                    )
+                }
+            )
+
         semantic_event = completed_event(
             stage="reasoning.semantic",
             started_at=started_at,
@@ -319,8 +404,8 @@ class MiaAgentWorkflow:
             "status": "completed",
         }
 
-    async def _after_semantics(self, state: AgentState) -> Literal["review", "done"]:
-        return "review" if state.get("review_items") else "done"
+    async def _after_semantics(self, state: AgentState) -> Literal["review", "completion"]:
+        return "review" if state.get("review_items") else "completion"
 
     async def _human_review(self, state: AgentState) -> AgentState:
         items = tuple(SemanticReviewItem.model_validate(item) for item in state["review_items"])
@@ -357,6 +442,171 @@ class MiaAgentWorkflow:
             "messages": [{"role": "assistant", "content": reply}],
             "status": "completed",
         }
+
+    async def _assess_completion(self, state: AgentState) -> AgentState:
+        website = WebsiteIngestResponse.model_validate(state["website_result"])
+        asked = set(state.get("asked_requirement_ids", []))
+        mandatory = self._unfilled_requirements(website, required=True, asked=asked)
+        if mandatory:
+            requirement = mandatory[0]
+            summary = website.completion_summary
+            nameplate = next(
+                (
+                    item
+                    for item in summary.fixed_templates
+                    if item.template_key == "digital_nameplate"
+                ),
+                summary.fixed_templates[0],
+            )
+            label = self._requirement_label(requirement)
+            return {
+                "active_requirement_id": requirement.id,
+                "completion_phase": "mandatory",
+                "reply": (
+                    "I have finished processing the available source information. "
+                    f"Mandatory fields: {nameplate.mandatory_filled} / "
+                    f"{nameplate.mandatory_total} filled. I could not establish "
+                    f"{label}. What is the {label}?"
+                ),
+                "status": "awaiting_input",
+            }
+
+        unresolved_mandatory = self._unfilled_requirements(
+            website,
+            required=True,
+            asked=set(),
+        )
+        if unresolved_mandatory:
+            return {
+                "reply": (
+                    "Source processing is complete, but the remaining mandatory fields were "
+                    "marked unavailable. MIA preserved those gaps and will not ask again in "
+                    "this session."
+                ),
+                "status": "completed",
+            }
+
+        if state.get("optional_enabled", False):
+            optional = self._unfilled_requirements(website, required=False, asked=asked)
+            if optional:
+                requirement = optional[0]
+                label = self._requirement_label(requirement)
+                return {
+                    "active_requirement_id": requirement.id,
+                    "completion_phase": "optional",
+                    "reply": f"Optional field: what is the {label}?",
+                    "status": "awaiting_input",
+                }
+            return {
+                "reply": "The selected optional fields are complete. MIA is ready to compile.",
+                "status": "completed",
+            }
+
+        summary = website.completion_summary
+        nameplate = next(
+            (item for item in summary.fixed_templates if item.template_key == "digital_nameplate"),
+            summary.fixed_templates[0],
+        )
+        return {
+            "reply": (
+                "All mandatory information is available. "
+                f"Mandatory: {nameplate.mandatory_filled} / {nameplate.mandatory_total}. "
+                f"Optional: {nameplate.optional_filled} / {nameplate.optional_total}. "
+                "Continue with current data, or add optional information?"
+            ),
+            "status": "awaiting_optional_choice",
+        }
+
+    async def _after_completion_assessment(
+        self,
+        state: AgentState,
+    ) -> Literal["input", "optional", "done"]:
+        if state["status"] == "awaiting_input":
+            return "input"
+        if state["status"] == "awaiting_optional_choice":
+            return "optional"
+        return "done"
+
+    async def _human_completion(self, state: AgentState) -> AgentState:
+        payload = interrupt(
+            {
+                "type": "requirement_answer",
+                "requirementId": state["active_requirement_id"],
+                "phase": state["completion_phase"],
+            }
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("answer"), str):
+            raise ValueError("a human answer is required")
+        answer = payload["answer"].strip()
+        website = WebsiteIngestResponse.model_validate(state["website_result"])
+        requirements = {item.id: item for item in website.coverage_report.inventory.requirements}
+        requirement = requirements[state["active_requirement_id"]]
+        asked = set(state.get("asked_requirement_ids", []))
+        asked.update(self._same_concept_requirement_ids(website, requirement))
+
+        if self._answer_is_unavailable(answer):
+            return {
+                "asked_requirement_ids": sorted(asked),
+                "messages": [{"role": "user", "content": answer}],
+                "reply": (
+                    f"I recorded {self._requirement_label(requirement)} as unavailable and "
+                    "will preserve the gap rather than ask repeatedly."
+                ),
+            }
+        if not answer:
+            return {
+                "reply": f"Please provide a value for {self._requirement_label(requirement)}.",
+                "status": "awaiting_input",
+            }
+
+        website = self._accept_human_answer(website, requirement, answer)
+        return {
+            "website_result": website.model_dump(mode="json"),
+            "asked_requirement_ids": sorted(asked),
+            "messages": [{"role": "user", "content": answer}],
+            "reply": f"I validated and retained {self._requirement_label(requirement)}.",
+        }
+
+    async def _optional_choice(self, state: AgentState) -> AgentState:
+        payload = interrupt(
+            {
+                "type": "optional_completion_choice",
+                "choices": ["continue", "add_optional"],
+            }
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("choice"), str):
+            raise ValueError("an optional completion choice is required")
+        choice = payload["choice"].strip().casefold()
+        if "optional" not in choice and not choice.startswith("add"):
+            return {
+                "reply": "Continuing with the current evidence. MIA is ready to compile.",
+                "messages": [{"role": "user", "content": payload["choice"]}],
+                "status": "completed",
+            }
+
+        website = WebsiteIngestResponse.model_validate(state["website_result"])
+        optional = self._unfilled_requirements(
+            website,
+            required=False,
+            asked=set(state.get("asked_requirement_ids", [])),
+        )
+        if not optional:
+            return {
+                "reply": "No applicable optional fixed fields remain. MIA is ready to compile.",
+                "status": "completed",
+            }
+        requirement = optional[0]
+        return {
+            "optional_enabled": True,
+            "active_requirement_id": requirement.id,
+            "completion_phase": "optional",
+            "reply": f"Optional field: what is the {self._requirement_label(requirement)}?",
+            "messages": [{"role": "user", "content": payload["choice"]}],
+            "status": "awaiting_input",
+        }
+
+    async def _after_optional_choice(self, state: AgentState) -> Literal["input", "done"]:
+        return "input" if state["status"] == "awaiting_input" else "done"
 
     def _apply_review_decision(
         self,
@@ -451,7 +701,7 @@ class MiaAgentWorkflow:
         base = [
             item
             for item in (*website.mapping_result.mapped, *website.mapping_result.ambiguous)
-            if item.status is MappingStatus.AUTO
+            if item.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
         ]
         approved = [
             item.mapping for item in reviewed if item.mapping.status is MappingStatus.APPROVED
@@ -469,9 +719,183 @@ class MiaAgentWorkflow:
                 "proposal": website.proposal.model_copy(update={"mappings": result.mapped}),
                 "mapping_result": result,
                 "coverage_report": coverage,
-                "completion_summary": build_completion_summary(coverage, result),
+                "completion_summary": build_completion_summary(
+                    coverage,
+                    result,
+                    website.knowledge_package.evidence,
+                    rejected_evidence_ids={
+                        item.mapping.evidence_id
+                        for item in reviewed
+                        if item.mapping.status is MappingStatus.REJECTED
+                    },
+                ),
             }
         )
+
+    def _accept_human_answer(
+        self,
+        website: WebsiteIngestResponse,
+        requirement: Requirement,
+        answer: str,
+    ) -> WebsiteIngestResponse:
+        if requirement.semantic_id is None or requirement.wildcard:
+            raise ValueError("human completion requires a fixed semantic target")
+        acquired_at = datetime.now(UTC)
+        identity = f"{requirement.id}\0{answer}\0{acquired_at.isoformat()}"
+        evidence = EvidenceRecord(
+            id="ev-human-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
+            predicate="human.requirement_answer",
+            source_label=requirement.id_short or self._requirement_label(requirement),
+            canonical_predicate=None,
+            value=answer,
+            source_type=SourceType.HUMAN,
+            source_uri=f"mia://conversation/requirement/{requirement.id}",
+            source_content_sha256=hashlib.sha256(answer.encode()).hexdigest(),
+            source_location=SourceLocation(excerpt=answer),
+            extraction_method="human_requirement_answer",
+            extractor_name="mia-human-completion",
+            extractor_version="1",
+            status=EvidenceStatus.VERIFIED,
+            acquired_at=acquired_at,
+        )
+        target = mapping_target(
+            self._repository.load(requirement.template_key),
+            requirement.template_path,
+        )
+        assessment = assess_mapping_confidence(
+            source_label=MatchQuality.EXACT,
+            value_format=ValueFormatQuality.VALID,
+            semantic_match=MatchQuality.EXACT,
+            destination_candidates=1,
+        )
+        mapping = ProposedFieldMapping(
+            evidence_id=evidence.id,
+            source_field=f"Human answer: {self._requirement_label(requirement)}",
+            source_value=answer,
+            target_element=target.id_short,
+            semantic_id=target.semantic_id.primary_value,
+            target=target,
+            confidence=assessment.score,
+            confidence_assessment=assessment,
+            reasoning=(
+                "The human supplied this value for the explicit official requirement; "
+                "MIA validated the target against the pinned template."
+            ),
+            status=MappingStatus.APPROVED,
+        )
+        package = website.knowledge_package.model_copy(
+            update={"evidence": (*website.knowledge_package.evidence, evidence)}
+        )
+        accepted = [
+            item
+            for item in (*website.mapping_result.mapped, *website.mapping_result.ambiguous)
+            if item.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
+        ]
+        accepted.append(mapping)
+        mapped_ids = {item.evidence_id for item in accepted}
+        result = MappingResult(
+            mapped=tuple(accepted),
+            unmatched_evidence_ids=tuple(
+                item.id for item in package.evidence if item.id not in mapped_ids
+            ),
+        )
+        coverage = self._coverage_analyzer.analyze(
+            package,
+            website.coverage_report.inventory,
+            mapping_result=result,
+        )
+        return website.model_copy(
+            update={
+                "evidence": package.evidence,
+                "knowledge_package": package,
+                "proposal": website.proposal.model_copy(update={"mappings": result.mapped}),
+                "mapping_result": result,
+                "coverage_report": coverage,
+                "completion_summary": build_completion_summary(
+                    coverage,
+                    result,
+                    package.evidence,
+                ),
+            }
+        )
+
+    @staticmethod
+    def _unfilled_requirements(
+        website: WebsiteIngestResponse,
+        *,
+        required: bool,
+        asked: set[str],
+    ) -> list[Requirement]:
+        accepted_targets = {
+            (
+                item.target.template_key,
+                item.target.template_release,
+                item.target.template_path,
+            )
+            for item in (
+                *website.mapping_result.mapped,
+                *website.mapping_result.ambiguous,
+            )
+            if item.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
+        }
+        candidates = [
+            item
+            for item in actionable_fixed_requirements(website.coverage_report)
+            # The current deterministic compiler targets Digital Nameplate only.
+            # Other selected templates remain analyzed, but are not interview gates yet.
+            if item.template_key == "digital_nameplate"
+            and item.required is required
+            and item.id not in asked
+            and (item.template_key, item.template_release, item.template_path)
+            not in accepted_targets
+        ]
+        candidates.sort(
+            key=lambda item: (
+                item.template_key != "digital_nameplate",
+                len(item.template_path),
+                item.template_path,
+            )
+        )
+        unique: list[Requirement] = []
+        concepts: set[str] = set()
+        for item in candidates:
+            concept = (item.id_short or "/".join(item.template_path)).casefold()
+            if concept not in concepts:
+                concepts.add(concept)
+                unique.append(item)
+        return unique
+
+    @staticmethod
+    def _same_concept_requirement_ids(
+        website: WebsiteIngestResponse,
+        selected: Requirement,
+    ) -> set[str]:
+        concept = (selected.id_short or "/".join(selected.template_path)).casefold()
+        return {
+            item.id
+            for item in actionable_fixed_requirements(website.coverage_report)
+            if (item.id_short or "/".join(item.template_path)).casefold() == concept
+        }
+
+    @staticmethod
+    def _answer_is_unavailable(answer: str) -> bool:
+        normalized = " ".join(answer.casefold().strip(". ").split())
+        return normalized in {
+            "unknown",
+            "unavailable",
+            "not available",
+            "not applicable",
+            "n/a",
+            "na",
+            "i don't know",
+            "i do not know",
+        }
+
+    @staticmethod
+    def _requirement_label(requirement: Requirement) -> str:
+        raw = requirement.id_short or requirement.template_path[-1]
+        words = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", raw)
+        return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", words).casefold()
 
     def _response(self, thread_id: str, state: dict[str, Any]) -> AgentResponse:
         website = state.get("website_result")

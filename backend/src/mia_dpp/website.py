@@ -171,7 +171,11 @@ class WebsiteIngestionService:
             inventory,
             mapping_result=mapping_result,
         )
-        completion_summary = build_completion_summary(coverage_report, mapping_result)
+        completion_summary = build_completion_summary(
+            coverage_report,
+            mapping_result,
+            package.evidence,
+        )
         statistics = coverage_report.statistics
         events.append(
             completed_event(

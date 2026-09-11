@@ -328,7 +328,11 @@ export interface AgentReviewDecision {
 export interface AgentResponse {
   threadId: string;
   reply: string;
-  status: "completed" | "awaiting_review";
+  status:
+    | "completed"
+    | "awaiting_review"
+    | "awaiting_input"
+    | "awaiting_optional_choice";
   mode: "agent" | "configuration_required";
   websiteResult: WebsiteIngestResponse | null;
   reviewItems: SemanticReviewItem[];

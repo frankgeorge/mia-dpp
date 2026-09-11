@@ -6,7 +6,8 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar, Protocol
 
 from mia_dpp.chat import CONFIDENCE_THRESHOLD
-from mia_dpp.idta import demo_propose
+from mia_dpp.confidence import MatchQuality, ValueFormatQuality, assess_mapping_confidence
+from mia_dpp.idta import demo_propose, mapping_target
 from mia_dpp.models import (
     EvidenceRecord,
     MappingResult,
@@ -64,6 +65,36 @@ class DeterministicWebsiteMapper:
 
         for record in evidence:
             label = record.source_label or record.predicate
+            if label.casefold() == "product page url":
+                target = mapping_target(
+                    self._repository.load("digital_nameplate"),
+                    ("Nameplate", "URIOfTheProduct"),
+                )
+                assessment = assess_mapping_confidence(
+                    source_label=MatchQuality.EXACT,
+                    value_format=ValueFormatQuality.VALID,
+                    semantic_match=MatchQuality.EXACT,
+                    destination_candidates=1,
+                )
+                mapped.append(
+                    ProposedFieldMapping(
+                        evidence_id=record.id,
+                        source_field=label,
+                        source_value=str(record.value),
+                        target_element=target.id_short,
+                        semantic_id=target.semantic_id.primary_value,
+                        target=target,
+                        confidence=assessment.score,
+                        confidence_assessment=assessment,
+                        reasoning=(
+                            "The acquired public product-page URL supplies the official product "
+                            "URI field directly."
+                        ),
+                        status=MappingStatus.AUTO,
+                    )
+                )
+                claimed_targets.add(target.instance_path)
+                continue
             mapping_label = self._LABEL_ALIASES.get(label.casefold())
             value = str(record.value)
             draft = demo_propose(

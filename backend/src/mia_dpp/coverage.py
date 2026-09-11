@@ -46,6 +46,7 @@ _STRONG_ALIASES: dict[str, frozenset[str]] = {
     "model": frozenset({"manufacturer product designation"}),
     "designation": frozenset({"manufacturer product designation"}),
     "product designation": frozenset({"manufacturer product designation"}),
+    "product page url": frozenset({"uri of the product"}),
     "serial number": frozenset({"serial number"}),
     "year of construction": frozenset({"year of construction"}),
     "country of origin": frozenset({"country of origin"}),

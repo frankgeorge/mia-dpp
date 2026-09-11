@@ -201,7 +201,7 @@ export function MappingRow({
           onClick={() => onDecide(m.id, "approved")}
           className="mt-2.5 font-mono text-[11px] text-muted underline underline-offset-2"
         >
-          Discarded · undo
+          Rejected · undo
         </button>
       )}
     </div>

@@ -302,6 +302,31 @@ def test_mapping_failure_never_deletes_or_collapses_evidence() -> None:
     assert response.knowledge_package.evidence == response.evidence
 
 
+def test_repeated_technical_concepts_keep_component_context() -> None:
+    page = RenderedPage(
+        url=PRODUCT_URL,
+        html="""
+        <html><head><title>Controller</title></head><body>
+          <table><caption>Probe</caption>
+            <tr><th>Degree of protection</th><td>IP68</td></tr>
+          </table>
+          <table><caption>Control unit</caption>
+            <tr><th>Degree of protection</th><td>IP54</td></tr>
+          </table>
+        </body></html>
+        """,
+        acquired_at=ACQUIRED_AT,
+    )
+    source = raw_website_artifact(page)
+    facts, _ = WebsiteFactExtractor().extract(source)
+    protection = [item for item in facts if item.label == "Degree of protection"]
+
+    assert [(item.value, item.source_location.table) for item in protection] == [
+        ("IP68", "Probe"),
+        ("IP54", "Control unit"),
+    ]
+
+
 def test_website_does_not_treat_footer_year_as_construction_year() -> None:
     page = RenderedPage(
         url=PRODUCT_URL,
