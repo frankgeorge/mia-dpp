@@ -41,20 +41,6 @@ class _ExtractedValue:
     location: SourceLocation
 
 
-class AdapterWebsiteExtractor:
-    """Execute an approved site adapter with an injected page loader."""
-
-    def __init__(self, loader: PageLoader) -> None:
-        self._loader = loader
-
-    async def extract_url(
-        self,
-        url: str,
-        spec: SiteAdapterSpec,
-    ) -> tuple[EvidenceRecord, ...]:
-        return await HtmlEvidenceExtractor(spec).extract_url(url, self._loader)
-
-
 class HtmlEvidenceExtractor:
     """Apply one reviewed ``SiteAdapterSpec`` without invoking an LLM."""
 

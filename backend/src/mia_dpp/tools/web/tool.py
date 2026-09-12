@@ -21,15 +21,11 @@ class WebExtractionTool:
     def __init__(
         self,
         *,
-        loader: PageLoader | None = None,
+        loader: PageLoader,
         url_policy: ProductUrlPolicy | None = None,
         fact_extractor: WebsiteFactExtractor | None = None,
         evidence_normalizer: EvidenceNormalizer | None = None,
     ) -> None:
-        if loader is None:
-            from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
-
-            loader = Crawl4AIPageLoader()
         self._loader = loader
         self._url_policy = url_policy or ProductUrlPolicy()
         self._fact_extractor = fact_extractor or WebsiteFactExtractor()

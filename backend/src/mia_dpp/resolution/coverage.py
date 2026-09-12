@@ -6,7 +6,6 @@ import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
 
 from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
 from mia_dpp.domain.mappings import (
@@ -48,17 +47,6 @@ _STRONG_ALIASES: dict[str, frozenset[str]] = {
     "year of construction": frozenset({"year of construction"}),
     "country of origin": frozenset({"country of origin"}),
 }
-
-
-class CoverageResolutionStrategy(Protocol):
-    """Future seam for semantic or human resolution of unresolved coverage."""
-
-    async def resolve(
-        self,
-        unresolved: Sequence[RequirementCoverage],
-        candidate_evidence: Sequence[EvidenceRecord],
-        inventory: RequirementInventory,
-    ) -> tuple[RequirementCoverage, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)

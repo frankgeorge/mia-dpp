@@ -9,7 +9,7 @@ backend in this order:
 4. `mia_dpp/agent/nodes/` — intake, web extraction, resolution, review, and completion steps.
 5. `mia_dpp/llm/chat.py` — conversational reasoning.
 6. `mia_dpp/llm/semantic.py` — conservative semantic proposals for human review.
-7. `mia_dpp/tools/` — capabilities an agent can invoke, currently web and documents.
+7. `mia_dpp/tools/` — source capabilities, with web extraction used by the current agent.
 8. `mia_dpp/resolution/` — deterministic evidence-to-target mapping and coverage.
 9. `mia_dpp/aas/` — official templates, requirement inventory, compilation, and validation.
 10. `mia_dpp/integrations/` — vendor-specific OpenRouter, Crawl4AI, and BaSyx code.
@@ -31,3 +31,6 @@ source → evidence → resolution → human review → approved mapping → AAS
 ```
 
 Web extraction never assigns authoritative AAS semantics, and unmatched evidence is retained.
+
+The document extraction capability and BaSyx deployment integration are implemented and tested,
+but neither is currently connected to the LangGraph workflow.

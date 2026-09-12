@@ -116,6 +116,6 @@ so test results do not depend on the internet or a third-party website.
 
 Future semantic matchers, human-review strategies, and LangGraph orchestration
 can consume `ProductKnowledgePackage`, `MappingResult`, `CoverageReport`, and
-`WorkflowEvent` without changing website extraction. `CoverageResolutionStrategy`
+`WorkflowEvent` without changing website extraction. A future coverage resolver
 accepts unresolved coverage and referenced evidence without rereading HTML. No
 framework-specific message or graph state is part of these domain contracts.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol
 
 from mia_dpp.canonical import sha256_json
 from mia_dpp.domain.evidence import (
@@ -13,7 +13,7 @@ from mia_dpp.domain.evidence import (
     EvidenceStatus,
     SourceLocation,
 )
-from mia_dpp.errors import ConfigurationError, ExtractionError
+from mia_dpp.errors import ExtractionError
 
 
 class TextPreprocessor(Protocol):
@@ -25,7 +25,7 @@ class TextPreprocessor(Protocol):
 class PdfToAasDocumentExtractor:
     """Convert PDF pages to provenance-rich evidence without invoking an LLM."""
 
-    def __init__(self, preprocessor: TextPreprocessor | None = None) -> None:
+    def __init__(self, preprocessor: TextPreprocessor) -> None:
         self._preprocessor = preprocessor
 
     def extract(self, document: DocumentReference) -> tuple[EvidenceRecord, ...]:
@@ -37,8 +37,7 @@ class PdfToAasDocumentExtractor:
         actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual_digest != document.content_sha256:
             raise ExtractionError("document content does not match its recorded SHA-256")
-        preprocessor = self._preprocessor or self._default_preprocessor()
-        converted = preprocessor.convert(str(path))
+        converted = self._preprocessor.convert(str(path))
         if converted is None:
             raise ExtractionError("PDF-to-AAS preprocessor returned no content")
         pages = [converted] if isinstance(converted, str) else converted
@@ -74,13 +73,3 @@ class PdfToAasDocumentExtractor:
                 )
             )
         return tuple(records)
-
-    @staticmethod
-    def _default_preprocessor() -> TextPreprocessor:
-        try:
-            from pdf2aas.preprocessor import PDFium
-        except ImportError as error:  # pragma: no cover - optional dependency
-            raise ConfigurationError(
-                "PDF extraction is optional; install the backend 'pdf' extra"
-            ) from error
-        return cast(TextPreprocessor, PDFium())
