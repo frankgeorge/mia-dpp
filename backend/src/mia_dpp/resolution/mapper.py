@@ -6,15 +6,16 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar, Protocol
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.chat import CONFIDENCE_THRESHOLD
 from mia_dpp.domain.evidence import EvidenceRecord
 from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
-from mia_dpp.idta import demo_propose, mapping_target
 from mia_dpp.resolution.confidence import (
+    AUTO_APPROVAL_THRESHOLD,
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
+from mia_dpp.resolution.targets import mapping_target
+from mia_dpp.resolution.text_mapping import propose_text_mappings
 
 MappingHistory = Mapping[tuple[str, str], int]
 
@@ -97,7 +98,7 @@ class DeterministicWebsiteMapper:
                 continue
             mapping_label = self._LABEL_ALIASES.get(label.casefold())
             value = str(record.value)
-            draft = demo_propose(
+            draft = propose_text_mappings(
                 f"{mapping_label}: {value}" if mapping_label else value,
                 self._repository,
                 history=dict(history),
@@ -132,7 +133,7 @@ class DeterministicWebsiteMapper:
                     if has_competing_destination
                     else (
                         MappingStatus.AUTO
-                        if candidate.confidence >= CONFIDENCE_THRESHOLD
+                        if candidate.confidence >= AUTO_APPROVAL_THRESHOLD
                         else MappingStatus.REVIEW
                     )
                 ),

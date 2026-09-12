@@ -11,7 +11,7 @@ from mia_dpp.aas.models import AasArtifact
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.errors import DeploymentError
 from mia_dpp.integrations.basyx import BasyxAasRepository
-from test_idta import PRODUCT, accepted_mappings
+from test_aas_pipeline import PRODUCT, accepted_mappings
 
 
 def test_deploys_submodel_before_shell_after_validation() -> None:

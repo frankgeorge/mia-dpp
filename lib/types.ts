@@ -300,17 +300,6 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface ChatResponse {
-  reply: string;
-  proposal: {
-    productName: string;
-    mappings: ProposedFieldMapping[];
-  } | null;
-  generate: boolean;
-  mode: string;
-  nameplateElements: NameplateElement[];
-}
-
 export interface SemanticReviewItem {
   id: string;
   requirementId: string;

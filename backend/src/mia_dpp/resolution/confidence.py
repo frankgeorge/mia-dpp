@@ -14,6 +14,8 @@ from pydantic import Field, validate_call
 
 from mia_dpp.domain.mappings import ConfidenceAssessment, ConfidenceFactor
 
+AUTO_APPROVAL_THRESHOLD = 0.85
+
 
 class MatchQuality(StrEnum):
     """Deterministic strength assigned by an extractor or mapping rule."""

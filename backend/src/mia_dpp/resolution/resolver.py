@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 
 from mia_dpp.aas.requirements import build_requirement_inventory
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.chat import nameplate_catalog
 from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.mappings import MappingProposal
 from mia_dpp.domain.workflow import completed_event
+from mia_dpp.resolution.catalog import nameplate_catalog
 from mia_dpp.resolution.coverage import CoverageAnalyzer
 from mia_dpp.resolution.mapper import DeterministicWebsiteMapper, MappingStrategy
 from mia_dpp.resolution.models import WebsiteIngestRequest, WebsiteIngestResponse

@@ -11,7 +11,8 @@ from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus, MappingTarget
 from mia_dpp.errors import MappingError
-from mia_dpp.idta import demo_propose, external_reference
+from mia_dpp.resolution.targets import external_reference
+from mia_dpp.resolution.text_mapping import propose_text_mappings
 
 PRODUCT = (
     "AFRISO gauge, model RF100-16, serial number 2024-8871, built 2024, "
@@ -20,7 +21,7 @@ PRODUCT = (
 
 
 def accepted_mappings(text: str = PRODUCT) -> tuple[str, list[FieldMapping]]:
-    proposal = demo_propose(text, OfficialTemplateRepository())
+    proposal = propose_text_mappings(text, OfficialTemplateRepository())
     mappings = [
         FieldMapping(
             **mapping.model_dump(),
@@ -32,8 +33,8 @@ def accepted_mappings(text: str = PRODUCT) -> tuple[str, list[FieldMapping]]:
     return proposal.product_name, mappings
 
 
-def test_demo_maps_evidence_to_official_and_wildcard_template_paths() -> None:
-    proposal = demo_propose(PRODUCT, OfficialTemplateRepository())
+def test_text_mapping_uses_official_and_wildcard_template_paths() -> None:
+    proposal = propose_text_mappings(PRODUCT, OfficialTemplateRepository())
 
     targets = {item.target_element: item.target for item in proposal.mappings}
     assert proposal.product_name == "RF100-16"

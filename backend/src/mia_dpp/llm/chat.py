@@ -8,26 +8,12 @@ from typing import Literal, Protocol
 from pydantic import Field, model_validator
 
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.mappings import GraphEntry, MappingProposal, NameplateElement
 from mia_dpp.llm.client import LLMClient
 
 
 class ChatMessage(WireModel):
     role: Literal["user", "assistant"]
     content: str
-
-
-class ChatRequest(WireModel):
-    messages: tuple[ChatMessage, ...] = ()
-    graph: tuple[GraphEntry, ...] = ()
-
-
-class ChatResponse(WireModel):
-    reply: str
-    proposal: MappingProposal | None = None
-    generate: bool = False
-    mode: str
-    nameplate_elements: tuple[NameplateElement, ...]
 
 
 class ConversationDecision(WireModel):

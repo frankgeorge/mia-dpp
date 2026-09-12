@@ -263,7 +263,7 @@ class MappingSpecification(WireModel):
         return self
 
 
-class DemoProposal(WireModel):
+class TextMappingProposal(WireModel):
     product_name: str
     evidence: tuple[EvidenceRecord, ...]
     mappings: tuple[MappingDraft, ...]

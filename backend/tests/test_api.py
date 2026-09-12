@@ -11,11 +11,11 @@ import pytest
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import AgentResponse
-from mia_dpp.chat import demo_turn
+from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.domain.workflow import AgentRunStatus
-from mia_dpp.llm.chat import ChatMessage, ChatRequest
 from mia_dpp.main import app
 from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.resolution.text_mapping import propose_text_mappings
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
@@ -35,13 +35,12 @@ def request(
 
 
 def accepted_payload(text: str) -> dict[str, Any]:
-    proposal = demo_turn(ChatRequest(messages=(ChatMessage(role="user", content=text),))).proposal
-    assert proposal is not None
+    proposal = propose_text_mappings(text, OfficialTemplateRepository())
     mappings = []
     for index, item in enumerate(proposal.mappings):
         data = item.model_dump(mode="json", by_alias=True)
         data["id"] = f"mapping-{index}"
-        data["status"] = "approved"
+        data["status"] = MappingStatus.APPROVED
         mappings.append(data)
     return {"productName": proposal.product_name, "mappings": mappings}
 
@@ -56,23 +55,6 @@ def test_health_and_template_catalog_prove_standards_readiness() -> None:
     assert len(health.json()["standardsCommit"]) == 40
     assert templates.status_code == 200
     assert [item["release"] for item in templates.json()] == ["3.0.1", "2.0.1"]
-
-
-def test_chat_endpoint_runs_without_an_external_key() -> None:
-    response = request(
-        "POST",
-        "/api/chat",
-        {
-            "messages": [{"role": "user", "content": "Festo sensor, model SDE5, serial SN-42."}],
-            "graph": [],
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["mode"] == "demo"
-    assert body["proposal"]["productName"] == "SDE5"
-    assert body["proposal"]["mappings"][0]["confidenceAssessment"]["factors"]
 
 
 def test_agent_message_endpoint_returns_a_resumable_thread(
@@ -153,8 +135,8 @@ def test_client_cannot_forge_official_semantic_metadata() -> None:
 def test_pydantic_rejects_unknown_request_fields() -> None:
     response = request(
         "POST",
-        "/api/chat",
-        {"messages": [], "graph": [], "unexpected": True},
+        "/api/agent/messages",
+        {"message": "hello", "graph": [], "unexpected": True},
     )
 
     assert response.status_code == 422

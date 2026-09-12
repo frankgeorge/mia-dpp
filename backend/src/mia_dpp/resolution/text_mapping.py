@@ -1,4 +1,4 @@
-"""Deterministic manual-text evidence and official IDTA mapping proposals.
+"""Deterministic regex-based text evidence and mapping proposals.
 
 This module keeps the original demo useful while changing its foundation: the
 regexes extract evidence, but all target metadata comes from the pinned
@@ -12,66 +12,15 @@ import re
 from dataclasses import dataclass
 from re import Pattern
 
-from mia_dpp.aas.templates import OfficialTemplateRepository, resolve_element
+from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation
-from mia_dpp.domain.mappings import DemoProposal, MappingDraft, MappingTarget
-from mia_dpp.domain.targets import (
-    ReferenceKey,
-    SemanticReference,
-    SubmodelTemplate,
-    TemplateElement,
-)
-from mia_dpp.errors import MappingError
+from mia_dpp.domain.mappings import MappingDraft, MappingTarget, TextMappingProposal
 from mia_dpp.resolution.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-
-
-def external_reference(value: str) -> SemanticReference:
-    return SemanticReference(
-        type="ExternalReference",
-        keys=(ReferenceKey(type="GlobalReference", value=value),),
-    )
-
-
-def mapping_target(
-    template: SubmodelTemplate,
-    path: tuple[str, ...],
-    *,
-    id_short: str | None = None,
-    semantic_id: str | None = None,
-) -> MappingTarget:
-    """Construct a typed target from authoritative template metadata."""
-
-    element = resolve_element(template, path)
-    target_id_short = id_short or element.id_short
-    if target_id_short is None:
-        raise MappingError(f"template path {'/'.join(path)} has no target idShort")
-    if element.wildcard:
-        if semantic_id is None:
-            raise MappingError("wildcard target requires an explicit semantic ID")
-        reference = external_reference(semantic_id)
-        instance_path = (*element.path[:-1], target_id_short)
-    else:
-        if element.semantic_id is None:
-            raise MappingError(f"template path {'/'.join(path)} has no semantic ID")
-        if id_short is not None or semantic_id is not None:
-            raise MappingError("fixed official targets cannot be overridden")
-        reference = element.semantic_id
-        instance_path = element.path
-    return MappingTarget(
-        template_key=template.release.key,
-        template_release=template.release.release,
-        template_path=element.path,
-        instance_path=instance_path,
-        id_short=target_id_short,
-        semantic_id=reference,
-        model_type=element.model_type,
-        value_type=element.value_type,
-        wildcard=element.wildcard,
-    )
+from mia_dpp.resolution.targets import ARBITRARY_PROPERTY_PATH, NAMEPLATE_ROOT, mapping_target
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,13 +37,6 @@ class PatternRule:
     instance_id_short: str | None = None
     semantic_id_override: str | None = None
 
-
-NAMEPLATE_ROOT = "Nameplate"
-ARBITRARY_PROPERTY_PATH = (
-    NAMEPLATE_ROOT,
-    "AssetSpecificProperties",
-    "ArbitraryProperty",
-)
 
 PATTERNS = (
     PatternRule(
@@ -267,13 +209,13 @@ def _draft(
     )
 
 
-def demo_propose(
+def propose_text_mappings(
     text: str,
     repository: OfficialTemplateRepository,
     *,
     history: dict[tuple[str, str], int] | None = None,
     allow_unlabelled_year: bool = True,
-) -> DemoProposal:
+) -> TextMappingProposal:
     """Extract manual evidence and propose official-template mappings deterministically."""
 
     template = repository.load("digital_nameplate")
@@ -417,32 +359,8 @@ def demo_propose(
         first_phrase,
         flags=re.IGNORECASE,
     ).strip()
-    return DemoProposal(
+    return TextMappingProposal(
         product_name=(designation or fallback or "Product")[:60],
         evidence=tuple(evidence_records),
         mappings=tuple(mappings),
     )
-
-
-def selectable_elements(template: SubmodelTemplate) -> tuple[TemplateElement, ...]:
-    """Return fixed value-bearing targets appropriate for a correction menu."""
-
-    selected: list[TemplateElement] = []
-
-    def visit(elements: tuple[TemplateElement, ...]) -> None:
-        for element in elements:
-            if (
-                element.model_type
-                in {
-                    "Property",
-                    "MultiLanguageProperty",
-                    "Range",
-                    "File",
-                }
-                and not element.wildcard
-            ):
-                selected.append(element)
-            visit(element.children)
-
-    visit(template.elements)
-    return tuple(selected)
