@@ -26,6 +26,14 @@ class Settings(BaseSettings):
         default="deepseek/deepseek-v3.2",
         validation_alias="MIA_SEMANTIC_MODEL",
     )
+    agent_v2_model: str = Field(
+        default="deepseek/deepseek-v3.2",
+        validation_alias="MIA_AGENT_V2_MODEL",
+    )
+    thread_store_path: Path = Field(
+        default=Path("/tmp/mia-agent-v2.sqlite3"),
+        validation_alias="MIA_THREAD_STORE_PATH",
+    )
     standards_root: Path = Field(
         default=REPOSITORY_ROOT / "standards" / "idta-submodel-templates",
         validation_alias="MIA_STANDARDS_ROOT",

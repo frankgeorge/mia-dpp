@@ -16,7 +16,7 @@ from mia_dpp.domain.mappings import (
     RequirementCoverage,
 )
 from mia_dpp.domain.targets import Requirement
-from mia_dpp.resolution.coverage import CoverageAnalyzer
+from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
 
 
 def evidence(identifier: str, label: str, value: str, unit: str | None = None) -> EvidenceRecord:

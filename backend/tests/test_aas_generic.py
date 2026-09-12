@@ -14,12 +14,12 @@ from mia_dpp.domain.evidence import (
 )
 from mia_dpp.domain.mappings import ApprovedMapping, MappingSpecification
 from mia_dpp.domain.targets import TargetProfile
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.resolution.targets import mapping_target
+from mia_dpp.tools.mapping.targets import mapping_target
 
 
 def test_compiles_nested_technical_data_from_the_second_official_template() -> None:

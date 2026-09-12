@@ -13,8 +13,8 @@ from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.errors import MappingError
-from mia_dpp.resolution.models import WebsiteIngestRequest
-from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.mapping.models import WebsiteIngestRequest
+from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.web.artifacts import raw_website_artifact
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
 from mia_dpp.tools.web.models import ProductUrlRejectedError, RenderedPage

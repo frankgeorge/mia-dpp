@@ -18,13 +18,13 @@ from mia_dpp.domain.mappings import (
     SemanticReviewItem,
 )
 from mia_dpp.domain.workflow import completed_event
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.resolution.models import WebsiteIngestRequest, WebsiteIngestResponse
-from mia_dpp.resolution.targets import mapping_target
+from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.mapping.targets import mapping_target
 from mia_dpp.tools.web.models import WebExtractionResult
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)

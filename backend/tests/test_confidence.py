@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,

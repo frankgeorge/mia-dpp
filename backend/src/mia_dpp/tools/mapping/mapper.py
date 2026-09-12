@@ -8,14 +8,14 @@ from typing import ClassVar, Protocol
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord
 from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     AUTO_APPROVAL_THRESHOLD,
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.resolution.targets import mapping_target
-from mia_dpp.resolution.text_mapping import propose_text_mappings
+from mia_dpp.tools.mapping.targets import mapping_target
+from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
 
 MappingHistory = Mapping[tuple[str, str], int]
 

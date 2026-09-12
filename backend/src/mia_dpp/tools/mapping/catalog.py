@@ -3,7 +3,7 @@
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.mappings import NameplateElement
 from mia_dpp.domain.targets import SubmodelTemplate, TemplateElement
-from mia_dpp.resolution.targets import ARBITRARY_PROPERTY_PATH, mapping_target
+from mia_dpp.tools.mapping.targets import ARBITRARY_PROPERTY_PATH, mapping_target
 
 _KNOWN_ARBITRARY_TARGETS = (
     ("DegreeOfProtection", "0173-1#02-AAM634#003", "IP ingress-protection rating."),

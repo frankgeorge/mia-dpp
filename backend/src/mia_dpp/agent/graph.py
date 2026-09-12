@@ -24,9 +24,9 @@ from mia_dpp.domain.mappings import SemanticReviewItem
 from mia_dpp.domain.workflow import AgentRunStatus
 from mia_dpp.llm.chat import ChatMessage, ChatModel
 from mia_dpp.llm.semantic import SemanticModel
-from mia_dpp.resolution.coverage import CoverageAnalyzer
-from mia_dpp.resolution.models import WebsiteIngestResponse
-from mia_dpp.resolution.resolver import ProductResolver
+from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
+from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.web.tool import WebExtractionTool
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)

@@ -15,6 +15,7 @@ from mia_dpp.aas.templates import (
     TemplateRepositoryError,
 )
 from mia_dpp.agent.models import AgentMessageRequest, AgentResponse, AgentReviewRequest
+from mia_dpp.agent.v2.models import AgentV2Request, AgentV2Response
 from mia_dpp.api.schemas import (
     DppBuildRequest,
     HealthResponse,
@@ -22,7 +23,8 @@ from mia_dpp.api.schemas import (
 from mia_dpp.bootstrap import Application
 from mia_dpp.domain.targets import TemplateSummary
 from mia_dpp.errors import ExtractionError, MiaError
-from mia_dpp.resolution.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.search import SearchUnavailableError
 from mia_dpp.tools.web.models import (
     ExtractionDependencyError,
     PageLoadError,
@@ -87,6 +89,27 @@ async def agent_message(payload: AgentMessageRequest, http_request: Request) -> 
         raise HTTPException(status_code=422, detail=str(error)) from error
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@router.post("/api/agent/v2/messages", response_model=AgentV2Response)
+async def agent_v2_message(
+    payload: AgentV2Request,
+    http_request: Request,
+) -> AgentV2Response:
+    """Run one autonomous PydanticAI turn using trusted server-side history."""
+
+    try:
+        return await _application(http_request).agent_v2.message(payload)
+    except ProductUrlRejectedError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ExtractionDependencyError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except PageLoadError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except SearchUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=502, detail=f"agent V2 failed: {error}") from error
 
 
 @router.post("/api/agent/review", response_model=AgentResponse)

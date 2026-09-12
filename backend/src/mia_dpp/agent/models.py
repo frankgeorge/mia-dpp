@@ -9,7 +9,7 @@ from pydantic import Field, model_validator
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import GraphEntry, SemanticReviewItem
 from mia_dpp.domain.workflow import AgentRunStatus
-from mia_dpp.resolution.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import WebsiteIngestResponse
 
 
 class AgentMessageRequest(WireModel):

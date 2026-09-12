@@ -12,7 +12,7 @@ from mia_dpp.domain.evidence import (
     SourceLocation,
 )
 from mia_dpp.domain.mappings import ConfidenceAssessment
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,

@@ -14,8 +14,8 @@ from mia_dpp.agent.models import AgentResponse
 from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.domain.workflow import AgentRunStatus
 from mia_dpp.main import app
-from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
-from mia_dpp.resolution.text_mapping import propose_text_mappings
+from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy

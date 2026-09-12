@@ -19,8 +19,8 @@ from mia_dpp.domain.mappings import (
     ProposedFieldMapping,
     SemanticReviewItem,
 )
-from mia_dpp.resolution.models import WebsiteIngestResponse
-from mia_dpp.resolution.targets import mapping_target
+from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.targets import mapping_target
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 

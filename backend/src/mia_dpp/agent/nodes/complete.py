@@ -15,13 +15,13 @@ from mia_dpp.domain.completion import actionable_fixed_requirements, build_compl
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
 from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
 from mia_dpp.domain.targets import Requirement
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.resolution.models import WebsiteIngestResponse
-from mia_dpp.resolution.targets import mapping_target
+from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.targets import mapping_target
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 

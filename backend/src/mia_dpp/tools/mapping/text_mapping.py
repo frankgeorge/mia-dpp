@@ -15,12 +15,12 @@ from re import Pattern
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation
 from mia_dpp.domain.mappings import MappingDraft, MappingTarget, TextMappingProposal
-from mia_dpp.resolution.confidence import (
+from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.resolution.targets import ARBITRARY_PROPERTY_PATH, NAMEPLATE_ROOT, mapping_target
+from mia_dpp.tools.mapping.targets import ARBITRARY_PROPERTY_PATH, NAMEPLATE_ROOT, mapping_target
 
 
 @dataclass(frozen=True, slots=True)

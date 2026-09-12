@@ -13,8 +13,8 @@ from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.integrations.openrouter import OpenRouterClient
 from mia_dpp.llm.chat import ChatLLM, ChatMessage
 from mia_dpp.llm.semantic import SemanticLLM
-from mia_dpp.resolution.models import WebsiteIngestRequest
-from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.mapping.models import WebsiteIngestRequest
+from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
