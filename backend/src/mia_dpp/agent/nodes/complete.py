@@ -11,7 +11,6 @@ from typing import Literal
 from langgraph.types import interrupt
 
 from mia_dpp.agent.state import AgentState
-from mia_dpp.api.schemas import WebsiteIngestResponse
 from mia_dpp.domain.completion import actionable_fixed_requirements, build_completion_summary
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
 from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
@@ -22,6 +21,7 @@ from mia_dpp.resolution.confidence import (
     ValueFormatQuality,
     assess_mapping_confidence,
 )
+from mia_dpp.resolution.models import WebsiteIngestResponse
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 

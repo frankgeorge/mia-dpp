@@ -3,23 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import httpx
 import pytest
 
-import mia_dpp.api as api_module
-from mia_dpp.api import app
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.agent.models import AgentResponse
 from mia_dpp.chat import demo_turn
-from mia_dpp.extraction import RenderedPage
-from mia_dpp.models import (
-    AgentResponse,
-    AgentRunStatus,
-    ChatMessage,
-    ChatRequest,
-)
-from mia_dpp.url_policy import ProductUrlPolicy
-from mia_dpp.website import WebsiteIngestionService
+from mia_dpp.domain.workflow import AgentRunStatus
+from mia_dpp.llm.chat import ChatMessage, ChatRequest
+from mia_dpp.main import app
+from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.web.models import RenderedPage
+from mia_dpp.tools.web.tool import WebExtractionTool
+from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 
 def request(
@@ -87,7 +86,7 @@ def test_agent_message_endpoint_returns_a_resumable_thread(
                 status=AgentRunStatus.COMPLETED,
             )
 
-    monkeypatch.setattr(api_module, "agent_workflow", Agent())
+    monkeypatch.setattr(app.state, "mia", replace(app.state.mia, agent_workflow=Agent()))
     response = request(
         "POST",
         "/api/agent/messages",
@@ -181,15 +180,15 @@ def test_website_endpoint_feeds_provenance_into_dpp(
     async def resolver(host: str, port: int) -> tuple[str, ...]:
         return ("93.184.216.34",)
 
-    monkeypatch.setattr(
-        api_module,
-        "website_ingestion",
-        WebsiteIngestionService(
-            api_module.templates,
+    repository = OfficialTemplateRepository()
+    workflow = WebsiteWorkflow(
+        WebExtractionTool(
             loader=Loader(),
             url_policy=ProductUrlPolicy(resolver),
         ),
+        ProductResolver(repository),
     )
+    monkeypatch.setattr(app.state, "mia", replace(app.state.mia, website_workflow=workflow))
 
     imported = request("POST", "/api/website", {"url": url, "graph": []})
 

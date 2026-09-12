@@ -6,24 +6,21 @@ import asyncio
 from collections.abc import Sequence
 from pathlib import Path
 
-from mia_dpp.agent_workflow import MiaAgentWorkflow
-from mia_dpp.extraction import RenderedPage
-from mia_dpp.models import (
-    AgentMessageRequest,
-    AgentReviewDecision,
-    AgentReviewRequest,
-    AgentRunStatus,
-    ChatMessage,
-    ConversationDecision,
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.agent.graph import MiaAgentWorkflow
+from mia_dpp.agent.models import AgentMessageRequest, AgentReviewDecision, AgentReviewRequest
+from mia_dpp.domain.evidence import ProductKnowledgePackage, SourceType
+from mia_dpp.domain.mappings import (
     CoverageReport,
     MappingStatus,
-    ProductKnowledgePackage,
     SemanticMatchDecision,
-    SourceType,
 )
-from mia_dpp.templates import OfficialTemplateRepository
-from mia_dpp.url_policy import ProductUrlPolicy
-from mia_dpp.website import WebsiteIngestionService
+from mia_dpp.domain.workflow import AgentRunStatus
+from mia_dpp.llm.chat import ChatMessage, ConversationDecision
+from mia_dpp.resolution.resolver import ProductResolver
+from mia_dpp.tools.web.models import RenderedPage
+from mia_dpp.tools.web.tool import WebExtractionTool
+from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 FIXTURE = Path(__file__).parent / "fixtures" / "web" / "website-product.html"
 PRODUCT_URL = "https://manufacturer.example/products/pg-16"
@@ -46,14 +43,14 @@ class FakeReasoningService:
     def configured(self) -> bool:
         return True
 
-    async def converse(self, messages: Sequence[ChatMessage]) -> ConversationDecision:
+    async def decide(self, messages: Sequence[ChatMessage]) -> ConversationDecision:
         self.conversations.append(tuple(messages))
         return ConversationDecision(
             intent="chat",
             reply="Please provide a direct manufacturer product-page URL.",
         )
 
-    async def propose_semantic_matches(
+    async def propose(
         self,
         package: ProductKnowledgePackage,
         coverage: CoverageReport,
@@ -77,7 +74,7 @@ class FakeReasoningService:
 
 
 class NoProposalReasoningService(FakeReasoningService):
-    async def propose_semantic_matches(
+    async def propose(
         self,
         package: ProductKnowledgePackage,
         coverage: CoverageReport,
@@ -87,12 +84,17 @@ class NoProposalReasoningService(FakeReasoningService):
 
 def workflow(reasoning: FakeReasoningService) -> MiaAgentWorkflow:
     repository = OfficialTemplateRepository()
-    website = WebsiteIngestionService(
-        repository,
+    web_tool = WebExtractionTool(
         loader=FixtureLoader(),
         url_policy=ProductUrlPolicy(public_resolver),
     )
-    return MiaAgentWorkflow(repository, website, reasoning)
+    return MiaAgentWorkflow(
+        repository,
+        web_tool,
+        ProductResolver(repository),
+        reasoning,
+        reasoning,
+    )
 
 
 def test_conversation_uses_model_and_retains_thread_history() -> None:
@@ -286,14 +288,17 @@ def test_missing_mandatory_answers_become_evidence_and_resume_same_thread() -> N
             )
 
     repository = OfficialTemplateRepository()
+    web_tool = WebExtractionTool(
+        loader=SparseLoader(),
+        url_policy=ProductUrlPolicy(public_resolver),
+    )
+    reasoning = NoProposalReasoningService()
     agent = MiaAgentWorkflow(
         repository,
-        WebsiteIngestionService(
-            repository,
-            loader=SparseLoader(),
-            url_policy=ProductUrlPolicy(public_resolver),
-        ),
-        NoProposalReasoningService(),
+        web_tool,
+        ProductResolver(repository),
+        reasoning,
+        reasoning,
     )
 
     review = asyncio.run(agent.message(AgentMessageRequest(message=f"Build from {PRODUCT_URL}")))

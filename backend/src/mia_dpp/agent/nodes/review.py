@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 
 from langgraph.types import interrupt
 
+from mia_dpp.agent.models import AgentReviewDecision, AgentReviewRequest
 from mia_dpp.agent.state import AgentState
-from mia_dpp.api.schemas import AgentReviewDecision, AgentReviewRequest, WebsiteIngestResponse
 from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
 from mia_dpp.domain.mappings import (
@@ -20,6 +20,7 @@ from mia_dpp.domain.mappings import (
     SemanticReviewItem,
 )
 from mia_dpp.idta import mapping_target
+from mia_dpp.resolution.models import WebsiteIngestResponse
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 

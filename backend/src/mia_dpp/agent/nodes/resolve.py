@@ -9,30 +9,39 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from mia_dpp.agent.state import AgentState
-from mia_dpp.api.schemas import WebsiteIngestResponse
 from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.mappings import (
+    GraphEntry,
     MappingResult,
     MappingStatus,
     ProposedFieldMapping,
     SemanticReviewItem,
 )
+from mia_dpp.domain.workflow import completed_event
 from mia_dpp.idta import mapping_target
 from mia_dpp.resolution.confidence import (
     MatchQuality,
     ValueFormatQuality,
     assess_mapping_confidence,
 )
-from mia_dpp.workflow import completed_event
+from mia_dpp.resolution.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.web.models import WebExtractionResult
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 
 
 class ResolveNodes:
+    async def _resolve_deterministically(self, state: AgentState) -> AgentState:
+        extraction = WebExtractionResult.model_validate(state["web_extraction"])
+        history = tuple(GraphEntry.model_validate(item) for item in state.get("graph_history", []))
+        request = WebsiteIngestRequest(url=state["website_url"], graph=history)
+        result = await self._resolver.resolve(extraction, request)
+        return {"website_result": result.model_dump(mode="json")}
+
     async def _resolve_semantics(self, state: AgentState) -> AgentState:
         website = WebsiteIngestResponse.model_validate(state["website_result"])
         started_at = datetime.now(UTC)
-        decisions = await self._semantic_tool.propose(
+        decisions = await self._semantic_llm.propose(
             website.knowledge_package,
             website.coverage_report,
         )
@@ -155,7 +164,7 @@ class ResolveNodes:
                 f"{'s' if len(review_items) != 1 else ''} for human review."
             ),
             metadata={
-                "configured": self._reasoning.configured,
+                "configured": self._semantic_llm.configured,
                 "authoritative": False,
             },
         )
@@ -175,7 +184,7 @@ class ResolveNodes:
                 "status": "awaiting_review",
             }
 
-        if self._reasoning.configured:
+        if self._semantic_llm.configured:
             reply = (
                 f"I retained {len(website.evidence)} source facts. The semantic model found no "
                 "additional mapping that was safe enough to propose; unresolved evidence remains "

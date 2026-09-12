@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 
 from mia_dpp import __version__
 from mia_dpp.aas.build import build_dpp
@@ -15,53 +14,37 @@ from mia_dpp.aas.templates import (
     STANDARDS_REPOSITORY_COMMIT,
     TemplateRepositoryError,
 )
+from mia_dpp.agent.models import AgentMessageRequest, AgentResponse, AgentReviewRequest
 from mia_dpp.api.schemas import (
-    AgentMessageRequest,
-    AgentResponse,
-    AgentReviewRequest,
-    ChatRequest,
-    ChatResponse,
     DppBuildRequest,
     HealthResponse,
-    WebsiteIngestRequest,
-    WebsiteIngestResponse,
 )
-from mia_dpp.bootstrap import build_application
+from mia_dpp.bootstrap import Application
 from mia_dpp.chat import demo_turn, live_turn
 from mia_dpp.domain.targets import TemplateSummary
 from mia_dpp.errors import ExtractionError, MiaError
-from mia_dpp.sources.extraction import (
+from mia_dpp.llm.chat import ChatRequest, ChatResponse
+from mia_dpp.resolution.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.web.models import (
     ExtractionDependencyError,
     PageLoadError,
     ProductUrlRejectedError,
 )
 
-application = build_application()
-settings = application.settings
-templates = application.templates
-website_ingestion = application.website_ingestion
-reasoning = application.reasoning
-agent_workflow = application.agent_workflow
-
-app = FastAPI(
-    title="MIA Digital Product Passport",
-    version=__version__,
-    description="Deterministic product evidence to official IDTA/AAS compilation.",
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=settings.cors_origin_regex,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
+router = APIRouter()
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
+def _application(request: Request) -> Application:
+    app: FastAPI = request.app
+    return app.state.mia  # type: ignore[no-any-return]
+
+
+@router.get("/health", response_model=HealthResponse)
+async def health(http_request: Request) -> HealthResponse:
     """Report readiness of both the process and its pinned standards data."""
 
     try:
-        templates.load("digital_nameplate")
+        _application(http_request).templates.load("digital_nameplate")
     except TemplateRepositoryError:
         return HealthResponse(
             status="not_ready",
@@ -77,27 +60,29 @@ async def health() -> HealthResponse:
     )
 
 
-@app.get("/api/templates", response_model=tuple[TemplateSummary, ...])
-async def template_catalog() -> tuple[TemplateSummary, ...]:
+@router.get("/api/templates", response_model=tuple[TemplateSummary, ...])
+async def template_catalog(http_request: Request) -> tuple[TemplateSummary, ...]:
     """Expose the two pinned templates currently used to prove generic loading."""
 
     try:
+        templates = _application(http_request).templates
         return tuple(templates.summary(key) for key in templates.keys())
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+@router.post("/api/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest, http_request: Request) -> ChatResponse:
     """Use deterministic demo mode unless an OpenRouter key is configured."""
 
     try:
-        if settings.openrouter_api_key is None:
-            return demo_turn(request, templates)
+        application = _application(http_request)
+        if application.settings.openrouter_api_key is None:
+            return demo_turn(payload, application.templates)
         return await live_turn(
-            request,
-            settings.openrouter_api_key.get_secret_value(),
-            templates,
+            payload,
+            application.settings.openrouter_api_key.get_secret_value(),
+            application.templates,
         )
     except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         return ChatResponse(
@@ -106,21 +91,18 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 "review and AAS build tools remain available."
             ),
             mode="error",
-            nameplate_elements=demo_turn(ChatRequest(), templates).nameplate_elements,
+            nameplate_elements=demo_turn(ChatRequest(), application.templates).nameplate_elements,
         )
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
-@app.post("/api/agent/messages", response_model=AgentResponse)
-async def agent_message(request: AgentMessageRequest) -> AgentResponse:
+@router.post("/api/agent/messages", response_model=AgentResponse)
+async def agent_message(payload: AgentMessageRequest, http_request: Request) -> AgentResponse:
     """Run or continue one conversational MIA workflow thread."""
 
     try:
-        import mia_dpp.api as api_package
-
-        workflow = getattr(api_package, "agent_workflow", agent_workflow)
-        return await workflow.message(request)
+        return await _application(http_request).agent_workflow.message(payload)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:
@@ -135,12 +117,12 @@ async def agent_message(request: AgentMessageRequest) -> AgentResponse:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
-@app.post("/api/agent/review", response_model=AgentResponse)
-async def agent_review(request: AgentReviewRequest) -> AgentResponse:
+@router.post("/api/agent/review", response_model=AgentResponse)
+async def agent_review(payload: AgentReviewRequest, http_request: Request) -> AgentResponse:
     """Resume a paused workflow with explicit human semantic decisions."""
 
     try:
-        return await agent_workflow.review(request)
+        return await _application(http_request).agent_workflow.review(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(
             status_code=422,
@@ -148,16 +130,16 @@ async def agent_review(request: AgentReviewRequest) -> AgentResponse:
         ) from error
 
 
-@app.post("/api/dpp", response_model=DppPackage)
-async def create_dpp(request: DppBuildRequest) -> DppPackage:
+@router.post("/api/dpp", response_model=DppPackage)
+async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPackage:
     """Build and validate an official-template-backed AAS environment."""
 
     try:
         return build_dpp(
-            request.product_name,
-            list(request.mappings),
-            repository=templates,
-            evidence=request.evidence,
+            payload.product_name,
+            list(payload.mappings),
+            repository=_application(http_request).templates,
+            evidence=payload.evidence,
         )
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -165,15 +147,14 @@ async def create_dpp(request: DppBuildRequest) -> DppPackage:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-@app.post("/api/website", response_model=WebsiteIngestResponse)
-async def ingest_website(request: WebsiteIngestRequest) -> WebsiteIngestResponse:
+@router.post("/api/website", response_model=WebsiteIngestResponse)
+async def ingest_website(
+    payload: WebsiteIngestRequest, http_request: Request
+) -> WebsiteIngestResponse:
     """Fetch a public product page with Crawl4AI and propose reviewed mappings."""
 
     try:
-        import mia_dpp.api as api_package
-
-        ingestion = getattr(api_package, "website_ingestion", website_ingestion)
-        return await ingestion.ingest(request)
+        return await _application(http_request).website_workflow.ingest(payload)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:

@@ -1,4 +1,4 @@
-"""Explicit construction of the MIA application and its external integrations."""
+"""Composition root: connect MIA roles, tools, core logic, and integrations."""
 
 from __future__ import annotations
 
@@ -7,42 +7,53 @@ from dataclasses import dataclass
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.graph import MiaAgentWorkflow
 from mia_dpp.config import Settings
-from mia_dpp.integrations.openrouter import OpenRouterReasoningService
-from mia_dpp.llm.reasoning import (
-    ReasoningService,
-    UnconfiguredReasoningService,
-)
-from mia_dpp.resolution.website import WebsiteIngestionService
+from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
+from mia_dpp.integrations.openrouter import OpenRouterClient
+from mia_dpp.llm.chat import ChatLLM, ChatModel, UnconfiguredChatLLM
+from mia_dpp.llm.semantic import SemanticLLM, SemanticModel, UnconfiguredSemanticLLM
+from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.web.tool import WebExtractionTool
 
 
 @dataclass(frozen=True)
 class Application:
     settings: Settings
     templates: OfficialTemplateRepository
-    website_ingestion: WebsiteIngestionService
-    reasoning: ReasoningService
+    web_tool: WebExtractionTool
+    resolver: ProductResolver
+    website_workflow: WebsiteWorkflow
+    chat_llm: ChatModel
+    semantic_llm: SemanticModel
     agent_workflow: MiaAgentWorkflow
 
 
 def build_application(settings: Settings | None = None) -> Application:
-    """Assemble MIA with simple explicit dependency construction."""
+    """Build concrete dependencies without hiding behavior in a DI framework."""
 
     configured = settings or Settings()
     templates = OfficialTemplateRepository(configured.standards_root)
-    website_ingestion = WebsiteIngestionService(templates)
-    reasoning: ReasoningService
+    web_tool = WebExtractionTool(loader=Crawl4AIPageLoader())
+    resolver = ProductResolver(templates)
+    website_workflow = WebsiteWorkflow(web_tool, resolver)
+
+    chat_llm: ChatModel
+    semantic_llm: SemanticModel
     if configured.openrouter_api_key is not None:
-        reasoning = OpenRouterReasoningService(
-            configured.openrouter_api_key.get_secret_value(),
-            conversation_model=configured.conversation_model,
-            semantic_model=configured.semantic_model,
-        )
+        client = OpenRouterClient(configured.openrouter_api_key.get_secret_value())
+        chat_llm = ChatLLM(client, model=configured.conversation_model)
+        semantic_llm = SemanticLLM(client, model=configured.semantic_model)
     else:
-        reasoning = UnconfiguredReasoningService()
+        chat_llm = UnconfiguredChatLLM()
+        semantic_llm = UnconfiguredSemanticLLM()
+
+    agent = MiaAgentWorkflow(templates, web_tool, resolver, chat_llm, semantic_llm)
     return Application(
         settings=configured,
         templates=templates,
-        website_ingestion=website_ingestion,
-        reasoning=reasoning,
-        agent_workflow=MiaAgentWorkflow(templates, website_ingestion, reasoning),
+        web_tool=web_tool,
+        resolver=resolver,
+        website_workflow=website_workflow,
+        chat_llm=chat_llm,
+        semantic_llm=semantic_llm,
+        agent_workflow=agent,
     )

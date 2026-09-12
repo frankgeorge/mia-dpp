@@ -1,5 +1,5 @@
 # mypy: disable-error-code="attr-defined"
-"""Conversation intent and website acquisition nodes."""
+"""Conversation intent and initial routing."""
 
 from __future__ import annotations
 
@@ -7,9 +7,7 @@ import re
 from typing import Literal
 
 from mia_dpp.agent.state import AgentState
-from mia_dpp.api.schemas import WebsiteIngestRequest
-from mia_dpp.domain.mappings import GraphEntry
-from mia_dpp.llm.conversation import ChatMessage
+from mia_dpp.llm.chat import ChatMessage
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 
@@ -27,7 +25,7 @@ class IntakeNodes:
             }
 
         history = tuple(ChatMessage.model_validate(item) for item in state.get("messages", []))
-        decision = await self._reasoning.converse(history)
+        decision = await self._chat_llm.decide(history)
         if decision.intent == "ingest_website" and decision.url:
             return {
                 "route": "website",
@@ -43,10 +41,3 @@ class IntakeNodes:
 
     async def _after_intake(self, state: AgentState) -> Literal["website", "done"]:
         return "website" if state["route"] == "website" else "done"
-
-    async def _ingest_website(self, state: AgentState) -> AgentState:
-        history = tuple(GraphEntry.model_validate(item) for item in state.get("graph_history", []))
-        result = await self._source_tool.ingest(
-            WebsiteIngestRequest(url=state["website_url"], graph=history)
-        )
-        return {"website_result": result.model_dump(mode="json")}

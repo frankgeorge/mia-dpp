@@ -8,13 +8,16 @@ from typing import Any, ClassVar
 
 import pytest
 
-import mia_dpp.reasoning as reasoning_module
-from mia_dpp.extraction import RenderedPage
-from mia_dpp.models import ChatMessage, WebsiteIngestRequest
-from mia_dpp.reasoning import OpenRouterReasoningService
-from mia_dpp.templates import OfficialTemplateRepository
-from mia_dpp.url_policy import ProductUrlPolicy
-from mia_dpp.website import WebsiteIngestionService
+import mia_dpp.integrations.openrouter as openrouter_module
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.integrations.openrouter import OpenRouterClient
+from mia_dpp.llm.chat import ChatLLM, ChatMessage
+from mia_dpp.llm.semantic import SemanticLLM
+from mia_dpp.resolution.models import WebsiteIngestRequest
+from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.web.models import RenderedPage
+from mia_dpp.tools.web.tool import WebExtractionTool
+from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 FIXTURE = Path(__file__).parent / "fixtures" / "web" / "website-product.html"
 PRODUCT_URL = "https://manufacturer.example/products/pg-16"
@@ -59,7 +62,7 @@ class FakeOpenRouterClient:
                 "url": None,
             }
         else:
-            context = reasoning_module.json.loads(json["messages"][1]["content"])
+            context = openrouter_module.json.loads(json["messages"][1]["content"])
             selected_evidence = next(
                 item for item in context["evidence"] if item["label"] == "Connectivity"
             )
@@ -91,7 +94,7 @@ class FakeOpenRouterClient:
                                 {
                                     "function": {
                                         "name": tool_name,
-                                        "arguments": reasoning_module.json.dumps(arguments),
+                                        "arguments": openrouter_module.json.dumps(arguments),
                                     }
                                 }
                             ]
@@ -111,20 +114,20 @@ async def public_resolver(host: str, port: int) -> tuple[str, ...]:
     return ("93.184.216.34",)
 
 
-def service() -> OpenRouterReasoningService:
-    return OpenRouterReasoningService(
-        "test-key",
-        conversation_model="conversation-model",
-        semantic_model="semantic-model",
+def roles() -> tuple[ChatLLM, SemanticLLM]:
+    client = OpenRouterClient("test-key")
+    return (
+        ChatLLM(client, model="conversation-model"),
+        SemanticLLM(client, model="semantic-model"),
     )
 
 
 def test_conversation_requires_a_typed_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeOpenRouterClient.calls.clear()
-    monkeypatch.setattr(reasoning_module.httpx, "AsyncClient", FakeOpenRouterClient)
+    monkeypatch.setattr(openrouter_module.httpx, "AsyncClient", FakeOpenRouterClient)
 
     decision = asyncio.run(
-        service().converse((ChatMessage(role="user", content="How can MIA help me?"),))
+        roles()[0].decide((ChatMessage(role="user", content="How can MIA help me?"),))
     )
 
     assert decision.intent == "chat"
@@ -137,18 +140,20 @@ def test_semantic_model_can_return_only_supplied_domain_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     FakeOpenRouterClient.calls.clear()
-    monkeypatch.setattr(reasoning_module.httpx, "AsyncClient", FakeOpenRouterClient)
+    monkeypatch.setattr(openrouter_module.httpx, "AsyncClient", FakeOpenRouterClient)
     repository = OfficialTemplateRepository()
     website = asyncio.run(
-        WebsiteIngestionService(
-            repository,
-            loader=FixtureLoader(),
-            url_policy=ProductUrlPolicy(public_resolver),
+        WebsiteWorkflow(
+            WebExtractionTool(
+                loader=FixtureLoader(),
+                url_policy=ProductUrlPolicy(public_resolver),
+            ),
+            ProductResolver(repository),
         ).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
     )
 
     decisions = asyncio.run(
-        service().propose_semantic_matches(
+        roles()[1].propose(
             website.knowledge_package,
             website.coverage_report,
         )

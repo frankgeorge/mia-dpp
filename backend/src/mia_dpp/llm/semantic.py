@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Protocol
 
 from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.domain.mappings import CoverageReport, CoverageStatus, SemanticMatchDecision
@@ -22,6 +23,10 @@ class SemanticLLM:
     def __init__(self, client: LLMClient, *, model: str) -> None:
         self._client = client
         self._model = model
+
+    @property
+    def configured(self) -> bool:
+        return True
 
     async def propose(
         self,
@@ -142,3 +147,29 @@ class SemanticLLM:
             seen_requirements.add(decision.requirement_id)
             result.append(decision)
         return tuple(result)
+
+
+class SemanticModel(Protocol):
+    """Provider-neutral semantic reasoning role used by the agent."""
+
+    @property
+    def configured(self) -> bool: ...
+
+    async def propose(
+        self,
+        package: ProductKnowledgePackage,
+        coverage: CoverageReport,
+    ) -> tuple[SemanticMatchDecision, ...]: ...
+
+
+class UnconfiguredSemanticLLM:
+    @property
+    def configured(self) -> bool:
+        return False
+
+    async def propose(
+        self,
+        package: ProductKnowledgePackage,
+        coverage: CoverageReport,
+    ) -> tuple[SemanticMatchDecision, ...]:
+        return ()

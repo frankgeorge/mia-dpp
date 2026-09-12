@@ -16,6 +16,7 @@ class AgentState(TypedDict, total=False):
     configured: bool
     graph_history: list[dict[str, Any]]
     website_url: str
+    web_extraction: dict[str, Any] | None
     website_result: dict[str, Any] | None
     review_items: list[dict[str, Any]]
     status: Literal[

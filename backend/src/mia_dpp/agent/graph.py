@@ -13,54 +13,55 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.agent.models import AgentMessageRequest, AgentResponse, AgentReviewRequest
 from mia_dpp.agent.nodes.complete import CompleteNodes
 from mia_dpp.agent.nodes.intake import IntakeNodes
 from mia_dpp.agent.nodes.resolve import ResolveNodes
 from mia_dpp.agent.nodes.review import ReviewNodes
+from mia_dpp.agent.nodes.web import WebNodes
 from mia_dpp.agent.state import AgentState
-from mia_dpp.api.schemas import (
-    AgentMessageRequest,
-    AgentResponse,
-    AgentReviewRequest,
-    WebsiteIngestResponse,
-)
 from mia_dpp.domain.mappings import SemanticReviewItem
 from mia_dpp.domain.workflow import AgentRunStatus
-from mia_dpp.llm.conversation import ChatMessage
-from mia_dpp.llm.reasoning import ReasoningService
+from mia_dpp.llm.chat import ChatMessage, ChatModel
+from mia_dpp.llm.semantic import SemanticModel
 from mia_dpp.resolution.coverage import CoverageAnalyzer
-from mia_dpp.resolution.website import WebsiteIngestionService
-from mia_dpp.tools.semantic import SemanticTool
-from mia_dpp.tools.source import SourceTool
+from mia_dpp.resolution.models import WebsiteIngestResponse
+from mia_dpp.resolution.resolver import ProductResolver
+from mia_dpp.tools.web.tool import WebExtractionTool
 
 _URL = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 
 
-class MiaAgentWorkflow(IntakeNodes, ResolveNodes, ReviewNodes, CompleteNodes):
+class MiaAgentWorkflow(IntakeNodes, WebNodes, ResolveNodes, ReviewNodes, CompleteNodes):
     def __init__(
         self,
         repository: OfficialTemplateRepository,
-        website_ingestion: WebsiteIngestionService,
-        reasoning: ReasoningService,
+        web_tool: WebExtractionTool,
+        resolver: ProductResolver,
+        chat_llm: ChatModel,
+        semantic_llm: SemanticModel,
     ) -> None:
         self._repository = repository
-        self._source_tool = SourceTool(website_ingestion)
-        self._reasoning = reasoning
-        self._semantic_tool = SemanticTool(reasoning)
+        self._web_tool = web_tool
+        self._resolver = resolver
+        self._chat_llm = chat_llm
+        self._semantic_llm = semantic_llm
         self._coverage_analyzer = CoverageAnalyzer()
         self._pending_chat: dict[str, list[ChatMessage]] = {}
         builder = StateGraph(AgentState)
         builder.add_node("intake", self._intake)
-        builder.add_node("website_ingestion", self._ingest_website)
+        builder.add_node("web_extract", self._extract_web)
+        builder.add_node("deterministic_resolution", self._resolve_deterministically)
         builder.add_node("semantic_resolution", self._resolve_semantics)
         builder.add_node("human_review", self._human_review)
         builder.add_edge(START, "intake")
         builder.add_conditional_edges(
             "intake",
             self._after_intake,
-            {"website": "website_ingestion", "done": END},
+            {"website": "web_extract", "done": END},
         )
-        builder.add_edge("website_ingestion", "semantic_resolution")
+        builder.add_edge("web_extract", "deterministic_resolution")
+        builder.add_edge("deterministic_resolution", "semantic_resolution")
         builder.add_conditional_edges(
             "semantic_resolution",
             self._after_semantics,
@@ -108,7 +109,8 @@ class MiaAgentWorkflow(IntakeNodes, ResolveNodes, ReviewNodes, CompleteNodes):
             "messages": [{"role": "user", "content": request.message}],
             "user_message": request.message,
             "graph_history": [item.model_dump(mode="json") for item in request.graph],
-            "configured": self._reasoning.configured,
+            "configured": self._chat_llm.configured and self._semantic_llm.configured,
+            "web_extraction": None,
             "website_result": None,
             "review_items": [],
             "asked_requirement_ids": [],
@@ -143,7 +145,7 @@ class MiaAgentWorkflow(IntakeNodes, ResolveNodes, ReviewNodes, CompleteNodes):
             + stored
             + [ChatMessage(role="user", content=request.message)]
         )
-        decision = await self._reasoning.converse(history)
+        decision = await self._chat_llm.decide(history)
         stored.extend(
             [
                 ChatMessage(role="user", content=request.message),

@@ -8,7 +8,6 @@ import re
 import httpx
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.api.schemas import ChatRequest, ChatResponse
 from mia_dpp.domain.mappings import (
     MappingProposal,
     MappingStatus,
@@ -21,6 +20,7 @@ from mia_dpp.idta import (
     mapping_target,
     selectable_elements,
 )
+from mia_dpp.llm.chat import ChatRequest, ChatResponse
 from mia_dpp.resolution.confidence import (
     MatchQuality,
     ValueFormatQuality,
