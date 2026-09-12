@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
+  AgentTraceEvent,
   AgentReviewDecision,
-  AgentResponse,
+  AgentV2Response,
+  CompanyCandidate,
   ChatMessage,
   CoverageReport,
   CompletionSummary,
@@ -15,6 +17,8 @@ import type {
   MappingResult,
   NameplateElement,
   SemanticReviewItem,
+  ProductCandidate,
+  WebsiteIngestResponse,
   WorkflowEvent,
 } from "@/lib/types";
 import { CoveragePanel } from "@/components/CoveragePanel";
@@ -22,6 +26,7 @@ import { EvidencePanel } from "@/components/EvidencePanel";
 import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
 import { WorkflowTrace } from "@/components/WorkflowTrace";
+import { AgentActivity } from "@/components/AgentActivity";
 
 const GRAPH_KEY = "mia.graph.v1";
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
@@ -66,7 +71,11 @@ export default function Workspace() {
   >([]);
   const [mode, setMode] = useState<string>("");
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
+  const [agentStatus, setAgentStatus] = useState<AgentV2Response["status"]>("completed");
+  const [companyCandidates, setCompanyCandidates] = useState<CompanyCandidate[]>([]);
+  const [productCandidates, setProductCandidates] = useState<ProductCandidate[]>([]);
+  const [currentProductId, setCurrentProductId] = useState<string | null>(null);
+  const [agentActivity, setAgentActivity] = useState<AgentTraceEvent[]>([]);
   const [semanticReview, setSemanticReview] = useState<SemanticReviewItem[]>([]);
   const [reviewDecisions, setReviewDecisions] = useState<
     Record<string, AgentReviewDecision>
@@ -113,22 +122,17 @@ export default function Workspace() {
     setBusy(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/agent/messages`, {
+      const res = await fetch(`${API_URL}/api/agent/v2/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ threadId, message: t, graph }),
+        body: JSON.stringify({ threadId, message: t }),
       });
-      const body = (await res.json()) as AgentResponse | { detail?: string };
+      const body = (await res.json()) as AgentV2Response | { detail?: string };
       if (!res.ok) {
         throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${res.status}`);
       }
-      const data = body as AgentResponse;
-      setThreadId(data.threadId);
-      setAgentStatus(data.status);
-      setMode(data.mode);
-      if (data.websiteResult && semanticReview.length === 0) {
-        applyAgentWebsiteResult(data);
-      }
+      const data = body as AgentV2Response;
+      applyV2Response(data);
 
       setMessages((prev) => [
         ...prev,
@@ -158,13 +162,12 @@ export default function Workspace() {
     ]);
 
     try {
-      const response = await fetch(`${API_URL}/api/agent/messages`, {
+      const response = await fetch(`${API_URL}/api/agent/v2/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           threadId,
           message: `Import product website: ${url}`,
-          graph,
         }),
       });
       const body = (await response.json()) as unknown;
@@ -180,11 +183,8 @@ export default function Workspace() {
           detail ?? `Python backend returned ${response.status}`
         );
       }
-      const data = body as AgentResponse;
-      setThreadId(data.threadId);
-      setAgentStatus(data.status);
-      setMode(data.mode);
-      applyAgentWebsiteResult(data);
+      const data = body as AgentV2Response;
+      applyV2Response(data);
       setWebsiteUrl("");
       setMessages((previous) => [
         ...previous,
@@ -204,13 +204,33 @@ export default function Workspace() {
     }
   }
 
-  function applyAgentWebsiteResult(data: AgentResponse) {
-    const website = data.websiteResult;
-    if (!website) return;
+  function applyV2Response(data: AgentV2Response) {
+    setThreadId(data.threadId);
+    setAgentStatus(data.status);
+    setMode(data.mode);
+    setCompanyCandidates(data.companyCandidates);
+    setProductCandidates(data.productCandidates);
+    setCurrentProductId(data.currentProduct?.productId ?? null);
+    setAgentActivity((previous) => [...previous, ...data.traceEvents]);
+    const website = data.currentProduct?.resolution;
+    if (website) {
+      applyWebsiteResult(
+        website,
+        data.currentProduct?.pendingReviews ?? [],
+        data.status === "awaiting_review"
+      );
+    }
+  }
+
+  function applyWebsiteResult(
+    website: WebsiteIngestResponse,
+    reviewItems: SemanticReviewItem[],
+    awaitingReview: boolean
+  ) {
     const mappingKey = (mapping: Omit<FieldMapping, "id">) =>
       `${mapping.evidenceId}|${mapping.target.templateKey}|${mapping.target.templatePath.join("/")}`;
     const reviewByMapping = new Map(
-      data.reviewItems.map((item) => [mappingKey(item.mapping), item])
+      reviewItems.map((item) => [mappingKey(item.mapping), item])
     );
     const deterministic: FieldMapping[] = website.proposal.mappings.map(
       (mapping, index) => ({
@@ -221,7 +241,7 @@ export default function Workspace() {
       })
     );
     const proposalKeys = new Set(website.proposal.mappings.map(mappingKey));
-    const semantic: FieldMapping[] = data.reviewItems
+    const semantic: FieldMapping[] = reviewItems
       .filter((item) => !proposalKeys.has(mappingKey(item.mapping)))
       .map((item) => ({
         ...item.mapping,
@@ -229,8 +249,8 @@ export default function Workspace() {
       }));
     setProductName(website.proposal.productName || "Website product");
     setMappings([...deterministic, ...semantic]);
-    setSemanticReview(data.status === "awaiting_review" ? data.reviewItems : []);
-    if (data.status === "awaiting_review") setReviewDecisions({});
+    setSemanticReview(awaitingReview ? reviewItems : []);
+    if (awaitingReview) setReviewDecisions({});
     setEvidence(website.evidence);
     setMappingResult(website.mappingResult);
     setCoverageReport(website.coverageReport);
@@ -252,19 +272,18 @@ export default function Workspace() {
 
     setBusy(true);
     try {
-      const response = await fetch(`${API_URL}/api/agent/review`, {
+      if (!currentProductId) throw new Error("No active product is available for review.");
+      const response = await fetch(`${API_URL}/api/agent/v2/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ threadId, decisions }),
+        body: JSON.stringify({ threadId, productId: currentProductId, decisions }),
       });
-      const body = (await response.json()) as AgentResponse | { detail?: string };
+      const body = (await response.json()) as AgentV2Response | { detail?: string };
       if (!response.ok) {
         throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${response.status}`);
       }
-      const data = body as AgentResponse;
-      setAgentStatus(data.status);
-      applyAgentWebsiteResult(data);
-      setSemanticReview([]);
+      const data = body as AgentV2Response;
+      applyV2Response(data);
       setReviewDecisions({});
       setMessages((previous) => [
         ...previous,
@@ -312,6 +331,8 @@ export default function Workspace() {
       target: selected.target,
       sourceValue: correctedValue?.trim() || mapping.sourceValue,
       status: "approved",
+      mappingOrigin: "human",
+      humanReviewed: true,
       reasoning: "Corrected by you, and saved to the Integration Graph.",
     };
     setMappings((previous) =>
@@ -475,6 +496,11 @@ export default function Workspace() {
               LangGraph agent
             </span>
           )}
+          {mode === "agent_v2" && (
+            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
+              Autonomous agent
+            </span>
+          )}
           {mode === "configuration_required" && (
             <span className="rounded-full bg-warn/10 px-2.5 py-1 font-mono text-[11px] text-warn">
               LLM key required
@@ -538,6 +564,47 @@ export default function Workspace() {
                   </div>
                 </div>
               ))}
+              {agentStatus === "awaiting_company" && companyCandidates.length > 0 && !busy && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                    Select the company
+                  </p>
+                  {companyCandidates.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      onClick={() => void send(`Select company ${candidate.id}: ${candidate.name}`)}
+                      className="w-full rounded-xl border border-hairline bg-white p-3 text-left hover:border-signal/40"
+                    >
+                      <p className="text-sm font-semibold text-ink">{candidate.name}</p>
+                      <p className="mt-1 text-xs text-muted">{candidate.domain}</p>
+                      {candidate.description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-muted">
+                          {candidate.description}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {agentStatus === "awaiting_product" && productCandidates.length > 0 && !busy && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                    Select a product
+                  </p>
+                  {productCandidates.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      onClick={() => void send(`Select product ${candidate.id}: ${candidate.name}`)}
+                      className="w-full rounded-xl border border-hairline bg-white p-3 text-left hover:border-signal/40"
+                    >
+                      <p className="text-sm font-semibold text-ink">{candidate.name}</p>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted">
+                        {candidate.description || candidate.officialUrl}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
               {agentStatus === "awaiting_optional_choice" && !busy && (
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -795,7 +862,17 @@ export default function Workspace() {
             ) : tab === "coverage" ? (
               <CoveragePanel report={coverageReport} evidence={evidence} completion={completionSummary} />
             ) : tab === "process" ? (
-              <WorkflowTrace events={workflowEvents} />
+              <div className="space-y-6">
+                <AgentActivity events={agentActivity} />
+                {workflowEvents.length > 0 && (
+                  <div>
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
+                      Deterministic pipeline
+                    </p>
+                    <WorkflowTrace events={workflowEvents} />
+                  </div>
+                )}
+              </div>
             ) : graph.length === 0 ? (
               <Empty
                 title="The graph is empty"

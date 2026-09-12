@@ -26,26 +26,25 @@ make dev
 Open `http://127.0.0.1:3000`. `Ctrl-C` stops both processes started by
 `make dev`.
 
-No API key is needed: manual input and website-to-IDTA mapping are
-deterministic. Crawl4AI uses the locally installed Chromium browser to render
-submitted product pages.
-To let OpenRouter propose mappings, copy `.env.example` to `.env.local` and set
-`OPENROUTER_API_KEY`. The model still cannot choose authoritative semantic IDs,
-set confidence, compile AAS JSON, or bypass validation.
+The deterministic `/api/website` and `/api/dpp` capabilities do not need an API
+key. The autonomous workspace does: copy `.env.example` to `.env.local` and set
+`OPENROUTER_API_KEY`. Crawl4AI uses locally installed Chromium to render pages.
+The model can choose actions and propose bounded mappings, but it cannot invent
+authoritative semantic IDs, set confidence, compile AAS JSON, or bypass validation.
 
-With an OpenRouter key, the workspace uses a resumable LangGraph workflow:
+With an OpenRouter key, the workspace uses a persistent PydanticAI decision loop:
 
 ```text
-conversation → website tools → evidence ledger → IDTA coverage
-             → semantic proposals → human review → resume
+conversation ↔ autonomous agent ↔ discovery/extraction/mapping/AAS tools
+                              ↓
+                  typed state + trusted history
 ```
 
-The chat can explain MIA and accept a product URL directly. Website acquisition,
-fact extraction and coverage remain deterministic. The model sees only retained
-evidence and official requirement identifiers, and every additional semantic
-mapping pauses for explicit approval or rejection. The MVP checkpointer is
-in-memory, so conversation threads survive requests but reset when the Python
-process restarts; a durable checkpointer is the next deployment step.
+The chat accepts a company name, product choice, or direct URL. Website acquisition,
+fact extraction, confidence, coverage, compilation, and validation remain deterministic.
+Semantic proposals are constrained to retained evidence and official requirement IDs.
+Trusted PydanticAI message history and typed workflow state are stored server-side in
+SQLite for local development.
 
 Run `make help` to see the short command list. The most useful checks are:
 
@@ -76,31 +75,27 @@ not prove that a value on a new product is correct.
 ## Repository map
 
 ```text
-app/, components/              Next.js interface only
-backend/src/mia_dpp/models.py  MIA-owned Pydantic contracts
-backend/src/mia_dpp/extraction.py
-                               approved website rules and Crawl4AI boundary
-backend/src/mia_dpp/website.py product-page text/provenance integration
-backend/src/mia_dpp/documents.py
-                               optional PDF-to-AAS preprocessing boundary
-backend/src/mia_dpp/templates.py
-                               verified official-template loader
-backend/src/mia_dpp/aas.py     generic compiler and layered validator
-backend/src/mia_dpp/pipeline.py
-                               deterministic application service
-backend/src/mia_dpp/basyx.py   validation-gated BaSyx HTTP adapter
-backend/tests/                 unit, contract, and end-to-end tests
+app/, components/                 Next.js structured-agent interface
+backend/src/mia_dpp/agent/v2/     autonomous loop, state, persistence, trace, tools
+backend/src/mia_dpp/tools/web/    generic and adapter-based evidence extraction
+backend/src/mia_dpp/tools/mapping/
+                                  mapping, confidence, coverage, review
+backend/src/mia_dpp/aas/          official templates, compiler, validator
+backend/src/mia_dpp/domain/       framework-neutral Pydantic concepts
+backend/src/mia_dpp/integrations/ vendor-specific adapters
+backend/tests/                    deterministic and autonomous-loop tests
 standards/idta-submodel-templates/
-                               unmodified, commit-pinned standards data
+                                  unmodified, commit-pinned standards data
 ```
 
 MIA does not copy upstream application source into its own package. `aas-core`
 and Crawl4AI are locked Python dependencies behind MIA-owned adapters. BaSyx
-PDF-to-AAS remains optional, and BaSyx is an external runtime. AASbyLLM and
-LangGraph remain reference ideas until a proven service needs them.
+PDF-to-AAS remains optional, and BaSyx is an external runtime. AASbyLLM remains
+reference material. LangGraph is temporarily retained only as a migration fallback
+for the former workflow endpoints; the workspace uses Agent V2.
 
-See `docs/deterministic-backend.md` for a guided explanation of the code and
-the validation layers.
+See `docs/agent-v2.md` for the autonomous architecture and
+`docs/deterministic-backend.md` for the validation layers.
 
 ## Local deployment
 

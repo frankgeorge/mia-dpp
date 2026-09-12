@@ -112,6 +112,60 @@ def test_company_only_request_uses_discovery_and_returns_structured_choices() ->
     assert snapshot.messages
 
 
+def test_one_run_can_discover_and_queue_products_without_a_fixed_graph() -> None:
+    search = FakeSearch()
+    company_tool = CompanyDiscoveryTool(search)
+    product_tool = ProductDiscoveryTool(search)
+    company = asyncio.run(company_tool.search("Siemens"))[0]
+    product = asyncio.run(product_tool.discover(company))[0]
+    repository = OfficialTemplateRepository()
+    store = InMemoryThreadStore()
+    model = ScriptedTestModel(
+        arguments={
+            "search_companies": {"company_name": "Siemens"},
+            "select_company": {"company_id": company.id},
+            "discover_products": {"query": "industrial products"},
+            "select_products": {"product_ids": [product.id]},
+        },
+        call_tools=[
+            "search_companies",
+            "select_company",
+            "discover_products",
+            "select_products",
+        ],
+        custom_output_args={
+            "reply": "The selected product is queued.",
+            "status": "awaiting_input",
+            "decision_summary": "Discovered and selected a company and product.",
+        },
+    )
+    runtime = MiaAgentV2(
+        model=model,
+        store=store,
+        company_tool=company_tool,
+        product_tool=product_tool,
+        product_research_tool=ProductResearchTool(search),
+        web_tool=WebExtractionTool(loader=UnusedLoader()),
+        mapping_tool=ProductResolver(repository),
+        mapping_review=MappingReviewService(repository),
+        dpp_pipeline=DeterministicDppPipeline(repository),
+    )
+
+    response = asyncio.run(runtime.message(AgentV2Request(message="Create a DPP for Siemens")))
+
+    assert response.selected_company == company
+    assert response.selected_product_ids == (product.id,)
+    snapshot = asyncio.run(store.load(response.thread_id))
+    assert snapshot is not None
+    assert snapshot.state.product_queue == (product.id,)
+    assert [event.tool_name for event in response.trace_events if event.tool_name] == [
+        "search_companies",
+        "select_company",
+        "discover_products",
+        "select_products",
+    ]
+
+
 def test_sqlite_keeps_workflow_state_and_model_history_separate(tmp_path: Path) -> None:
     store = SQLiteThreadStore(tmp_path / "threads.sqlite3")
     result = asyncio.run(agent(store).message(AgentV2Request(message="DPP for Siemens")))

@@ -1,4 +1,5 @@
 export type MappingStatus = "auto" | "review" | "approved" | "rejected";
+export type MappingOrigin = "deterministic" | "semantic_agent" | "human";
 export type Severity = "info" | "warning" | "error";
 export type ValidationCategory = "metamodel" | "template" | "policy";
 export type RequirementKind = "value" | "structural";
@@ -113,6 +114,8 @@ export interface FieldMapping {
   confidenceAssessment: ConfidenceAssessment;
   reasoning: string;
   status: MappingStatus;
+  mappingOrigin: MappingOrigin;
+  humanReviewed: boolean;
   /** True when earlier human review helped resolve the target. */
   fromGraph?: boolean;
 }
@@ -325,6 +328,88 @@ export interface AgentResponse {
   mode: "agent" | "configuration_required";
   websiteResult: WebsiteIngestResponse | null;
   reviewItems: SemanticReviewItem[];
+}
+
+export type AgentV2Status =
+  | "running"
+  | "awaiting_company"
+  | "awaiting_product"
+  | "awaiting_review"
+  | "awaiting_input"
+  | "awaiting_optional_choice"
+  | "ready_to_build"
+  | "completed"
+  | "failed";
+
+export interface CompanyCandidate {
+  id: string;
+  name: string;
+  officialUrl: string;
+  domain: string;
+  description: string;
+  sourceUri: string;
+}
+
+export interface ProductCandidate {
+  id: string;
+  name: string;
+  officialUrl: string;
+  description: string;
+  family: string | null;
+  model: string | null;
+  thumbnailUrl: string | null;
+  sourceUri: string;
+}
+
+export interface ProductSourceCandidate {
+  id: string;
+  productId: string;
+  title: string;
+  url: string;
+  description: string;
+  authoritativeDomain: boolean;
+  sourceUri: string;
+}
+
+export interface AgentTraceEvent {
+  id: string;
+  threadId: string;
+  eventType: string;
+  status: "started" | "completed" | "failed";
+  timestamp: string;
+  summary: string;
+  toolName: string | null;
+  productId: string | null;
+  inputSummary: string | null;
+  outputSummary: string | null;
+  sourceIds: string[];
+  durationMs: number | null;
+  metadata: Record<string, string | number | boolean | null>;
+}
+
+export interface AgentV2ProductWork {
+  productId: string;
+  candidate: ProductCandidate | null;
+  sourceCandidates: ProductSourceCandidate[];
+  extractions: unknown[];
+  resolution: WebsiteIngestResponse | null;
+  pendingReviews: SemanticReviewItem[];
+  reviewComplete: boolean;
+  aasArtifactSha256: string | null;
+}
+
+export interface AgentV2Response {
+  threadId: string;
+  reply: string;
+  status: AgentV2Status;
+  decisionSummary: string;
+  companyCandidates: CompanyCandidate[];
+  selectedCompany: CompanyCandidate | null;
+  productCandidates: ProductCandidate[];
+  selectedProductIds: string[];
+  currentProduct: AgentV2ProductWork | null;
+  traceEvents: AgentTraceEvent[];
+  mode: "agent_v2";
 }
 
 export interface WebsiteIngestResponse {

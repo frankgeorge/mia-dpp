@@ -67,6 +67,15 @@ export function MappingRow({
         {m.reasoning}
       </p>
 
+      <p className="mt-2 inline-block rounded-full bg-mist px-2 py-0.5 font-mono text-[10px] text-muted">
+        {m.mappingOrigin === "semantic_agent"
+          ? "AI-assisted proposal"
+          : m.mappingOrigin === "human"
+            ? "Human supplied/corrected"
+            : "Deterministic mapping"}
+        {m.humanReviewed ? " · reviewed" : ""}
+      </p>
+
       <details className="mt-2.5 rounded-lg border border-hairline bg-mist/60 px-3 py-2">
         <summary className="cursor-pointer text-[12px] font-medium text-ink">
           Why {pct}%? {missingPct > 0 && `What is the missing ${missingPct}%?`}
