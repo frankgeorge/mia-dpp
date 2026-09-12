@@ -1,6 +1,6 @@
-from mia_dpp.models import Cardinality, Requirement, RequirementInventory, RequirementKind
-from mia_dpp.requirements import build_requirement_inventory
-from mia_dpp.templates import OfficialTemplateRepository
+from mia_dpp.aas.requirements import build_requirement_inventory
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.targets import Cardinality, Requirement, RequirementInventory, RequirementKind
 
 
 def requirement_by_path(

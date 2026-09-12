@@ -9,16 +9,18 @@ from pathlib import Path
 
 import pytest
 
+from mia_dpp.aas.build import build_dpp
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.errors import MappingError
-from mia_dpp.evidence import EvidenceNormalizer
-from mia_dpp.extraction import ProductUrlRejectedError, RenderedPage
-from mia_dpp.models import FieldMapping, MappingStatus, WebsiteIngestRequest
-from mia_dpp.pipeline import build_dpp
-from mia_dpp.source_artifacts import raw_website_artifact
-from mia_dpp.templates import OfficialTemplateRepository
-from mia_dpp.url_policy import ProductUrlPolicy
-from mia_dpp.website import WebsiteIngestionService
-from mia_dpp.website_facts import WebsiteFactExtractor
+from mia_dpp.resolution.models import WebsiteIngestRequest
+from mia_dpp.resolution.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.web.artifacts import raw_website_artifact
+from mia_dpp.tools.web.generic import WebsiteFactExtractor
+from mia_dpp.tools.web.models import ProductUrlRejectedError, RenderedPage
+from mia_dpp.tools.web.normalizer import EvidenceNormalizer
+from mia_dpp.tools.web.tool import WebExtractionTool
+from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 FIXTURE = Path(__file__).parent / "fixtures" / "web" / "website-product.html"
 PRODUCT_URL = "https://manufacturer.example/products/pg-16"
@@ -49,12 +51,13 @@ class FixtureLoader:
         return product_page(self.final_url)
 
 
-def service(loader: FixtureLoader | None = None) -> WebsiteIngestionService:
-    return WebsiteIngestionService(
-        OfficialTemplateRepository(),
+def service(loader: FixtureLoader | None = None) -> WebsiteWorkflow:
+    repository = OfficialTemplateRepository()
+    web_tool = WebExtractionTool(
         loader=loader or FixtureLoader(),
         url_policy=ProductUrlPolicy(public_resolver),
     )
+    return WebsiteWorkflow(web_tool, ProductResolver(repository))
 
 
 def test_generic_fact_extraction_retains_heterogeneous_source_facts() -> None:
@@ -247,11 +250,7 @@ def test_same_value_is_not_attached_to_the_wrong_json_ld_field() -> None:
             return page
 
     response = asyncio.run(
-        WebsiteIngestionService(
-            OfficialTemplateRepository(),
-            loader=RepeatedValueLoader(),
-            url_policy=ProductUrlPolicy(public_resolver),
-        ).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
+        service(RepeatedValueLoader()).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
     )
 
     order_code = next(item for item in response.evidence if item.source_label == "Article number")
@@ -282,13 +281,7 @@ def test_mapping_failure_never_deletes_or_collapses_evidence() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(
-        WebsiteIngestionService(
-            OfficialTemplateRepository(),
-            loader=UnmappedLoader(),
-            url_policy=ProductUrlPolicy(public_resolver),
-        ).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
-    )
+    response = asyncio.run(service(UnmappedLoader()).ingest(WebsiteIngestRequest(url=PRODUCT_URL)))
 
     technical = [
         item
@@ -344,13 +337,7 @@ def test_website_does_not_treat_footer_year_as_construction_year() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(
-        WebsiteIngestionService(
-            OfficialTemplateRepository(),
-            loader=FooterLoader(),
-            url_policy=ProductUrlPolicy(public_resolver),
-        ).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
-    )
+    response = asyncio.run(service(FooterLoader()).ingest(WebsiteIngestRequest(url=PRODUCT_URL)))
 
     assert "YearOfConstruction" not in {item.target_element for item in response.proposal.mappings}
 
@@ -373,11 +360,7 @@ def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
             return page
 
     response = asyncio.run(
-        WebsiteIngestionService(
-            OfficialTemplateRepository(),
-            loader=FactorySettingLoader(),
-            url_policy=ProductUrlPolicy(public_resolver),
-        ).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
+        service(FactorySettingLoader()).ingest(WebsiteIngestRequest(url=PRODUCT_URL))
     )
 
     assert "ManufacturingSite" not in {item.target_element for item in response.proposal.mappings}
@@ -451,11 +434,11 @@ def test_service_checks_the_final_crawl4ai_url() -> None:
     async def resolver(host: str, port: int) -> tuple[str, ...]:
         return ("127.0.0.1",) if host == "localhost" else ("93.184.216.34",)
 
-    ingestion = WebsiteIngestionService(
-        OfficialTemplateRepository(),
+    web_tool = WebExtractionTool(
         loader=FixtureLoader("http://localhost/internal"),
         url_policy=ProductUrlPolicy(resolver),
     )
+    ingestion = WebsiteWorkflow(web_tool, ProductResolver(OfficialTemplateRepository()))
 
     with pytest.raises(ProductUrlRejectedError, match="private"):
         asyncio.run(ingestion.ingest(WebsiteIngestRequest(url=PRODUCT_URL)))

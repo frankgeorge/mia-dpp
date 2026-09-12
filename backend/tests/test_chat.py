@@ -1,7 +1,8 @@
 """Tests for offline chat orchestration and explainable review states."""
 
 from mia_dpp.chat import demo_turn
-from mia_dpp.models import ChatMessage, ChatRequest, GraphEntry, MappingStatus
+from mia_dpp.domain.mappings import GraphEntry, MappingStatus
+from mia_dpp.llm.chat import ChatMessage, ChatRequest
 
 
 def test_demo_turn_returns_official_targets_and_explainable_scores() -> None:

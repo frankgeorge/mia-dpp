@@ -12,14 +12,18 @@ from types import SimpleNamespace
 import pytest
 
 from mia_dpp.errors import ExtractionError
-from mia_dpp.extraction import (
-    Crawl4AIPageLoader,
+from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
+from mia_dpp.tools.web.adapter import (
     HtmlEvidenceExtractor,
+)
+from mia_dpp.tools.web.models import (
+    ExtractionRule,
+    ExtractionSource,
     ProductUrlRejectedError,
     RenderedPage,
     RequiredEvidenceMissingError,
+    SiteAdapterSpec,
 )
-from mia_dpp.models import ExtractionRule, ExtractionSource, SiteAdapterSpec
 
 FIXTURES = Path(__file__).parent / "fixtures" / "web"
 PRODUCT_URL = "https://manufacturer.example/products/pg-16"

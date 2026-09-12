@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mia_dpp.coverage import CoverageAnalyzer
-from mia_dpp.models import (
-    CoverageReport,
-    CoverageStatus,
+from mia_dpp.aas.requirements import build_requirement_inventory
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.evidence import (
     EvidenceRecord,
     EvidenceStatus,
     ProductKnowledgePackage,
-    Requirement,
-    RequirementCoverage,
     SourceLocation,
 )
-from mia_dpp.requirements import build_requirement_inventory
-from mia_dpp.templates import OfficialTemplateRepository
+from mia_dpp.domain.mappings import (
+    CoverageReport,
+    CoverageStatus,
+    RequirementCoverage,
+)
+from mia_dpp.domain.targets import Requirement
+from mia_dpp.resolution.coverage import CoverageAnalyzer
 
 
 def evidence(identifier: str, label: str, value: str, unit: str | None = None) -> EvidenceRecord:

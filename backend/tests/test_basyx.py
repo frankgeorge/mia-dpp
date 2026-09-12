@@ -6,11 +6,11 @@ import json
 import httpx
 import pytest
 
-from mia_dpp.basyx import BasyxAasRepository
+from mia_dpp.aas.build import build_dpp
+from mia_dpp.aas.models import AasArtifact
+from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.errors import DeploymentError
-from mia_dpp.models import AasArtifact
-from mia_dpp.pipeline import build_dpp
-from mia_dpp.templates import OfficialTemplateRepository
+from mia_dpp.integrations.basyx import BasyxAasRepository
 from test_idta import PRODUCT, accepted_mappings
 
 

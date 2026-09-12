@@ -5,13 +5,17 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from mia_dpp.confidence import MatchQuality, ValueFormatQuality, assess_mapping_confidence
-from mia_dpp.models import (
-    ConfidenceAssessment,
+from mia_dpp.domain.evidence import (
     EvidenceRecord,
     EvidenceStatus,
     ProductKnowledgePackage,
     SourceLocation,
+)
+from mia_dpp.domain.mappings import ConfidenceAssessment
+from mia_dpp.resolution.confidence import (
+    MatchQuality,
+    ValueFormatQuality,
+    assess_mapping_confidence,
 )
 
 

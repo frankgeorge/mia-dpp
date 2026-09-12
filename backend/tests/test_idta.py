@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 import pytest
 from aas_core3 import jsonization, verification
 
+from mia_dpp.aas.build import build_dpp
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus, MappingTarget
 from mia_dpp.errors import MappingError
 from mia_dpp.idta import demo_propose, external_reference
-from mia_dpp.models import FieldMapping, MappingStatus, MappingTarget
-from mia_dpp.pipeline import build_dpp
-from mia_dpp.templates import OfficialTemplateRepository
 
 PRODUCT = (
     "AFRISO gauge, model RF100-16, serial number 2024-8871, built 2024, "

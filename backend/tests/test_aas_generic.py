@@ -5,18 +5,21 @@ from datetime import UTC, datetime
 from aas_core3 import jsonization, verification
 
 from mia_dpp.aas import AasCompiler, AasValidator
-from mia_dpp.confidence import MatchQuality, ValueFormatQuality, assess_mapping_confidence
-from mia_dpp.idta import mapping_target
-from mia_dpp.models import (
-    ApprovedMapping,
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.evidence import (
     EvidenceRecord,
     EvidenceStatus,
-    MappingSpecification,
     ProductKnowledgePackage,
     SourceLocation,
-    TargetProfile,
 )
-from mia_dpp.templates import OfficialTemplateRepository
+from mia_dpp.domain.mappings import ApprovedMapping, MappingSpecification
+from mia_dpp.domain.targets import TargetProfile
+from mia_dpp.idta import mapping_target
+from mia_dpp.resolution.confidence import (
+    MatchQuality,
+    ValueFormatQuality,
+    assess_mapping_confidence,
+)
 
 
 def test_compiles_nested_technical_data_from_the_second_official_template() -> None:
