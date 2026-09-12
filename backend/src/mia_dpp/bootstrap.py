@@ -20,6 +20,8 @@ from mia_dpp.llm.chat import ChatLLM, ChatModel, UnconfiguredChatLLM
 from mia_dpp.llm.semantic import SemanticLLM, SemanticModel, UnconfiguredSemanticLLM
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.mapping.review import MappingReviewService
+from mia_dpp.tools.products.research import ProductResearchTool
 from mia_dpp.tools.products.tool import ProductDiscoveryTool
 from mia_dpp.tools.web.tool import WebExtractionTool
 
@@ -48,6 +50,7 @@ def build_application(settings: Settings | None = None) -> Application:
     search = DdgsSearchProvider()
     company_tool = CompanyDiscoveryTool(search)
     product_tool = ProductDiscoveryTool(search)
+    product_research_tool = ProductResearchTool(search)
 
     chat_llm: ChatModel
     semantic_llm: SemanticModel
@@ -75,8 +78,10 @@ def build_application(settings: Settings | None = None) -> Application:
         store=SQLiteThreadStore(configured.thread_store_path),
         company_tool=company_tool,
         product_tool=product_tool,
+        product_research_tool=product_research_tool,
         web_tool=web_tool,
         mapping_tool=resolver,
+        mapping_review=MappingReviewService(templates),
         dpp_pipeline=DeterministicDppPipeline(templates),
     )
     return Application(

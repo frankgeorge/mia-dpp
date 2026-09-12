@@ -21,3 +21,15 @@ class ProductCandidate(WireModel):
     model: str | None = None
     thumbnail_url: str | None = None
     source_uri: str
+
+
+class ProductSourceCandidate(WireModel):
+    """A public page the agent may inspect for one already identified product."""
+
+    id: str
+    product_id: str
+    title: str
+    url: str
+    description: str = ""
+    authoritative_domain: bool
+    source_uri: str

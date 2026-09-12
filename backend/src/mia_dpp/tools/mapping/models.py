@@ -16,6 +16,7 @@ from mia_dpp.domain.mappings import (
     MappingResult,
     NameplateElement,
 )
+from mia_dpp.domain.targets import Requirement
 from mia_dpp.domain.workflow import WorkflowEvent
 
 
@@ -56,3 +57,11 @@ class WebsiteIngestResponse(WireModel):
         if self.coverage_report.analyzed_evidence_ids != tuple(item.id for item in self.evidence):
             raise ValueError("coverageReport must analyze every evidence record in order")
         return self
+
+
+class SemanticMappingContext(WireModel):
+    """Bounded unresolved data safe to provide to semantic reasoning."""
+
+    product_id: str
+    evidence: tuple[EvidenceRecord, ...]
+    requirements: tuple[Requirement, ...]

@@ -15,7 +15,7 @@ from mia_dpp.aas.templates import (
     TemplateRepositoryError,
 )
 from mia_dpp.agent.models import AgentMessageRequest, AgentResponse, AgentReviewRequest
-from mia_dpp.agent.v2.models import AgentV2Request, AgentV2Response
+from mia_dpp.agent.v2.models import AgentV2Request, AgentV2Response, AgentV2ReviewRequest
 from mia_dpp.api.schemas import (
     DppBuildRequest,
     HealthResponse,
@@ -110,6 +110,22 @@ async def agent_v2_message(
         raise HTTPException(status_code=503, detail=str(error)) from error
     except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=502, detail=f"agent V2 failed: {error}") from error
+
+
+@router.post("/api/agent/v2/review", response_model=AgentV2Response)
+async def agent_v2_review(
+    payload: AgentV2ReviewRequest,
+    http_request: Request,
+) -> AgentV2Response:
+    """Apply typed human mapping decisions to a trusted Agent V2 thread."""
+
+    try:
+        return await _application(http_request).agent_v2.review(payload)
+    except (KeyError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=422,
+            detail=f"review could not be applied: {error}",
+        ) from error
 
 
 @router.post("/api/agent/review", response_model=AgentResponse)

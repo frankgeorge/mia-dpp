@@ -15,6 +15,7 @@ from mia_dpp.agent.v2.models import (
     AgentRunOutput,
     AgentV2Request,
     AgentV2Response,
+    AgentV2ReviewRequest,
     AgentV2Status,
     MiaState,
     TraceStatus,
@@ -24,6 +25,8 @@ from mia_dpp.agent.v2.store import ThreadStore
 from mia_dpp.agent.v2.tools import AGENT_TOOLS
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.resolver import ProductResolver
+from mia_dpp.tools.mapping.review import MappingReviewService
+from mia_dpp.tools.products.research import ProductResearchTool
 from mia_dpp.tools.products.tool import ProductDiscoveryTool
 from mia_dpp.tools.web.tool import WebExtractionTool
 
@@ -38,15 +41,19 @@ class MiaAgentV2:
         store: ThreadStore,
         company_tool: CompanyDiscoveryTool,
         product_tool: ProductDiscoveryTool,
+        product_research_tool: ProductResearchTool,
         web_tool: WebExtractionTool,
         mapping_tool: ProductResolver,
+        mapping_review: MappingReviewService,
         dpp_pipeline: DeterministicDppPipeline,
     ) -> None:
         self._store = store
         self._company_tool = company_tool
         self._product_tool = product_tool
+        self._product_research_tool = product_research_tool
         self._web_tool = web_tool
         self._mapping_tool = mapping_tool
+        self._mapping_review = mapping_review
         self._dpp_pipeline = dpp_pipeline
         self._configured = model is not None
         self._agent: Agent[MiaDependencies, AgentRunOutput] | None = None
@@ -104,8 +111,10 @@ class MiaAgentV2:
             state=state,
             company_tool=self._company_tool,
             product_tool=self._product_tool,
+            product_research_tool=self._product_research_tool,
             web_tool=self._web_tool,
             mapping_tool=self._mapping_tool,
+            mapping_review=self._mapping_review,
             dpp_pipeline=self._dpp_pipeline,
         )
         state.add_event(
@@ -136,6 +145,62 @@ class MiaAgentV2:
             trace_offset=trace_offset,
         )
 
+    async def review(self, request: AgentV2ReviewRequest) -> AgentV2Response:
+        """Apply explicit human decisions to trusted pending state, then resume next turn."""
+
+        snapshot = await self._store.load(request.thread_id)
+        if snapshot is None:
+            raise ValueError("unknown agent thread")
+        state = snapshot.state
+        trace_offset = len(state.trace)
+        work = state.products.get(request.product_id)
+        if work is None or work.resolution is None:
+            raise ValueError("unknown or unresolved product")
+        pending = {item.id: item for item in work.pending_reviews}
+        for decision in request.decisions:
+            item = pending.get(decision.review_id)
+            if item is None:
+                raise ValueError(f"review is not pending: {decision.review_id}")
+            resolution, _ = self._mapping_review.decide(
+                work.resolution,
+                item,
+                decision=decision.decision,
+                thread_id=state.thread_id,
+                corrected_requirement_id=decision.corrected_requirement_id,
+                corrected_value=decision.corrected_value,
+            )
+            work.resolution = resolution
+            pending.pop(decision.review_id)
+            state.add_event(
+                "human.review_received",
+                f"Human review decision recorded: {decision.decision}.",
+                tool_name="human_review",
+                product_id=request.product_id,
+                metadata={"reviewId": decision.review_id, "decision": decision.decision},
+            )
+        work.pending_reviews = tuple(pending.values())
+        state.products[request.product_id] = work
+        state.current_product_id = request.product_id
+        state.status = (
+            AgentV2Status.AWAITING_REVIEW if work.pending_reviews else AgentV2Status.AWAITING_INPUT
+        )
+        await self._store.save(state, snapshot.messages)
+        reply = (
+            f"Saved {len(request.decisions)} review decision"
+            f"{'s' if len(request.decisions) != 1 else ''}. "
+            + (
+                f"{len(work.pending_reviews)} mappings still need review."
+                if work.pending_reviews
+                else "I can now continue researching gaps or build when requirements are ready."
+            )
+        )
+        return self._response(
+            state,
+            reply=reply,
+            decision_summary="Human mapping decisions were deterministically applied.",
+            trace_offset=trace_offset,
+        )
+
     @staticmethod
     def _prompt_with_state(message: str, state: MiaState) -> str:
         compact = {
@@ -155,7 +220,16 @@ class MiaAgentV2:
             "selectedProductIds": list(state.selected_product_ids),
             "products": {
                 key: {
-                    "hasEvidence": value.extraction is not None,
+                    "sourceCount": len(value.extractions),
+                    "sourceCandidates": [
+                        {
+                            "id": item.id,
+                            "url": item.url,
+                            "authoritative": item.authoritative_domain,
+                        }
+                        for item in value.source_candidates
+                    ],
+                    "hasEvidence": bool(value.extractions),
                     "hasMapping": value.resolution is not None,
                     "pendingReviews": len(value.pending_reviews),
                     "hasArtifact": value.aas_artifact_sha256 is not None,

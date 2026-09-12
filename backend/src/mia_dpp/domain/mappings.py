@@ -18,6 +18,12 @@ class MappingStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class MappingOrigin(StrEnum):
+    DETERMINISTIC = "deterministic"
+    SEMANTIC_AGENT = "semantic_agent"
+    HUMAN = "human"
+
+
 class CoverageStatus(StrEnum):
     SATISFIED = "satisfied"
     CANDIDATE = "candidate"
@@ -204,6 +210,8 @@ class MappingDraft(WireModel):
     confidence_assessment: ConfidenceAssessment
     reasoning: str
     from_graph: bool = False
+    mapping_origin: MappingOrigin = MappingOrigin.DETERMINISTIC
+    human_reviewed: bool = False
 
     @model_validator(mode="after")
     def legacy_fields_match_typed_target(self) -> MappingDraft:

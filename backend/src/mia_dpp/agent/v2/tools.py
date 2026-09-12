@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import time
+from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field
 from pydantic_ai import RunContext, Tool
@@ -21,6 +23,13 @@ class ToolObservation(WireModel):
     summary: str
     count: int = Field(ge=0)
     identifiers: tuple[str, ...] = ()
+
+
+class SemanticContextObservation(WireModel):
+    outcome: str
+    product_id: str
+    evidence: tuple[dict[str, object], ...]
+    requirements: tuple[dict[str, object], ...]
 
 
 async def search_companies(
@@ -192,7 +201,8 @@ async def extract_product_page(
         product_id=resolved_id,
         candidate=candidate,
     )
-    work.extraction = extraction
+    if extraction.source_url not in {item.source_url for item in work.extractions}:
+        work.extractions = (*work.extractions, extraction)
     ctx.deps.state.products[resolved_id] = work
     if resolved_id not in ctx.deps.state.selected_product_ids:
         ctx.deps.state.selected_product_ids = (*ctx.deps.state.selected_product_ids, resolved_id)
@@ -225,7 +235,8 @@ async def map_product_evidence(
     """Map existing evidence against selected official templates deterministically."""
 
     work = ctx.deps.state.products.get(product_id)
-    if work is None or work.extraction is None:
+    extraction = work.combined_extraction() if work is not None else None
+    if work is None or extraction is None:
         return ToolObservation(
             outcome="evidence_required",
             summary="Extract product evidence before mapping it.",
@@ -233,21 +244,16 @@ async def map_product_evidence(
         )
     started = time.monotonic()
     request = WebsiteIngestRequest(
-        url=work.extraction.source_url,
+        url=extraction.source_url,
         template_keys=ctx.deps.state.target_submodels,
     )
-    resolution = await ctx.deps.mapping_tool.resolve(work.extraction, request)
+    resolution = await ctx.deps.mapping_tool.resolve(extraction, request)
     work.resolution = resolution
-    review_mappings = tuple(
-        item
-        for item in (*resolution.mapping_result.mapped, *resolution.mapping_result.ambiguous)
-        if item.status is MappingStatus.REVIEW
-    )
-    work.pending_reviews = ()
+    work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(resolution)
     ctx.deps.state.products[product_id] = work
     stats = resolution.coverage_report.statistics
     ctx.deps.state.status = (
-        AgentV2Status.AWAITING_REVIEW if review_mappings else AgentV2Status.AWAITING_INPUT
+        AgentV2Status.AWAITING_REVIEW if work.pending_reviews else AgentV2Status.AWAITING_INPUT
     )
     ctx.deps.state.add_event(
         "mapping.completed",
@@ -276,6 +282,295 @@ async def map_product_evidence(
         ),
         count=len(resolution.mapping_result.mapped),
         identifiers=(product_id,),
+    )
+
+
+async def research_product_sources(
+    ctx: RunContext[MiaDependencies],
+    product_id: str,
+    query: str,
+) -> ToolObservation:
+    """Find additional pages that may resolve a product's current evidence or coverage gaps."""
+
+    work = ctx.deps.state.products.get(product_id)
+    if work is None:
+        return ToolObservation(
+            outcome="product_required",
+            summary="Select or extract a product before researching additional sources.",
+            count=0,
+        )
+    extraction = work.combined_extraction()
+    product_name = (
+        work.candidate.name
+        if work.candidate is not None
+        else extraction.product_name
+        if extraction is not None
+        else product_id
+    )
+    domain = ctx.deps.state.selected_company.domain if ctx.deps.state.selected_company else None
+    if domain is None and extraction is not None:
+        domain = (urlsplit(extraction.source_url).hostname or "").removeprefix("www.").casefold()
+    started = time.monotonic()
+    try:
+        candidates = await ctx.deps.product_research_tool.search(
+            product_id=product_id,
+            product_name=product_name,
+            query=query,
+            manufacturer_domain=domain,
+        )
+    except SearchUnavailableError as error:
+        ctx.deps.state.add_event(
+            "source.research",
+            str(error),
+            status=TraceStatus.FAILED,
+            tool_name="research_product_sources",
+            product_id=product_id,
+            input_summary=query,
+        )
+        return ToolObservation(outcome="unavailable", summary=str(error), count=0)
+    existing_urls = {item.source_url for item in work.extractions}
+    work.source_candidates = tuple(item for item in candidates if item.url not in existing_urls)
+    ctx.deps.state.products[product_id] = work
+    ctx.deps.state.add_event(
+        "source.candidates",
+        f"Found {len(work.source_candidates)} additional source candidates.",
+        tool_name="research_product_sources",
+        product_id=product_id,
+        input_summary=query,
+        output_summary=f"{len(work.source_candidates)} candidate pages",
+        duration_ms=int((time.monotonic() - started) * 1000),
+        metadata={
+            "count": len(work.source_candidates),
+            "authoritative": sum(item.authoritative_domain for item in work.source_candidates),
+        },
+    )
+    return ToolObservation(
+        outcome="candidates_found" if work.source_candidates else "no_results",
+        summary=(
+            "Inspect a relevant authoritative candidate with extract_product_page."
+            if work.source_candidates
+            else "No additional source was found for this query."
+        ),
+        count=len(work.source_candidates),
+        identifiers=tuple(item.id for item in work.source_candidates),
+    )
+
+
+async def inspect_unresolved_mappings(
+    ctx: RunContext[MiaDependencies],
+    product_id: str,
+) -> SemanticContextObservation:
+    """Inspect bounded unmatched evidence and allowed official targets for semantic reasoning."""
+
+    work = ctx.deps.state.products.get(product_id)
+    if work is None or work.resolution is None:
+        return SemanticContextObservation(
+            outcome="mapping_required",
+            product_id=product_id,
+            evidence=(),
+            requirements=(),
+        )
+    context = ctx.deps.mapping_review.semantic_context(work.resolution)
+    evidence = tuple(
+        {
+            "id": item.id,
+            "label": item.source_label or item.predicate,
+            "value": item.value,
+            "unit": item.unit,
+            "context": (item.source_location.excerpt or "")[:240],
+        }
+        for item in context.evidence
+    )
+    requirements = tuple(
+        {
+            "id": item.id,
+            "name": item.id_short,
+            "template": item.template_key,
+            "path": list(item.template_path),
+            "description": (item.description or "")[:360],
+            "valueType": item.value_type,
+            "unit": item.unit,
+            "required": item.required,
+        }
+        for item in context.requirements
+    )
+    ctx.deps.state.add_event(
+        "mapping.semantic_context",
+        (
+            f"Prepared {len(evidence)} unresolved facts and {len(requirements)} allowed "
+            "official requirements."
+        ),
+        tool_name="inspect_unresolved_mappings",
+        product_id=product_id,
+        metadata={"evidence": len(evidence), "requirements": len(requirements)},
+    )
+    return SemanticContextObservation(
+        outcome="context_ready",
+        product_id=product_id,
+        evidence=evidence,
+        requirements=requirements,
+    )
+
+
+async def propose_semantic_mapping(
+    ctx: RunContext[MiaDependencies],
+    product_id: str,
+    evidence_id: str,
+    requirement_id: str,
+    reason_summary: str,
+) -> ToolObservation:
+    """Propose one bounded semantic match; Python validates IDs and requires human review."""
+
+    work = ctx.deps.state.products.get(product_id)
+    if work is None or work.resolution is None:
+        return ToolObservation(
+            outcome="mapping_required",
+            summary="Run deterministic mapping before semantic proposals.",
+            count=0,
+        )
+    if any(
+        item.mapping.evidence_id == evidence_id or item.requirement_id == requirement_id
+        for item in work.pending_reviews
+    ):
+        return ToolObservation(
+            outcome="duplicate",
+            summary="This evidence already has a pending semantic proposal.",
+            count=0,
+        )
+    try:
+        review = ctx.deps.mapping_review.propose(
+            work.resolution,
+            evidence_id=evidence_id,
+            requirement_id=requirement_id,
+            reason_summary=reason_summary,
+        )
+    except ValueError as error:
+        return ToolObservation(outcome="invalid", summary=str(error), count=0)
+    work.pending_reviews = (*work.pending_reviews, review)
+    ctx.deps.state.products[product_id] = work
+    ctx.deps.state.status = AgentV2Status.AWAITING_REVIEW
+    ctx.deps.state.add_event(
+        "mapping.semantic_proposed",
+        "Created a constrained semantic proposal requiring human review.",
+        tool_name="propose_semantic_mapping",
+        product_id=product_id,
+        source_ids=(evidence_id,),
+        metadata={
+            "reviewId": review.id,
+            "confidence": review.mapping.confidence,
+            "authoritative": False,
+        },
+    )
+    return ToolObservation(
+        outcome="review_required",
+        summary="The semantic proposal is validated but awaits human approval.",
+        count=1,
+        identifiers=(review.id,),
+    )
+
+
+async def review_semantic_mapping(
+    ctx: RunContext[MiaDependencies],
+    product_id: str,
+    review_id: str,
+    decision: Literal["approve", "correct", "reject"],
+    corrected_requirement_id: str | None = None,
+    corrected_value: str | None = None,
+) -> ToolObservation:
+    """Apply a human approve/correct/reject decision to a pending semantic proposal."""
+
+    work = ctx.deps.state.products.get(product_id)
+    if work is None or work.resolution is None:
+        return ToolObservation(
+            outcome="mapping_required",
+            summary="No mapped product exists for this review.",
+            count=0,
+        )
+    item = next((item for item in work.pending_reviews if item.id == review_id), None)
+    if item is None:
+        return ToolObservation(
+            outcome="invalid_review",
+            summary="The review ID is not pending for this product.",
+            count=0,
+        )
+    try:
+        result, reviewed = ctx.deps.mapping_review.decide(
+            work.resolution,
+            item,
+            decision=decision,
+            thread_id=ctx.deps.state.thread_id,
+            corrected_requirement_id=corrected_requirement_id,
+            corrected_value=corrected_value,
+        )
+    except ValueError as error:
+        return ToolObservation(outcome="invalid", summary=str(error), count=0)
+    work.resolution = result
+    work.pending_reviews = tuple(
+        pending for pending in work.pending_reviews if pending.id != review_id
+    )
+    ctx.deps.state.products[product_id] = work
+    ctx.deps.state.status = (
+        AgentV2Status.AWAITING_REVIEW if work.pending_reviews else AgentV2Status.AWAITING_INPUT
+    )
+    ctx.deps.state.add_event(
+        "human.review_received",
+        f"Human review decision recorded: {decision}.",
+        tool_name="review_semantic_mapping",
+        product_id=product_id,
+        source_ids=(reviewed.mapping.evidence_id,),
+        metadata={"reviewId": review_id, "decision": decision},
+    )
+    return ToolObservation(
+        outcome="review_applied",
+        summary="The decision was applied and source evidence was retained.",
+        count=1,
+        identifiers=(review_id,),
+    )
+
+
+async def record_human_requirement_value(
+    ctx: RunContext[MiaDependencies],
+    product_id: str,
+    requirement_id: str,
+    value: str,
+) -> ToolObservation:
+    """Record a user's answer for one missing official requirement as auditable evidence."""
+
+    work = ctx.deps.state.products.get(product_id)
+    if work is None or work.resolution is None:
+        return ToolObservation(
+            outcome="mapping_required",
+            summary="No product coverage exists for this answer.",
+            count=0,
+        )
+    try:
+        work.resolution = ctx.deps.mapping_review.record_human_value(
+            work.resolution,
+            requirement_id=requirement_id,
+            value=value,
+            thread_id=ctx.deps.state.thread_id,
+        )
+    except ValueError as error:
+        return ToolObservation(outcome="invalid", summary=str(error), count=0)
+    ctx.deps.state.products[product_id] = work
+    ctx.deps.state.add_event(
+        "human.evidence_recorded",
+        "Recorded a human-supplied value as provenance-aware evidence.",
+        tool_name="record_human_requirement_value",
+        product_id=product_id,
+        metadata={"requirementId": requirement_id},
+    )
+    missing = sum(
+        item.mandatory_missing for item in work.resolution.completion_summary.fixed_templates
+    )
+    ctx.deps.state.status = (
+        AgentV2Status.AWAITING_INPUT if missing else AgentV2Status.READY_TO_BUILD
+    )
+    return ToolObservation(
+        outcome="evidence_recorded",
+        summary=f"The answer was validated and mapped. {missing} mandatory fields remain.",
+        count=1,
+        identifiers=(requirement_id,),
     )
 
 
@@ -343,5 +638,10 @@ AGENT_TOOLS = (
     Tool(select_products, sequential=True),
     Tool(extract_product_page, sequential=True),
     Tool(map_product_evidence, sequential=True),
+    Tool(research_product_sources, sequential=True),
+    Tool(inspect_unresolved_mappings, sequential=True),
+    Tool(propose_semantic_mapping, sequential=True),
+    Tool(review_semantic_mapping, sequential=True),
+    Tool(record_human_requirement_value, sequential=True),
     Tool(build_product_aas, sequential=True),
 )

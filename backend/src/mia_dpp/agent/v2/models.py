@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import AwareDatetime, Field
 
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate
+from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate, ProductSourceCandidate
+from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.domain.mappings import SemanticReviewItem
+from mia_dpp.domain.workflow import WorkflowEvent
 from mia_dpp.tools.mapping.models import WebsiteIngestResponse
 from mia_dpp.tools.web.models import WebExtractionResult
 
@@ -21,6 +24,7 @@ class AgentV2Status(StrEnum):
     AWAITING_PRODUCT = "awaiting_product"
     AWAITING_REVIEW = "awaiting_review"
     AWAITING_INPUT = "awaiting_input"
+    AWAITING_OPTIONAL_CHOICE = "awaiting_optional_choice"
     READY_TO_BUILD = "ready_to_build"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -53,11 +57,44 @@ class AgentTraceEvent(WireModel):
 class ProductWork(WireModel):
     product_id: str
     candidate: ProductCandidate | None = None
-    extraction: WebExtractionResult | None = None
+    source_candidates: tuple[ProductSourceCandidate, ...] = ()
+    extractions: tuple[WebExtractionResult, ...] = ()
     resolution: WebsiteIngestResponse | None = None
     pending_reviews: tuple[SemanticReviewItem, ...] = ()
     review_complete: bool = False
     aas_artifact_sha256: str | None = None
+
+    def combined_extraction(self) -> WebExtractionResult | None:
+        """Combine multiple source acquisitions without duplicating evidence records."""
+
+        if not self.extractions:
+            return None
+        primary = self.extractions[0]
+        evidence = []
+        evidence_ids: set[str] = set()
+        artifact_ids: list[str] = []
+        events: list[WorkflowEvent] = []
+        for extraction in self.extractions:
+            events.extend(extraction.workflow_events)
+            for artifact_id in extraction.knowledge_package.source_artifact_ids:
+                if artifact_id not in artifact_ids:
+                    artifact_ids.append(artifact_id)
+            for record in extraction.knowledge_package.evidence:
+                if record.id not in evidence_ids:
+                    evidence_ids.add(record.id)
+                    evidence.append(record)
+        package = ProductKnowledgePackage(
+            product_id=self.product_id,
+            product_name=primary.product_name,
+            source_artifact_ids=tuple(artifact_ids),
+            evidence=tuple(evidence),
+        )
+        return WebExtractionResult(
+            source_url=primary.source_url,
+            product_name=primary.product_name,
+            knowledge_package=package,
+            workflow_events=tuple(events),
+        )
 
 
 class MiaState(WireModel):
@@ -122,6 +159,19 @@ class AgentRunOutput(WireModel):
 class AgentV2Request(WireModel):
     thread_id: str | None = Field(default=None, min_length=8, max_length=128)
     message: str = Field(min_length=1, max_length=4096)
+
+
+class AgentV2ReviewDecision(WireModel):
+    review_id: str
+    decision: Literal["approve", "correct", "reject"]
+    corrected_requirement_id: str | None = None
+    corrected_value: str | None = Field(default=None, max_length=4096)
+
+
+class AgentV2ReviewRequest(WireModel):
+    thread_id: str = Field(min_length=8, max_length=128)
+    product_id: str
+    decisions: tuple[AgentV2ReviewDecision, ...] = Field(min_length=1)
 
 
 class AgentV2Response(WireModel):
