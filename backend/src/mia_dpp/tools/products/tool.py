@@ -10,6 +10,12 @@ from mia_dpp.tools.search import SearchProvider
 
 
 class ProductDiscoveryTool:
+    """Find product-page candidates on a selected company's official domain.
+
+    Agent V2 calls this after company selection and stores the structured
+    results for the user or model to select.
+    """
+
     def __init__(self, search: SearchProvider) -> None:
         self._search = search
 
@@ -19,6 +25,8 @@ class ProductDiscoveryTool:
         *,
         query: str = "",
     ) -> tuple[ProductCandidate, ...]:
+        """Return deduplicated official-domain results for the requested product scope."""
+
         scope = query.strip() or "industrial products catalogue"
         hits = await self._search.search(f"site:{company.domain} {scope}", limit=16)
         candidates: list[ProductCandidate] = []

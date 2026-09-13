@@ -9,6 +9,12 @@ from mia_dpp.bootstrap import build_application
 
 
 def create_app() -> FastAPI:
+    """Create the production FastAPI application.
+
+    The ASGI server calls this entrypoint, which asks ``bootstrap`` to assemble
+    MIA's concrete dependencies and then exposes them through the API routes.
+    """
+
     application = build_application()
     app = FastAPI(
         title="MIA Digital Product Passport",

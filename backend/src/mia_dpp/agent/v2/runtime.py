@@ -32,7 +32,12 @@ from mia_dpp.tools.web.tool import WebExtractionTool
 
 
 class MiaAgentV2:
-    """Own one model-led plan/act/observe loop and trusted thread persistence."""
+    """Run MIA's single model-led plan/act/observe loop.
+
+    API routes call this runtime for conversation turns and human reviews. It
+    supplies trusted state, history, and tools to PydanticAI, then persists the
+    updated thread after each turn.
+    """
 
     def __init__(
         self,
@@ -47,6 +52,13 @@ class MiaAgentV2:
         mapping_review: MappingReviewService,
         dpp_pipeline: DeterministicDppPipeline,
     ) -> None:
+        """Configure one PydanticAI agent with MIA's trusted capabilities.
+
+        ``bootstrap`` supplies the model, stores, tools, mapping services, and
+        AAS pipeline. If no model is configured, the runtime remains available
+        and returns an explicit configuration-required response.
+        """
+
         self._store = store
         self._company_tool = company_tool
         self._product_tool = product_tool
@@ -81,6 +93,14 @@ class MiaAgentV2:
         return self._configured
 
     async def message(self, request: AgentV2Request) -> AgentV2Response:
+        """Run one conversational turn of Agent V2.
+
+        Called by ``/api/agent/v2/messages``. It loads trusted state and model
+        history, calls ``Agent.run``, saves both, and returns frontend data.
+        Once ``Agent.run`` starts, PydanticAI/the model—not this method—chooses
+        which registered tool runs next and whether another tool is needed.
+        """
+
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
         snapshot = await self._store.load(thread_id)
         if snapshot is None:
@@ -146,7 +166,12 @@ class MiaAgentV2:
         )
 
     async def review(self, request: AgentV2ReviewRequest) -> AgentV2Response:
-        """Apply explicit human decisions to trusted pending state, then resume next turn."""
+        """Apply explicit human decisions to a pending product review.
+
+        Called by ``/api/agent/v2/review``. It validates decisions against
+        server-side pending items, updates mapping and product state, persists
+        the thread, and leaves the next conversational turn to ``message``.
+        """
 
         snapshot = await self._store.load(request.thread_id)
         if snapshot is None:
@@ -203,6 +228,12 @@ class MiaAgentV2:
 
     @staticmethod
     def _prompt_with_state(message: str, state: MiaState) -> str:
+        """Attach a compact trusted job summary to the new user message.
+
+        Large evidence remains in workflow state; the model receives only the
+        identifiers and counts needed to choose its next tool safely.
+        """
+
         compact = {
             "threadId": state.thread_id,
             "goal": state.user_goal,
@@ -252,6 +283,12 @@ class MiaAgentV2:
         decision_summary: str,
         trace_offset: int,
     ) -> AgentV2Response:
+        """Project trusted state into the structured frontend response.
+
+        Only trace events created during the current request are returned, while
+        the complete trace remains stored with the thread.
+        """
+
         current = state.products.get(state.current_product_id) if state.current_product_id else None
         return AgentV2Response(
             thread_id=state.thread_id,

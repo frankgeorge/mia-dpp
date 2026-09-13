@@ -19,6 +19,8 @@ from mia_dpp.tools.search import SearchUnavailableError
 
 
 class ToolObservation(WireModel):
+    """Small typed result returned to the model after a tool action."""
+
     outcome: str
     summary: str
     count: int = Field(ge=0)
@@ -26,6 +28,8 @@ class ToolObservation(WireModel):
 
 
 class SemanticContextObservation(WireModel):
+    """Bounded unresolved evidence and official targets shown to the model."""
+
     outcome: str
     product_id: str
     evidence: tuple[dict[str, object], ...]
@@ -36,7 +40,11 @@ async def search_companies(
     ctx: RunContext[MiaDependencies],
     company_name: str,
 ) -> ToolObservation:
-    """Find plausible legal/manufacturer identities for a company name."""
+    """Find plausible company identities before product discovery.
+
+    The agent calls this when a user's company name is not an exact identity.
+    It stores structured candidates and pauses the job for selection.
+    """
 
     started = time.monotonic()
     try:
@@ -73,7 +81,11 @@ async def select_company(
     ctx: RunContext[MiaDependencies],
     company_id: str,
 ) -> ToolObservation:
-    """Select one previously discovered company by its exact candidate ID."""
+    """Select one company from the current trusted candidate set.
+
+    The agent calls this after the user resolves an ambiguous identity. It saves
+    the selection in ``MiaState`` and allows product discovery to continue.
+    """
 
     candidate = next(
         (item for item in ctx.deps.state.company_candidates if item.id == company_id),
@@ -105,7 +117,11 @@ async def discover_products(
     ctx: RunContext[MiaDependencies],
     query: str = "",
 ) -> ToolObservation:
-    """Find official product pages for the currently selected company."""
+    """Discover product pages for the selected company.
+
+    A company must already be selected. Results are restricted to its domain,
+    stored as structured candidates, and normally shown for product selection.
+    """
 
     company = ctx.deps.state.selected_company
     if company is None:
@@ -149,7 +165,11 @@ async def select_products(
     ctx: RunContext[MiaDependencies],
     product_ids: list[str],
 ) -> ToolObservation:
-    """Queue one or more previously discovered products by exact candidate IDs."""
+    """Select and queue previously discovered products for processing.
+
+    The tool validates IDs against trusted candidates, creates each product's
+    ``ProductWork``, and points the agent at the first queued product.
+    """
 
     by_id = {item.id: item for item in ctx.deps.state.product_candidates}
     unknown = [item for item in product_ids if item not in by_id]
@@ -188,7 +208,11 @@ async def extract_product_page(
     url: str,
     product_id: str | None = None,
 ) -> ToolObservation:
-    """Extract provenance-rich evidence from one exact public product-page URL."""
+    """Extract provenance-rich evidence from one product page.
+
+    The agent calls this after identifying a useful URL. The extraction is
+    appended to that product's ``ProductWork`` so further sources can be added.
+    """
 
     started = time.monotonic()
     extraction = await ctx.deps.web_tool.extract(url)
@@ -232,7 +256,11 @@ async def map_product_evidence(
     ctx: RunContext[MiaDependencies],
     product_id: str,
 ) -> ToolObservation:
-    """Map existing evidence against selected official templates deterministically."""
+    """Deterministically map evidence already collected for one product.
+
+    Extraction must run first. This updates mappings, target coverage, pending
+    reviews, and workflow status; unresolved evidence remains available.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     extraction = work.combined_extraction() if work is not None else None
@@ -290,7 +318,11 @@ async def research_product_sources(
     product_id: str,
     query: str,
 ) -> ToolObservation:
-    """Find additional pages that may resolve a product's current evidence or coverage gaps."""
+    """Find additional sources for an identified product.
+
+    The agent uses this after extraction or coverage reveals a gap. Candidate
+    pages are stored in ``ProductWork`` for a later extraction tool call.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     if work is None:
@@ -360,7 +392,11 @@ async def inspect_unresolved_mappings(
     ctx: RunContext[MiaDependencies],
     product_id: str,
 ) -> SemanticContextObservation:
-    """Inspect bounded unmatched evidence and allowed official targets for semantic reasoning."""
+    """Prepare bounded inputs for semantic mapping.
+
+    Deterministic mapping must already exist. The model receives only unmatched
+    evidence and unresolved official requirements, not the whole source page.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     if work is None or work.resolution is None:
@@ -419,7 +455,11 @@ async def propose_semantic_mapping(
     requirement_id: str,
     reason_summary: str,
 ) -> ToolObservation:
-    """Propose one bounded semantic match; Python validates IDs and requires human review."""
+    """Propose one semantic match between allowed evidence and target IDs.
+
+    Python validates both IDs, calculates confidence, and stores the proposal as
+    a pending review. The proposal cannot become authoritative by model choice.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     if work is None or work.resolution is None:
@@ -477,7 +517,11 @@ async def review_semantic_mapping(
     corrected_requirement_id: str | None = None,
     corrected_value: str | None = None,
 ) -> ToolObservation:
-    """Apply a human approve/correct/reject decision to a pending semantic proposal."""
+    """Apply a human decision to one pending semantic proposal.
+
+    The proposal must exist in trusted product state. Mapping and coverage are
+    recalculated, while rejected source evidence remains retained.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     if work is None or work.resolution is None:
@@ -534,7 +578,11 @@ async def record_human_requirement_value(
     requirement_id: str,
     value: str,
 ) -> ToolObservation:
-    """Record a user's answer for one missing official requirement as auditable evidence."""
+    """Record a missing-field answer as auditable human evidence.
+
+    Coverage must already identify the official requirement. The answer is
+    added to the evidence ledger, mapped, and followed by a new completion check.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     if work is None or work.resolution is None:
@@ -578,7 +626,11 @@ async def build_product_aas(
     ctx: RunContext[MiaDependencies],
     product_id: str,
 ) -> ToolObservation:
-    """Build and validate an AAS only after mandatory deterministic gates pass."""
+    """Build and validate the product AAS after deterministic readiness checks.
+
+    Mapping and coverage must already exist without unresolved mandatory fields.
+    The AAS pipeline remains authoritative and stores the resulting artifact ID.
+    """
 
     work = ctx.deps.state.products.get(product_id)
     if work is None or work.resolution is None:

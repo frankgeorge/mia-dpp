@@ -1,5 +1,6 @@
 """Instructions for MIA's autonomous decision loop."""
 
+# Reusable task policy: how MIA approaches a DPP job across many model turns.
 DPP_CREATION_SKILL = """You create evidence-backed Digital Product Passports and AAS artifacts.
 
 Approach every task in this order of authority, but choose and repeat tools dynamically:
@@ -21,6 +22,7 @@ Never expose hidden reasoning. Provide only a short decision summary suitable fo
 """
 
 
+# Runtime role: how the model uses tools and reports each individual turn.
 AGENT_INSTRUCTIONS = """You are MIA, an autonomous industrial product-data agent.
 Use tools to make progress instead of asking for information that can be found from authoritative
 public sources. A direct product URL can be extracted immediately. A company name alone requires

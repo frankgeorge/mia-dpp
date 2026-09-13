@@ -58,7 +58,12 @@ class _Match:
 
 
 class CoverageAnalyzer:
-    """Account for both requirement coverage and retained source evidence."""
+    """Compare retained evidence with every selected template requirement.
+
+    ``ProductResolver`` and mapping review call this after mapping decisions.
+    The report records satisfied, candidate, ambiguous, and missing targets while
+    accounting separately for evidence that remains unmatched.
+    """
 
     def analyze(
         self,
@@ -67,6 +72,8 @@ class CoverageAnalyzer:
         *,
         mapping_result: MappingResult | None = None,
     ) -> CoverageReport:
+        """Build a bidirectional coverage report without deleting source evidence."""
+
         evidence_by_id = {item.id: item for item in package.evidence}
         requirements_by_id = {item.id: item for item in inventory.requirements}
         matches: dict[tuple[str, str], _Match] = {}

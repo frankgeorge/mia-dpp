@@ -16,10 +16,18 @@ _TITLE_SUFFIX = re.compile(
 
 
 class CompanyDiscoveryTool:
+    """Turn public search results into company candidates for Agent V2.
+
+    The agent-facing ``search_companies`` function calls this capability through
+    ``SearchProvider`` and stores the returned candidates in workflow state.
+    """
+
     def __init__(self, search: SearchProvider) -> None:
         self._search = search
 
     async def search(self, company_name: str) -> tuple[CompanyCandidate, ...]:
+        """Search and deduplicate plausible companies by their public domains."""
+
         hits = await self._search.search(
             f"{company_name} manufacturer official website company",
             limit=10,

@@ -21,7 +21,7 @@ MappingHistory = Mapping[tuple[str, str], int]
 
 
 class MappingStrategy(Protocol):
-    """Seam for deterministic, semantic, graph-memory, or human strategies."""
+    """Boundary used by ``ProductResolver`` to obtain mapping candidates."""
 
     async def propose(
         self,
@@ -32,7 +32,11 @@ class MappingStrategy(Protocol):
 
 
 class DeterministicWebsiteMapper:
-    """Adapt the existing bounded mapper to operate after evidence creation."""
+    """Propose evidence-to-target mappings from deterministic rules.
+
+    ``ProductResolver`` calls this after evidence exists. Recognized facts become
+    automatic or review mappings; every other evidence ID remains unmatched.
+    """
 
     _LABEL_ALIASES: ClassVar[dict[str, str]] = {
         "brand": "manufacturer",
@@ -59,6 +63,8 @@ class DeterministicWebsiteMapper:
         *,
         history: MappingHistory,
     ) -> MappingResult:
+        """Map each evidence record once and return mapped, ambiguous, and unmatched sets."""
+
         mapped: list[ProposedFieldMapping] = []
         ambiguous: list[ProposedFieldMapping] = []
         unmatched: list[str] = []

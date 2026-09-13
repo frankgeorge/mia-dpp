@@ -18,7 +18,11 @@ from mia_dpp.tools.web.tool import WebExtractionTool
 
 
 class ProductResolver:
-    """Compare an existing evidence package with explicitly selected templates."""
+    """Coordinate deterministic mapping, requirement coverage, and completion.
+
+    The website API and Agent V2 mapping tool call this after extraction. It
+    consumes existing evidence and returns the complete resolution snapshot.
+    """
 
     def __init__(
         self,
@@ -36,6 +40,12 @@ class ProductResolver:
         extraction: WebExtractionResult,
         request: WebsiteIngestRequest,
     ) -> WebsiteIngestResponse:
+        """Resolve one extraction against explicitly selected official templates.
+
+        Loads templates, builds requirements, invokes the mapper, and calculates
+        coverage. Control then returns to the API coordinator or autonomous agent.
+        """
+
         package = extraction.knowledge_package
         evidence = package.evidence
         events = list(extraction.workflow_events)
@@ -148,12 +158,14 @@ class ProductResolver:
 
 
 class WebsiteWorkflow:
-    """Small coordinator retained for the direct website API use case."""
+    """Compose web extraction and resolution for the direct website API."""
 
     def __init__(self, web_tool: WebExtractionTool, resolver: ProductResolver) -> None:
         self._web_tool = web_tool
         self._resolver = resolver
 
     async def ingest(self, request: WebsiteIngestRequest) -> WebsiteIngestResponse:
+        """Extract the submitted URL, then pass its evidence to ``ProductResolver``."""
+
         extraction = await self._web_tool.extract(request.url)
         return await self._resolver.resolve(extraction, request)

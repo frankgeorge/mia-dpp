@@ -15,22 +15,40 @@ from mia_dpp.agent.v2.models import MiaState
 
 @dataclass(frozen=True)
 class ThreadSnapshot:
+    """Workflow state and model history loaded together for one thread ID."""
+
     state: MiaState
     messages: list[ModelMessage]
 
 
 class ThreadStore(Protocol):
-    async def load(self, thread_id: str) -> ThreadSnapshot | None: ...
+    """Persistence boundary for trusted Agent V2 threads.
+
+    Implementations store workflow state and PydanticAI conversation history as
+    separate values, while retrieving both through the same thread identifier.
+    """
+
+    async def load(self, thread_id: str) -> ThreadSnapshot | None:
+        """Return the trusted state/history snapshot, or ``None`` for a new thread."""
+
+        ...
 
     async def save(
         self,
         state: MiaState,
         messages: Sequence[ModelMessage],
-    ) -> None: ...
+    ) -> None:
+        """Persist updated job state and PydanticAI history for the next turn."""
+
+        ...
 
 
 class SQLiteThreadStore:
-    """Small local store; replaceable without changing the agent or API contract."""
+    """Persist Agent V2 threads in the local SQLite development store.
+
+    The runtime calls ``load`` before a turn and ``save`` afterward. Replacing
+    this class with a production store does not change the agent or API contract.
+    """
 
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -56,6 +74,8 @@ class SQLiteThreadStore:
             )
 
     async def load(self, thread_id: str) -> ThreadSnapshot | None:
+        """Load state and model history previously saved under ``thread_id``."""
+
         return self._load(thread_id)
 
     def _load(self, thread_id: str) -> ThreadSnapshot | None:
@@ -75,6 +95,8 @@ class SQLiteThreadStore:
         state: MiaState,
         messages: Sequence[ModelMessage],
     ) -> None:
+        """Serialize state and model history into their separate SQLite columns."""
+
         self._save(state, list(messages))
 
     def _save(self, state: MiaState, messages: list[ModelMessage]) -> None:
@@ -95,12 +117,14 @@ class SQLiteThreadStore:
 
 
 class InMemoryThreadStore:
-    """Deterministic test store with the same trusted-history boundary."""
+    """Deterministic test implementation of the trusted thread boundary."""
 
     def __init__(self) -> None:
         self._threads: dict[str, ThreadSnapshot] = {}
 
     async def load(self, thread_id: str) -> ThreadSnapshot | None:
+        """Return a test snapshot without accessing SQLite."""
+
         return self._threads.get(thread_id)
 
     async def save(
@@ -108,6 +132,8 @@ class InMemoryThreadStore:
         state: MiaState,
         messages: Sequence[ModelMessage],
     ) -> None:
+        """Copy state and messages so later test mutations cannot alter history."""
+
         copied_state = state.model_copy(deep=True)
         copied_messages = ModelMessagesTypeAdapter.validate_json(
             ModelMessagesTypeAdapter.dump_json(list(messages))

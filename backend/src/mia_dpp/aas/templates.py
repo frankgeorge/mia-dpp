@@ -392,7 +392,11 @@ def _read_git_head(root: Path) -> str | None:
 
 
 class OfficialTemplateRepository:
-    """Read-only facade over the pinned IDTA standards submodule."""
+    """Read and verify official templates from the pinned IDTA submodule.
+
+    Mapping, coverage, compilation, and validation share this repository so
+    authoritative metadata comes from one integrity-checked source.
+    """
 
     def __init__(self, root: Path = DEFAULT_STANDARDS_ROOT) -> None:
         self.root = Path(root)
@@ -472,6 +476,8 @@ class OfficialTemplateRepository:
         return copy.deepcopy(submodel)
 
     def load(self, key: str) -> SubmodelTemplate:
+        """Load and normalize one verified template into MIA's domain model."""
+
         if key in self._templates:
             return self._templates[key]
         release = self.get(key)

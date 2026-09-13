@@ -10,7 +10,11 @@ from mia_dpp.tools.search import SearchProvider
 
 
 class ProductResearchTool:
-    """Search for source pages while marking manufacturer-domain authority explicitly."""
+    """Find additional source pages for one identified product.
+
+    Agent V2 uses this after coverage reveals gaps. Results record whether each
+    page belongs to the known manufacturer domain before later extraction.
+    """
 
     def __init__(self, search: SearchProvider) -> None:
         self._search = search
@@ -23,6 +27,8 @@ class ProductResearchTool:
         query: str,
         manufacturer_domain: str | None,
     ) -> tuple[ProductSourceCandidate, ...]:
+        """Return new source candidates with explicit manufacturer-domain authority."""
+
         scope = " ".join(part for part in (product_name, query.strip()) if part)
         if manufacturer_domain:
             scope = f"site:{manufacturer_domain} {scope}"

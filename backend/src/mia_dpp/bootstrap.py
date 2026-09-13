@@ -28,6 +28,12 @@ from mia_dpp.tools.web.tool import WebExtractionTool
 
 @dataclass(frozen=True)
 class Application:
+    """Concrete capabilities shared by the HTTP routes.
+
+    ``build_application`` creates this object once at startup. Routes retrieve
+    it from FastAPI state instead of constructing tools or integrations.
+    """
+
     settings: Settings
     templates: OfficialTemplateRepository
     web_tool: WebExtractionTool
@@ -40,7 +46,12 @@ class Application:
 
 
 def build_application(settings: Settings | None = None) -> Application:
-    """Build concrete dependencies without hiding behavior in a DI framework."""
+    """Connect MIA's concrete implementations at application startup.
+
+    This composition root wires OpenRouter/PydanticAI, Crawl4AI, DDGS, the
+    thread store, mapping services, and deterministic AAS pipeline. It returns
+    the ``Application`` used by ``create_app`` and contains no workflow policy.
+    """
 
     configured = settings or Settings()
     templates = OfficialTemplateRepository(configured.standards_root)

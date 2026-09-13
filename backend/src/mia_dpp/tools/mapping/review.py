@@ -29,6 +29,13 @@ from mia_dpp.tools.mapping.targets import mapping_target
 
 
 class MappingReviewService:
+    """Validate and apply semantic or human mapping decisions.
+
+    Agent tools call this after deterministic mapping. It constrains proposals to
+    retained evidence and official targets, then recalculates coverage after a
+    human approval, correction, rejection, or missing-field answer.
+    """
+
     def __init__(self, repository: OfficialTemplateRepository) -> None:
         self._repository = repository
         self._coverage = CoverageAnalyzer()
@@ -37,6 +44,8 @@ class MappingReviewService:
     def pending_deterministic_reviews(
         result: WebsiteIngestResponse,
     ) -> tuple[SemanticReviewItem, ...]:
+        """Convert deterministic review mappings into stable frontend review items."""
+
         requirements = {
             (item.template_key, item.template_release, item.template_path): item
             for item in result.coverage_report.inventory.requirements
@@ -66,6 +75,8 @@ class MappingReviewService:
 
     @staticmethod
     def semantic_context(result: WebsiteIngestResponse) -> SemanticMappingContext:
+        """Return only unmatched evidence and unresolved official value requirements."""
+
         unresolved = set(result.mapping_result.unmatched_evidence_ids)
         evidence = tuple(item for item in result.evidence if item.id in unresolved)
         unresolved_requirements = {
@@ -95,6 +106,8 @@ class MappingReviewService:
         requirement_id: str,
         reason_summary: str,
     ) -> SemanticReviewItem:
+        """Validate one model-proposed evidence/requirement pair and queue review."""
+
         context = self.semantic_context(result)
         record = next((item for item in context.evidence if item.id == evidence_id), None)
         requirement = next(
@@ -147,6 +160,8 @@ class MappingReviewService:
         corrected_requirement_id: str | None = None,
         corrected_value: str | None = None,
     ) -> tuple[WebsiteIngestResponse, SemanticReviewItem]:
+        """Apply one human decision and return recalculated mapping/coverage state."""
+
         mapping = item.mapping
         if decision == "reject":
             reviewed = item.model_copy(
@@ -211,7 +226,7 @@ class MappingReviewService:
         value: str,
         thread_id: str,
     ) -> WebsiteIngestResponse:
-        """Turn a user's missing-field answer into evidence, then map it normally."""
+        """Turn a missing-field answer into human evidence and recalculate coverage."""
 
         cleaned = value.strip()
         if not cleaned:

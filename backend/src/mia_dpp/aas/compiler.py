@@ -105,7 +105,11 @@ def _set_leaf_value(raw: dict[str, Any], mapping: ApprovedMapping, value: str) -
 
 
 class AasCompiler:
-    """Project approved evidence onto official template nodes and serialize with aas-core."""
+    """Project approved evidence onto official template nodes.
+
+    ``DeterministicDppPipeline`` calls this after review. It verifies every
+    target against the selected template and serializes the result with aas-core.
+    """
 
     def __init__(self, repository: OfficialTemplateRepository) -> None:
         self._repository = repository
@@ -116,7 +120,7 @@ class AasCompiler:
         specification: MappingSpecification,
         template: SubmodelTemplate,
     ) -> AasArtifact:
-        """Build one stable AAS environment from an approved mapping specification."""
+        """Build one stable AAS artifact from an approved mapping specification."""
 
         if specification.target_profile.template != template.release:
             raise MappingError("mapping specification does not select the loaded template")

@@ -24,7 +24,11 @@ from mia_dpp.domain.targets import Cardinality, SubmodelTemplate, TemplateElemen
 
 
 class AasValidator:
-    """Combine strict aas-core checks with template-path conformance checks."""
+    """Verify compiled artifacts against aas-core and official template rules.
+
+    The deterministic DPP pipeline calls this immediately after compilation.
+    Its report—not the agent or LLM—decides whether deployment is allowed.
+    """
 
     def validate(
         self,
@@ -32,6 +36,8 @@ class AasValidator:
         template: SubmodelTemplate,
         specification: MappingSpecification,
     ) -> ValidationReport:
+        """Return metamodel, template, and policy findings for one artifact."""
+
         findings: list[ValidationFinding] = []
         if sha256_json(artifact.environment) != artifact.sha256:
             findings.append(

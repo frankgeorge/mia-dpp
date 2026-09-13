@@ -25,7 +25,12 @@ from mia_dpp.errors import MappingError
 
 
 class DeterministicDppPipeline:
-    """Compile only accepted UI mappings against pinned official template metadata."""
+    """Turn accepted mappings into a compiled and validated DPP package.
+
+    The API or Agent V2 build tool calls this after mapping is complete. It
+    selects evidence, invokes ``AasCompiler``, invokes ``AasValidator``, and
+    returns the artifact with its deployment gate and gap report.
+    """
 
     def __init__(self, repository: OfficialTemplateRepository) -> None:
         self._repository = repository
@@ -40,7 +45,7 @@ class DeterministicDppPipeline:
         evidence: tuple[EvidenceRecord, ...] = (),
         now: datetime | None = None,
     ) -> DppPackage:
-        """Build, verify and report one Digital Nameplate AAS environment."""
+        """Build and verify one Digital Nameplate AAS from accepted mappings."""
 
         accepted = [
             mapping

@@ -11,6 +11,12 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 class OpenRouterClient:
+    """Legacy structured-call transport used by the retained LangGraph path.
+
+    ``bootstrap`` supplies it to the older chat and semantic LLM roles. Agent V2
+    instead uses PydanticAI's native OpenRouter model integration.
+    """
+
     def __init__(self, api_key: str, *, timeout: float = 90.0) -> None:
         self._api_key = api_key
         self._timeout = timeout
@@ -25,6 +31,8 @@ class OpenRouterClient:
         tool_name: str,
         max_tokens: int,
     ) -> dict[str, object]:
+        """Request one named structured tool call and return its decoded arguments."""
+
         payload = {
             "model": model,
             "max_tokens": max_tokens,

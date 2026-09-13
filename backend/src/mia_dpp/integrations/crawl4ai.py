@@ -6,7 +6,15 @@ from mia_dpp.tools.web.models import ExtractionDependencyError, PageLoadError, R
 
 
 class Crawl4AIPageLoader:
+    """Render public pages through Crawl4AI for ``WebExtractionTool``.
+
+    ``bootstrap`` injects this concrete integration through the provider-neutral
+    ``PageLoader`` boundary; it returns HTML and the final redirected URL.
+    """
+
     async def load(self, url: str) -> RenderedPage:
+        """Render one URL or raise a web-tool error the agent/API can handle."""
+
         try:
             from crawl4ai import AsyncWebCrawler
         except ImportError as exc:  # pragma: no cover - optional installation

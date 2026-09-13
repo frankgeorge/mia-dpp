@@ -11,10 +11,18 @@ from mia_dpp.tools.search import SearchHit, SearchUnavailableError
 
 
 class DdgsSearchProvider:
+    """Implement MIA's ``SearchProvider`` boundary with DDGS metasearch.
+
+    Company and product tools call this integration indirectly. Provider errors
+    become ``SearchUnavailableError`` so the agent can choose another action.
+    """
+
     def __init__(self, *, timeout: int = 10) -> None:
         self._timeout = timeout
 
     async def search(self, query: str, *, limit: int = 8) -> tuple[SearchHit, ...]:
+        """Run blocking DDGS search off-thread and normalize provider results."""
+
         try:
             rows = await asyncio.to_thread(self._search, query, limit)
         except Exception as error:

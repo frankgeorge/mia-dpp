@@ -19,6 +19,8 @@ from mia_dpp.tools.web.models import WebExtractionResult
 
 
 class AgentV2Status(StrEnum):
+    """Current point at which an Agent V2 job can continue or must pause."""
+
     RUNNING = "running"
     AWAITING_COMPANY = "awaiting_company"
     AWAITING_PRODUCT = "awaiting_product"
@@ -37,7 +39,11 @@ class TraceStatus(StrEnum):
 
 
 class AgentTraceEvent(WireModel):
-    """Safe, explicit activity record; never contains hidden model reasoning."""
+    """Safe activity record shown by the frontend.
+
+    Tools append these events to ``MiaState`` when work starts, completes, or
+    fails. They summarize observable actions and never contain hidden reasoning.
+    """
 
     id: str
     thread_id: str
@@ -55,6 +61,12 @@ class AgentTraceEvent(WireModel):
 
 
 class ProductWork(WireModel):
+    """All trusted working data accumulated for one selected product.
+
+    Agent tools update its sources, evidence resolution, pending reviews, and
+    artifact identity as the autonomous loop progresses.
+    """
+
     product_id: str
     candidate: ProductCandidate | None = None
     source_candidates: tuple[ProductSourceCandidate, ...] = ()
@@ -65,7 +77,11 @@ class ProductWork(WireModel):
     aas_artifact_sha256: str | None = None
 
     def combined_extraction(self) -> WebExtractionResult | None:
-        """Combine multiple source acquisitions without duplicating evidence records."""
+        """Combine repeated source acquisitions before deterministic mapping.
+
+        ``map_product_evidence`` calls this after one or more page extractions.
+        It preserves source identities while deduplicating evidence by ID.
+        """
 
         if not self.extractions:
             return None
@@ -98,7 +114,12 @@ class ProductWork(WireModel):
 
 
 class MiaState(WireModel):
-    """Durable job state, deliberately separate from model message history."""
+    """Trusted workflow state for one DPP job/thread.
+
+    Tools mutate this state as companies, products, evidence, reviews, and
+    artifacts are discovered. PydanticAI message history is stored separately:
+    it records the conversation, while this model records the job's facts.
+    """
 
     thread_id: str
     user_goal: str = ""
@@ -127,6 +148,12 @@ class MiaState(WireModel):
         duration_ms: int | None = None,
         metadata: dict[str, str | int | float | bool | None] | None = None,
     ) -> AgentTraceEvent:
+        """Append one safe execution event and return it to the caller.
+
+        Agent tools use this to make state changes visible to the activity UI.
+        The runtime later returns only events added during the current turn.
+        """
+
         now = datetime.now(UTC)
         seed = f"{self.thread_id}\0{event_type}\0{now.isoformat()}\0{len(self.trace)}"
         event = AgentTraceEvent(
@@ -149,7 +176,11 @@ class MiaState(WireModel):
 
 
 class AgentRunOutput(WireModel):
-    """Validated final response from one autonomous decision loop run."""
+    """Validated model output returned after one autonomous tool loop.
+
+    PydanticAI produces this after tool calls stop; the runtime combines it with
+    trusted state rather than asking the model to recreate workflow data.
+    """
 
     reply: str = Field(min_length=1, max_length=4000)
     status: AgentV2Status
@@ -157,11 +188,15 @@ class AgentRunOutput(WireModel):
 
 
 class AgentV2Request(WireModel):
+    """HTTP-safe input containing only a thread ID and the new user message."""
+
     thread_id: str | None = Field(default=None, min_length=8, max_length=128)
     message: str = Field(min_length=1, max_length=4096)
 
 
 class AgentV2ReviewDecision(WireModel):
+    """One explicit approve, correct, or reject decision from the human UI."""
+
     review_id: str
     decision: Literal["approve", "correct", "reject"]
     corrected_requirement_id: str | None = None
@@ -169,12 +204,20 @@ class AgentV2ReviewDecision(WireModel):
 
 
 class AgentV2ReviewRequest(WireModel):
+    """Batch of review decisions for one product in one trusted thread."""
+
     thread_id: str = Field(min_length=8, max_length=128)
     product_id: str
     decisions: tuple[AgentV2ReviewDecision, ...] = Field(min_length=1)
 
 
 class AgentV2Response(WireModel):
+    """Structured Agent V2 result consumed by the workspace.
+
+    It combines conversational text with trusted candidate, product, review,
+    and trace state so the frontend never needs to infer workflow from prose.
+    """
+
     thread_id: str
     reply: str
     status: AgentV2Status

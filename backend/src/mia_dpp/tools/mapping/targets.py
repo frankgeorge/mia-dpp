@@ -27,7 +27,11 @@ def mapping_target(
     id_short: str | None = None,
     semantic_id: str | None = None,
 ) -> MappingTarget:
-    """Construct a typed target from authoritative template metadata."""
+    """Construct a mapping target from authoritative template metadata.
+
+    Mapping and review code call this before accepting a target. Fixed targets
+    cannot be overridden; wildcard targets require an explicit semantic ID.
+    """
 
     element = resolve_element(template, path)
     target_id_short = id_short or element.id_short

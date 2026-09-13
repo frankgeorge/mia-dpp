@@ -16,7 +16,12 @@ from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 
 class WebExtractionTool:
-    """Acquire and normalize web evidence without interpreting AAS targets."""
+    """Turn one public URL into provenance-rich product evidence.
+
+    Agent V2 or the direct website workflow calls this capability. It validates
+    and loads the page, extracts facts, and normalizes evidence, but never maps
+    facts to AAS targets.
+    """
 
     def __init__(
         self,
@@ -32,6 +37,8 @@ class WebExtractionTool:
         self._evidence_normalizer = evidence_normalizer or EvidenceNormalizer()
 
     async def extract(self, url: str) -> WebExtractionResult:
+        """Acquire, extract, and normalize one page into a product knowledge package."""
+
         events = []
         fetch_started = datetime.now(UTC)
         requested_url = await self._url_policy.validate(url)
