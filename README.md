@@ -76,7 +76,8 @@ not prove that a value on a new product is correct.
 
 ```text
 app/, components/                 Next.js structured-agent interface
-backend/src/mia_dpp/agent/v2/     autonomous loop, state, persistence, trace, tools
+backend/src/mia_dpp/agent/       LangGraph lifecycle and PydanticAI autonomous brain
+backend/src/mia_dpp/workspace/   artifact manifest, lineage, viewing, and export
 backend/src/mia_dpp/tools/web/    generic and adapter-based evidence extraction
 backend/src/mia_dpp/tools/mapping/
                                   mapping, confidence, coverage, review
@@ -91,10 +92,10 @@ standards/idta-submodel-templates/
 MIA does not copy upstream application source into its own package. `aas-core`
 and Crawl4AI are locked Python dependencies behind MIA-owned adapters. BaSyx
 PDF-to-AAS remains optional, and BaSyx is an external runtime. AASbyLLM remains
-reference material. LangGraph is temporarily retained only as a migration fallback
-for the former workflow endpoints; the workspace uses Agent V2.
+reference material. LangGraph owns checkpoints and human interrupts; PydanticAI is
+the single autonomous decision-maker.
 
-See `docs/agent-v2.md` for the autonomous architecture and
+See `docs/agent.md` for the autonomous architecture and
 `docs/deterministic-backend.md` for the validation layers.
 
 ## Local deployment

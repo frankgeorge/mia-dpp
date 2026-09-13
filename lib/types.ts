@@ -317,20 +317,7 @@ export interface AgentReviewDecision {
   comment?: string | null;
 }
 
-export interface AgentResponse {
-  threadId: string;
-  reply: string;
-  status:
-    | "completed"
-    | "awaiting_review"
-    | "awaiting_input"
-    | "awaiting_optional_choice";
-  mode: "agent" | "configuration_required";
-  websiteResult: WebsiteIngestResponse | null;
-  reviewItems: SemanticReviewItem[];
-}
-
-export type AgentV2Status =
+export type AgentStatus =
   | "running"
   | "awaiting_company"
   | "awaiting_product"
@@ -348,6 +335,7 @@ export interface CompanyCandidate {
   domain: string;
   description: string;
   sourceUri: string;
+  identityVerified: boolean;
 }
 
 export interface ProductCandidate {
@@ -387,8 +375,9 @@ export interface AgentTraceEvent {
   metadata: Record<string, string | number | boolean | null>;
 }
 
-export interface AgentV2ProductWork {
+export interface AgentProductWork {
   productId: string;
+  status: "queued" | "in_progress" | "awaiting_review" | "ready_to_build" | "completed" | "failed";
   candidate: ProductCandidate | null;
   sourceCandidates: ProductSourceCandidate[];
   extractions: unknown[];
@@ -396,20 +385,46 @@ export interface AgentV2ProductWork {
   pendingReviews: SemanticReviewItem[];
   reviewComplete: boolean;
   aasArtifactSha256: string | null;
+  artifactIds: string[];
 }
 
-export interface AgentV2Response {
+export interface HumanRequest {
+  kind: "mapping_review" | "requirement_value";
+  productId: string;
+  summary: string;
+  requirementId: string | null;
+}
+
+export interface WorkspaceArtifact {
+  id: string;
+  kind: "search" | "source" | "raw" | "evidence" | "mapping" | "coverage" | "review" | "aas" | "validation" | "trace" | "export";
+  name: string;
+  relativePath: string;
+  createdAt: string;
+  createdBy: string;
+  contentType: string;
+  sha256: string;
+  size: number;
+  productId: string | null;
+  sourceUrl: string | null;
+  derivedFrom: string[];
+  downloadable: boolean;
+}
+
+export interface AgentResponse {
   threadId: string;
   reply: string;
-  status: AgentV2Status;
+  status: AgentStatus;
   decisionSummary: string;
   companyCandidates: CompanyCandidate[];
   selectedCompany: CompanyCandidate | null;
   productCandidates: ProductCandidate[];
   selectedProductIds: string[];
-  currentProduct: AgentV2ProductWork | null;
+  currentProduct: AgentProductWork | null;
   traceEvents: AgentTraceEvent[];
-  mode: "agent_v2";
+  pendingHumanRequest: HumanRequest | null;
+  artifactCount: number;
+  mode: "agent";
 }
 
 export interface WebsiteIngestResponse {

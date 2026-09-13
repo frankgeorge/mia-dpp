@@ -2,7 +2,7 @@ import type { AgentTraceEvent } from "@/lib/types";
 
 export function AgentActivity({ events }: { events: AgentTraceEvent[] }) {
   if (events.length === 0) {
-    return <p className="text-sm text-zinc-500">No Agent V2 activity yet.</p>;
+    return <p className="text-sm text-zinc-500">No MIA agent activity yet.</p>;
   }
 
   return (
@@ -32,6 +32,11 @@ export function AgentActivity({ events }: { events: AgentTraceEvent[] }) {
             {event.inputSummary && <p>Input: {event.inputSummary}</p>}
             {event.outputSummary && <p>Output: {event.outputSummary}</p>}
             {event.durationMs !== null && <p>Duration: {event.durationMs} ms</p>}
+            {Object.keys(event.metadata).length > 0 && (
+              <pre className="mt-2 overflow-x-auto rounded-lg bg-zinc-50 p-2 font-mono text-[10px]">
+                {JSON.stringify(event.metadata, null, 2)}
+              </pre>
+            )}
           </div>
         </details>
       ))}

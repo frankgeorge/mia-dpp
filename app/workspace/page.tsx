@@ -5,7 +5,7 @@ import Link from "next/link";
 import type {
   AgentTraceEvent,
   AgentReviewDecision,
-  AgentV2Response,
+  AgentResponse,
   CompanyCandidate,
   ChatMessage,
   CoverageReport,
@@ -14,12 +14,14 @@ import type {
   EvidenceRecord,
   FieldMapping,
   GraphEntry,
+  HumanRequest,
   MappingResult,
   NameplateElement,
   SemanticReviewItem,
   ProductCandidate,
   WebsiteIngestResponse,
   WorkflowEvent,
+  WorkspaceArtifact,
 } from "@/lib/types";
 import { CoveragePanel } from "@/components/CoveragePanel";
 import { EvidencePanel } from "@/components/EvidencePanel";
@@ -35,6 +37,7 @@ type WorkspaceTab =
   | "evidence"
   | "coverage"
   | "process"
+  | "data"
   | "graph";
 
 const SAMPLES = [
@@ -71,12 +74,15 @@ export default function Workspace() {
   >([]);
   const [mode, setMode] = useState<string>("");
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<AgentV2Response["status"]>("completed");
+  const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
   const [companyCandidates, setCompanyCandidates] = useState<CompanyCandidate[]>([]);
   const [productCandidates, setProductCandidates] = useState<ProductCandidate[]>([]);
   const [currentProductId, setCurrentProductId] = useState<string | null>(null);
   const [agentActivity, setAgentActivity] = useState<AgentTraceEvent[]>([]);
+  const [artifacts, setArtifacts] = useState<WorkspaceArtifact[]>([]);
   const [semanticReview, setSemanticReview] = useState<SemanticReviewItem[]>([]);
+  const [humanRequest, setHumanRequest] = useState<HumanRequest | null>(null);
+  const [humanValue, setHumanValue] = useState("");
   const [reviewDecisions, setReviewDecisions] = useState<
     Record<string, AgentReviewDecision>
   >({});
@@ -122,17 +128,17 @@ export default function Workspace() {
     setBusy(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/agent/v2/messages`, {
+      const res = await fetch(`${API_URL}/api/agent/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ threadId, message: t }),
       });
-      const body = (await res.json()) as AgentV2Response | { detail?: string };
+      const body = (await res.json()) as AgentResponse | { detail?: string };
       if (!res.ok) {
         throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${res.status}`);
       }
-      const data = body as AgentV2Response;
-      applyV2Response(data);
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
 
       setMessages((prev) => [
         ...prev,
@@ -162,7 +168,7 @@ export default function Workspace() {
     ]);
 
     try {
-      const response = await fetch(`${API_URL}/api/agent/v2/messages`, {
+      const response = await fetch(`${API_URL}/api/agent/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -183,8 +189,8 @@ export default function Workspace() {
           detail ?? `Python backend returned ${response.status}`
         );
       }
-      const data = body as AgentV2Response;
-      applyV2Response(data);
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
       setWebsiteUrl("");
       setMessages((previous) => [
         ...previous,
@@ -204,14 +210,16 @@ export default function Workspace() {
     }
   }
 
-  function applyV2Response(data: AgentV2Response) {
+  function applyAgentResponse(data: AgentResponse) {
     setThreadId(data.threadId);
     setAgentStatus(data.status);
     setMode(data.mode);
     setCompanyCandidates(data.companyCandidates);
     setProductCandidates(data.productCandidates);
     setCurrentProductId(data.currentProduct?.productId ?? null);
+    setHumanRequest(data.pendingHumanRequest);
     setAgentActivity((previous) => [...previous, ...data.traceEvents]);
+    void refreshArtifacts(data.threadId);
     const website = data.currentProduct?.resolution;
     if (website) {
       applyWebsiteResult(
@@ -220,6 +228,50 @@ export default function Workspace() {
         data.status === "awaiting_review"
       );
     }
+  }
+
+  async function submitHumanValue() {
+    if (!threadId || !humanRequest?.requirementId || !humanValue.trim() || busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_URL}/api/agent/value`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadId,
+          productId: humanRequest.productId,
+          requirementId: humanRequest.requirementId,
+          value: humanValue.trim(),
+        }),
+      });
+      const body = (await response.json()) as AgentResponse | { detail?: string };
+      if (!response.ok) {
+        throw new Error("detail" in body && body.detail ? body.detail : "Value was rejected");
+      }
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
+      setHumanValue("");
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: humanValue.trim() },
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: `The value could not be saved: ${message}` },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshArtifacts(activeThreadId: string) {
+    const response = await fetch(
+      `${API_URL}/api/workspaces/${encodeURIComponent(activeThreadId)}/artifacts`
+    );
+    if (response.ok) setArtifacts((await response.json()) as WorkspaceArtifact[]);
   }
 
   function applyWebsiteResult(
@@ -273,17 +325,17 @@ export default function Workspace() {
     setBusy(true);
     try {
       if (!currentProductId) throw new Error("No active product is available for review.");
-      const response = await fetch(`${API_URL}/api/agent/v2/review`, {
+      const response = await fetch(`${API_URL}/api/agent/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ threadId, productId: currentProductId, decisions }),
       });
-      const body = (await response.json()) as AgentV2Response | { detail?: string };
+      const body = (await response.json()) as AgentResponse | { detail?: string };
       if (!response.ok) {
         throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${response.status}`);
       }
-      const data = body as AgentV2Response;
-      applyV2Response(data);
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
       setReviewDecisions({});
       setMessages((previous) => [
         ...previous,
@@ -493,11 +545,6 @@ export default function Workspace() {
           )}
           {mode === "agent" && (
             <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
-              LangGraph agent
-            </span>
-          )}
-          {mode === "agent_v2" && (
-            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
               Autonomous agent
             </span>
           )}
@@ -621,6 +668,32 @@ export default function Workspace() {
                   </button>
                 </div>
               )}
+              {humanRequest?.kind === "requirement_value" && !busy && (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitHumanValue();
+                  }}
+                  className="rounded-xl border border-warn/20 bg-white p-4"
+                >
+                  <p className="text-sm font-medium text-ink">{humanRequest.summary}</p>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={humanValue}
+                      onChange={(event) => setHumanValue(event.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-hairline px-3 py-2 text-sm"
+                      placeholder="Enter the verified value"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!humanValue.trim()}
+                      className="rounded-lg bg-ink px-4 py-2 text-xs font-medium text-white disabled:opacity-30"
+                    >
+                      Save value
+                    </button>
+                  </div>
+                </form>
+              )}
               {busy && (
                 <div className="flex gap-1.5 py-2 pl-2">
                   {[0, 1, 2].map((i) => (
@@ -716,6 +789,7 @@ export default function Workspace() {
                   "evidence",
                   "coverage",
                   "process",
+                  "data",
                   "graph",
                 ] as WorkspaceTab[]
               ).map((t) => (
@@ -744,6 +818,11 @@ export default function Workspace() {
                   {t === "graph" && graph.length > 0 && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
                       {graph.length}
+                    </span>
+                  )}
+                  {t === "data" && artifacts.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                      {artifacts.length}
                     </span>
                   )}
                   {tab === t && (
@@ -873,6 +952,67 @@ export default function Workspace() {
                   </div>
                 )}
               </div>
+            ) : tab === "data" ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[13px] text-muted">
+                    Manifest-registered data, lineage, and generated files for this thread.
+                  </p>
+                  {threadId && (
+                    <a
+                      href={`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/download`}
+                      className="rounded-full bg-ink px-4 py-1.5 text-[12px] font-medium text-white"
+                    >
+                      Download workspace ZIP
+                    </a>
+                  )}
+                </div>
+                {artifacts.length === 0 ? (
+                  <Empty
+                    title="No workspace data yet"
+                    body="Search, extraction, mapping, review, trace, and AAS outputs will appear here."
+                  />
+                ) : (
+                  artifacts.map((artifact) => (
+                    <div
+                      key={artifact.id}
+                      className="flex items-center justify-between rounded-xl border border-hairline bg-paper p-4 shadow-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-medium text-ink">
+                          {artifact.name}
+                        </p>
+                        <p className="mt-1 font-mono text-[10px] text-muted">
+                          {artifact.kind} · {artifact.createdBy} · {artifact.size} bytes
+                        </p>
+                        {artifact.derivedFrom.length > 0 && (
+                          <p className="mt-1 truncate font-mono text-[10px] text-muted">
+                            derived from {artifact.derivedFrom.join(", ")}
+                          </p>
+                        )}
+                      </div>
+                      {threadId && (
+                        <div className="ml-4 flex gap-2">
+                          <a
+                            href={`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/artifacts/${artifact.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[12px] font-medium text-signal"
+                          >
+                            View
+                          </a>
+                          <a
+                            href={`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/artifacts/${artifact.id}?download=true`}
+                            className="text-[12px] font-medium text-ink"
+                          >
+                            Download
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
             ) : graph.length === 0 ? (
               <Empty
                 title="The graph is empty"
@@ -919,6 +1059,7 @@ export default function Workspace() {
 function tabLabel(tab: WorkspaceTab): string {
   if (tab === "graph") return "Integration Graph";
   if (tab === "process") return "Process";
+  if (tab === "data") return "Workspace Data";
   if (tab === "coverage") return "Coverage";
   if (tab === "evidence") return "Evidence";
   return "Mappings";
