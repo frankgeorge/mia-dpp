@@ -129,7 +129,6 @@ class MiaAgent:
             asyncio.run,
             self._brain.run(message, state, history),
         ).result()
-        self._persist_trace(state, trace_offset)
         self._persist_snapshot(state, output.decision_summary)
         return {
             "job": state.model_dump(mode="json"),

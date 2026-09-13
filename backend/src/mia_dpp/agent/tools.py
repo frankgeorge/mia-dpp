@@ -56,7 +56,7 @@ async def search_companies(
     try:
         candidates = await ctx.deps.company_tool.search(company_name)
     except SearchUnavailableError as error:
-        ctx.deps.state.add_event(
+        ctx.deps.add_event(
             "company.search",
             str(error),
             status=TraceStatus.FAILED,
@@ -66,7 +66,7 @@ async def search_companies(
         return ToolObservation(outcome="unavailable", summary=str(error), count=0)
     ctx.deps.state.company_candidates = candidates
     ctx.deps.state.status = AgentStatus.AWAITING_COMPANY
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "company.candidates",
         f"Found {len(candidates)} candidate companies.",
         tool_name="search_companies",
@@ -112,7 +112,7 @@ async def select_company(
         )
     ctx.deps.state.selected_company = candidate.model_copy(update={"identity_verified": True})
     ctx.deps.state.status = AgentStatus.RUNNING
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "company.selected",
         f"Selected {candidate.name}.",
         tool_name="select_company",
@@ -147,7 +147,7 @@ async def discover_products(
     try:
         candidates = await ctx.deps.product_tool.discover(company, query=query)
     except SearchUnavailableError as error:
-        ctx.deps.state.add_event(
+        ctx.deps.add_event(
             "product.search",
             str(error),
             status=TraceStatus.FAILED,
@@ -157,7 +157,7 @@ async def discover_products(
         return ToolObservation(outcome="unavailable", summary=str(error), count=0)
     ctx.deps.state.product_candidates = candidates
     ctx.deps.state.status = AgentStatus.AWAITING_PRODUCT
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "product.candidates",
         f"Found {len(candidates)} official-domain product candidates.",
         tool_name="discover_products",
@@ -209,7 +209,7 @@ async def select_products(
             ProductWork(product_id=product_id, candidate=by_id[product_id]),
         )
     ctx.deps.state.status = AgentStatus.RUNNING
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "product.selected",
         f"Queued {len(unique)} product{'s' if len(unique) != 1 else ''}.",
         tool_name="select_products",
@@ -278,7 +278,7 @@ async def extract_product_page(
     ctx.deps.state.current_product_id = resolved_id
     ctx.deps.state.status = AgentStatus.RUNNING
     evidence = extraction.knowledge_package.evidence
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "web.evidence_extracted",
         f"Retained {len(evidence)} facts from {extraction.source_url}.",
         tool_name="extract_product_page",
@@ -352,7 +352,7 @@ async def map_product_evidence(
         ProductStatus.AWAITING_REVIEW if work.pending_reviews else ProductStatus.IN_PROGRESS
     )
     ctx.deps.state.products[product_id] = work
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "mapping.completed",
         (
             f"Mapped {len(resolution.mapping_result.mapped)}, found "
@@ -421,7 +421,7 @@ async def research_product_sources(
             manufacturer_domain=domain,
         )
     except SearchUnavailableError as error:
-        ctx.deps.state.add_event(
+        ctx.deps.add_event(
             "source.research",
             str(error),
             status=TraceStatus.FAILED,
@@ -433,7 +433,7 @@ async def research_product_sources(
     existing_urls = {item.source_url for item in work.extractions}
     work.source_candidates = tuple(item for item in candidates if item.url not in existing_urls)
     ctx.deps.state.products[product_id] = work
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "source.candidates",
         f"Found {len(work.source_candidates)} additional source candidates.",
         tool_name="research_product_sources",
@@ -500,7 +500,7 @@ async def inspect_unresolved_mappings(
         }
         for item in context.requirements
     )
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "mapping.semantic_context",
         (
             f"Prepared {len(evidence)} unresolved facts and {len(requirements)} allowed "
@@ -559,7 +559,7 @@ async def propose_semantic_mapping(
     work.pending_reviews = (*work.pending_reviews, review)
     ctx.deps.state.products[product_id] = work
     ctx.deps.state.status = AgentStatus.AWAITING_REVIEW
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "mapping.semantic_proposed",
         "Created a constrained semantic proposal requiring human review.",
         tool_name="propose_semantic_mapping",
@@ -608,7 +608,7 @@ async def request_human_review(
         summary=f"{len(work.pending_reviews)} mapping proposals need a human decision.",
     )
     ctx.deps.state.status = AgentStatus.AWAITING_REVIEW
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "human.input_requested",
         "Requested trusted human review for semantic mappings.",
         tool_name="request_human_review",
@@ -660,7 +660,7 @@ async def request_human_value(
         summary=question,
     )
     ctx.deps.state.status = AgentStatus.AWAITING_INPUT
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "human.input_requested",
         question,
         tool_name="request_human_value",
@@ -750,7 +750,7 @@ async def build_product_aas(
         )
         else AgentStatus.RUNNING
     )
-    ctx.deps.state.add_event(
+    ctx.deps.add_event(
         "aas.validation_completed",
         "Built and deterministically validated the AAS artifact.",
         tool_name="build_product_aas",

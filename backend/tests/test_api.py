@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.agent.models import AgentResponse, AgentStatus
+from mia_dpp.agent.models import AgentResponse, AgentStatus, MiaState
 from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.main import app
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
@@ -195,6 +195,29 @@ def test_workspace_artifact_api_lists_reads_and_exports_thread_files() -> None:
     assert viewed.json() == {"fact": "24 V"}
     assert exported.status_code == 200
     assert exported.headers["content-type"] == "application/zip"
+
+
+def test_trace_endpoint_returns_normalized_events_without_state_snapshots() -> None:
+    workspace = app.state.mia.workspace
+    state = MiaState(thread_id="thread-api-trace")
+    event = state.add_event("tool.started", "Extracting the product page.")
+    workspace.write_json(
+        state.thread_id,
+        ArtifactKind.TRACE,
+        "event.json",
+        event.model_dump(mode="json"),
+    )
+    workspace.write_json(
+        state.thread_id,
+        ArtifactKind.TRACE,
+        "state-snapshot.json",
+        {"status": "running"},
+    )
+
+    response = request("GET", "/api/workspaces/thread-api-trace/trace")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [event.id]
 
 
 def test_website_endpoint_feeds_provenance_into_dpp(

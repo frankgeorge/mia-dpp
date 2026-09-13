@@ -102,9 +102,20 @@ class AutonomousAgent:
         This method owns autonomous decisions but not workflow lifetime.
         """
         trace_offset = len(state.trace)
+        dependencies = MiaDependencies(
+            state=state,
+            company_tool=self._company_tool,
+            product_tool=self._product_tool,
+            product_research_tool=self._product_research_tool,
+            web_tool=self._web_tool,
+            mapping_tool=self._mapping_tool,
+            mapping_review=self._mapping_review,
+            dpp_pipeline=self._dpp_pipeline,
+            workspace=self._workspace,
+        )
         if self._agent is None:
             state.status = AgentStatus.AWAITING_INPUT
-            state.add_event(
+            dependencies.add_event(
                 "run.configuration_required",
                 "MIA agent requires OPENROUTER_API_KEY.",
             )
@@ -120,18 +131,7 @@ class AutonomousAgent:
                 trace_offset,
             )
 
-        dependencies = MiaDependencies(
-            state=state,
-            company_tool=self._company_tool,
-            product_tool=self._product_tool,
-            product_research_tool=self._product_research_tool,
-            web_tool=self._web_tool,
-            mapping_tool=self._mapping_tool,
-            mapping_review=self._mapping_review,
-            dpp_pipeline=self._dpp_pipeline,
-            workspace=self._workspace,
-        )
-        state.add_event(
+        dependencies.add_event(
             "run.started",
             "MIA started an autonomous decision loop.",
             status=TraceStatus.STARTED,
@@ -146,7 +146,7 @@ class AutonomousAgent:
         output = result.output
         if state.status is AgentStatus.RUNNING:
             state.status = output.status
-        state.add_event(
+        dependencies.add_event(
             "run.completed",
             output.decision_summary,
             metadata={

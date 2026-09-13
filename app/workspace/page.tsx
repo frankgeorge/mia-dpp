@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
   AgentTraceEvent,
@@ -29,6 +29,9 @@ import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
 import { WorkflowTrace } from "@/components/WorkflowTrace";
 import { AgentActivity } from "@/components/AgentActivity";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { LiveActivity } from "@/components/LiveActivity";
+import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 
 const GRAPH_KEY = "mia.graph.v1";
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
@@ -91,6 +94,13 @@ export default function Workspace() {
   const endRef = useRef<HTMLDivElement>(null);
 
   /* Integration Graph persists across sessions in the browser. */
+  const mergeActivity = useCallback((events: AgentTraceEvent[]) => {
+    setAgentActivity((previous) => {
+      const known = new Set(previous.map((event) => event.id));
+      return [...previous, ...events.filter((event) => !known.has(event.id))];
+    });
+  }, []);
+
   useEffect(() => {
     const restore = setTimeout(() => {
       try {
@@ -116,7 +126,32 @@ export default function Workspace() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, busy, agentActivity]);
+
+  useEffect(() => {
+    if (!busy || !threadId) return;
+    let cancelled = false;
+    const poll = async () => {
+      const response = await fetch(
+        `${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/trace`
+      );
+      if (!cancelled && response.ok) {
+        mergeActivity((await response.json()) as AgentTraceEvent[]);
+      }
+    };
+    void poll();
+    const interval = window.setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [busy, threadId, mergeActivity]);
+
+  function activeThread(): string {
+    const active = threadId ?? `thread-${crypto.randomUUID()}`;
+    if (!threadId) setThreadId(active);
+    return active;
+  }
 
   async function send(text: string) {
     const t = text.trim();
@@ -125,13 +160,14 @@ export default function Workspace() {
     const next: ChatMessage[] = [...messages, { role: "user", content: t }];
     setMessages(next);
     setInput("");
+    const activeThreadId = activeThread();
     setBusy(true);
 
     try {
       const res = await fetch(`${API_URL}/api/agent/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ threadId, message: t }),
+        body: JSON.stringify({ threadId: activeThreadId, message: t }),
       });
       const body = (await res.json()) as AgentResponse | { detail?: string };
       if (!res.ok) {
@@ -161,6 +197,7 @@ export default function Workspace() {
   async function ingestWebsite() {
     const url = websiteUrl.trim();
     if (!url || busy || semanticReview.length > 0) return;
+    const activeThreadId = activeThread();
     setBusy(true);
     setMessages((previous) => [
       ...previous,
@@ -172,7 +209,7 @@ export default function Workspace() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          threadId,
+          threadId: activeThreadId,
           message: `Import product website: ${url}`,
         }),
       });
@@ -218,7 +255,7 @@ export default function Workspace() {
     setProductCandidates(data.productCandidates);
     setCurrentProductId(data.currentProduct?.productId ?? null);
     setHumanRequest(data.pendingHumanRequest);
-    setAgentActivity((previous) => [...previous, ...data.traceEvents]);
+    mergeActivity(data.traceEvents);
     void refreshArtifacts(data.threadId);
     const website = data.currentProduct?.resolution;
     if (website) {
@@ -607,7 +644,11 @@ export default function Workspace() {
                         : "max-w-[92%] rounded-2xl rounded-bl-sm border border-hairline bg-white px-4 py-3 text-[14px] leading-relaxed text-ink shadow-sm"
                     }
                   >
-                    {m.content}
+                    {m.role === "assistant" ? (
+                      <ChatMarkdown>{m.content}</ChatMarkdown>
+                    ) : (
+                      m.content
+                    )}
                   </div>
                 </div>
               ))}
@@ -694,17 +735,7 @@ export default function Workspace() {
                   </div>
                 </form>
               )}
-              {busy && (
-                <div className="flex gap-1.5 py-2 pl-2">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal/60"
-                      style={{ animationDelay: `${i * 140}ms` }}
-                    />
-                  ))}
-                </div>
-              )}
+              {busy && <LiveActivity events={agentActivity} />}
               <div ref={endRef} />
             </div>
           </div>
@@ -953,66 +984,7 @@ export default function Workspace() {
                 )}
               </div>
             ) : tab === "data" ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-[13px] text-muted">
-                    Manifest-registered data, lineage, and generated files for this thread.
-                  </p>
-                  {threadId && (
-                    <a
-                      href={`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/download`}
-                      className="rounded-full bg-ink px-4 py-1.5 text-[12px] font-medium text-white"
-                    >
-                      Download workspace ZIP
-                    </a>
-                  )}
-                </div>
-                {artifacts.length === 0 ? (
-                  <Empty
-                    title="No workspace data yet"
-                    body="Search, extraction, mapping, review, trace, and AAS outputs will appear here."
-                  />
-                ) : (
-                  artifacts.map((artifact) => (
-                    <div
-                      key={artifact.id}
-                      className="flex items-center justify-between rounded-xl border border-hairline bg-paper p-4 shadow-sm"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px] font-medium text-ink">
-                          {artifact.name}
-                        </p>
-                        <p className="mt-1 font-mono text-[10px] text-muted">
-                          {artifact.kind} · {artifact.createdBy} · {artifact.size} bytes
-                        </p>
-                        {artifact.derivedFrom.length > 0 && (
-                          <p className="mt-1 truncate font-mono text-[10px] text-muted">
-                            derived from {artifact.derivedFrom.join(", ")}
-                          </p>
-                        )}
-                      </div>
-                      {threadId && (
-                        <div className="ml-4 flex gap-2">
-                          <a
-                            href={`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/artifacts/${artifact.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[12px] font-medium text-signal"
-                          >
-                            View
-                          </a>
-                          <a
-                            href={`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/artifacts/${artifact.id}?download=true`}
-                            className="text-[12px] font-medium text-ink"
-                          >
-                            Download
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
+              <WorkspaceExplorer apiUrl={API_URL} threadId={threadId} artifacts={artifacts} />
             ) : graph.length === 0 ? (
               <Empty
                 title="The graph is empty"

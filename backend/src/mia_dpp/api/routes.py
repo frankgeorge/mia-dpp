@@ -18,6 +18,7 @@ from mia_dpp.agent.models import (
     AgentRequest,
     AgentResponse,
     AgentReviewRequest,
+    AgentTraceEvent,
     AgentValueRequest,
 )
 from mia_dpp.api.schemas import (
@@ -189,16 +190,22 @@ async def export_workspace(thread_id: str, http_request: Request) -> dict[str, o
 
 @router.get(
     "/api/workspaces/{thread_id}/trace",
-    response_model=tuple[WorkspaceArtifact, ...],
+    response_model=tuple[AgentTraceEvent, ...],
 )
 async def workspace_trace(
     thread_id: str,
     http_request: Request,
-) -> tuple[WorkspaceArtifact, ...]:
-    """List normalized trace artifacts without exposing hidden model reasoning."""
+) -> tuple[AgentTraceEvent, ...]:
+    """Return normalized activity events without exposing hidden model reasoning."""
 
-    artifacts = _application(http_request).workspace.list_artifacts(thread_id)
-    return tuple(item for item in artifacts if item.kind.value == "trace")
+    workspace = _application(http_request).workspace
+    events: list[AgentTraceEvent] = []
+    for artifact in workspace.list_artifacts(thread_id):
+        if artifact.kind.value != "trace" or artifact.name != "event.json":
+            continue
+        _, data = workspace.read_artifact(thread_id, artifact.id)
+        events.append(AgentTraceEvent.model_validate_json(data))
+    return tuple(events)
 
 
 @router.post("/api/dpp", response_model=DppPackage)
