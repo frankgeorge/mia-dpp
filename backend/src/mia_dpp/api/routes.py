@@ -28,7 +28,11 @@ from mia_dpp.api.schemas import (
 from mia_dpp.bootstrap import Application
 from mia_dpp.domain.targets import TemplateSummary
 from mia_dpp.errors import ExtractionError, MiaError
-from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import (
+    MappingKnowledgeEntry,
+    WebsiteIngestRequest,
+    WebsiteIngestResponse,
+)
 from mia_dpp.tools.search import SearchUnavailableError
 from mia_dpp.tools.web.models import (
     ExtractionDependencyError,
@@ -206,6 +210,16 @@ async def workspace_trace(
         _, data = workspace.read_artifact(thread_id, artifact.id)
         events.append(AgentTraceEvent.model_validate_json(data))
     return tuple(events)
+
+
+@router.get(
+    "/api/mapping-knowledge",
+    response_model=tuple[MappingKnowledgeEntry, ...],
+)
+async def mapping_knowledge(http_request: Request) -> tuple[MappingKnowledgeEntry, ...]:
+    """List backend-owned mapping knowledge for the Integration Graph."""
+
+    return _application(http_request).mapping_knowledge.list()
 
 
 @router.post("/api/dpp", response_model=DppPackage)

@@ -21,6 +21,7 @@ from mia_dpp.agent.models import (
 from mia_dpp.agent.prompts import AGENT_INSTRUCTIONS, DPP_CREATION_SKILL
 from mia_dpp.agent.tools import AGENT_TOOLS
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
+from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.products.research import ProductResearchTool
@@ -48,6 +49,7 @@ class AutonomousAgent:
         web_tool: WebExtractionTool,
         mapping_tool: ProductResolver,
         mapping_review: MappingReviewService,
+        mapping_knowledge: MappingKnowledgeStore,
         dpp_pipeline: DeterministicDppPipeline,
     ) -> None:
         """Configure one PydanticAI agent with MIA's trusted capabilities.
@@ -64,6 +66,7 @@ class AutonomousAgent:
         self._web_tool = web_tool
         self._mapping_tool = mapping_tool
         self._mapping_review = mapping_review
+        self._mapping_knowledge = mapping_knowledge
         self._dpp_pipeline = dpp_pipeline
         self._configured = model is not None
         self._agent: Agent[MiaDependencies, AgentRunOutput] | None = None
@@ -110,6 +113,7 @@ class AutonomousAgent:
             web_tool=self._web_tool,
             mapping_tool=self._mapping_tool,
             mapping_review=self._mapping_review,
+            mapping_knowledge=self._mapping_knowledge,
             dpp_pipeline=self._dpp_pipeline,
             workspace=self._workspace,
         )

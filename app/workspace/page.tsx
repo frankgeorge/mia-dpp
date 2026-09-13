@@ -13,7 +13,6 @@ import type {
   DppPackage,
   EvidenceRecord,
   FieldMapping,
-  GraphEntry,
   HumanRequest,
   MappingResult,
   NameplateElement,
@@ -22,6 +21,7 @@ import type {
   WebsiteIngestResponse,
   WorkflowEvent,
   WorkspaceArtifact,
+  MappingKnowledgeEntry,
 } from "@/lib/types";
 import { CoveragePanel } from "@/components/CoveragePanel";
 import { EvidencePanel } from "@/components/EvidencePanel";
@@ -32,8 +32,8 @@ import { AgentActivity } from "@/components/AgentActivity";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { LiveActivity } from "@/components/LiveActivity";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
+import { IntegrationGraph } from "@/components/IntegrationGraph";
 
-const GRAPH_KEY = "mia.graph.v1";
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
 type WorkspaceTab =
   | "mappings"
@@ -71,7 +71,7 @@ export default function Workspace() {
   const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
   const [completionSummary, setCompletionSummary] = useState<CompletionSummary | null>(null);
   const [workflowEvents, setWorkflowEvents] = useState<WorkflowEvent[]>([]);
-  const [graph, setGraph] = useState<GraphEntry[]>([]);
+  const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
     NameplateElement[]
   >([]);
@@ -90,10 +90,8 @@ export default function Workspace() {
     Record<string, AgentReviewDecision>
   >({});
   const [tab, setTab] = useState<WorkspaceTab>("mappings");
-  const graphReadyRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  /* Integration Graph persists across sessions in the browser. */
   const mergeActivity = useCallback((events: AgentTraceEvent[]) => {
     setAgentActivity((previous) => {
       const known = new Set(previous.map((event) => event.id));
@@ -102,31 +100,22 @@ export default function Workspace() {
   }, []);
 
   useEffect(() => {
-    const restore = setTimeout(() => {
-      try {
-        const saved = localStorage.getItem(GRAPH_KEY);
-        if (saved) setGraph(JSON.parse(saved));
-      } catch {
-        /* ignore unreadable storage */
-      } finally {
-        graphReadyRef.current = true;
-      }
-    }, 0);
-    return () => clearTimeout(restore);
-  }, []);
-
-  useEffect(() => {
-    if (!graphReadyRef.current) return;
-    try {
-      localStorage.setItem(GRAPH_KEY, JSON.stringify(graph));
-    } catch {
-      /* ignore full or blocked storage */
-    }
-  }, [graph]);
-
-  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy, agentActivity]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/mapping-knowledge`);
+        if (response.ok) {
+          setMappingKnowledge((await response.json()) as MappingKnowledgeEntry[]);
+        }
+      } catch {
+        /* The empty state remains usable while the backend is unavailable. */
+      }
+    };
+    void load();
+  }, []);
 
   useEffect(() => {
     if (!busy || !threadId) return;
@@ -257,6 +246,7 @@ export default function Workspace() {
     setHumanRequest(data.pendingHumanRequest);
     mergeActivity(data.traceEvents);
     void refreshArtifacts(data.threadId);
+    void refreshMappingKnowledge();
     const website = data.currentProduct?.resolution;
     if (website) {
       applyWebsiteResult(
@@ -309,6 +299,13 @@ export default function Workspace() {
       `${API_URL}/api/workspaces/${encodeURIComponent(activeThreadId)}/artifacts`
     );
     if (response.ok) setArtifacts((await response.json()) as WorkspaceArtifact[]);
+  }
+
+  async function refreshMappingKnowledge() {
+    const response = await fetch(`${API_URL}/api/mapping-knowledge`);
+    if (response.ok) {
+      setMappingKnowledge((await response.json()) as MappingKnowledgeEntry[]);
+    }
   }
 
   function applyWebsiteResult(
@@ -393,7 +390,6 @@ export default function Workspace() {
     setMappings((prev) =>
       prev.map((m) => (m.id === id ? { ...m, status } : m))
     );
-    const m = mappings.find((x) => x.id === id);
     if (semanticReview.some((item) => item.id === id)) {
       setReviewDecisions((previous) => ({
         ...previous,
@@ -404,7 +400,6 @@ export default function Workspace() {
         },
       }));
     }
-    if (m && status === "approved") writeToGraph(m);
   }
 
   function correct(
@@ -425,7 +420,7 @@ export default function Workspace() {
       mappingOrigin: "human",
       humanReviewed: true,
       humanComment: comment?.trim() || null,
-      reasoning: "Corrected by you, and saved to the Integration Graph.",
+      reasoning: "Corrected by you and awaiting trusted backend persistence.",
     };
     setMappings((previous) =>
       previous.map((item) => (item.id === id ? corrected : item))
@@ -449,35 +444,9 @@ export default function Workspace() {
         }));
       }
     }
-    writeToGraph(corrected);
-  }
-
-  /* Every human decision is written back — this is the compounding memory. */
-  function writeToGraph(m: FieldMapping) {
-    setGraph((prev) => {
-      const i = prev.findIndex(
-        (g) => g.sourceField.toLowerCase() === m.sourceField.toLowerCase()
-      );
-      const entry: GraphEntry = {
-        sourceField: m.sourceField,
-        targetElement: m.targetElement,
-        semanticId: m.semanticId,
-        verifiedAt: new Date().toISOString(),
-        corrections: i >= 0 ? prev[i].corrections + 1 : 1,
-      };
-      if (i >= 0) {
-        const copy = [...prev];
-        copy[i] = entry;
-        return copy;
-      }
-      return [entry, ...prev];
-    });
   }
 
   function approveAll() {
-    mappings
-      .filter((m) => m.status === "review" || m.status === "auto")
-      .forEach(writeToGraph);
     setMappings((prev) =>
       prev.map((m) =>
         m.status === "rejected" ? m : { ...m, status: "approved" }
@@ -850,9 +819,9 @@ export default function Workspace() {
                       ) ?? coverageReport.statistics.requirements}
                     </span>
                   )}
-                  {t === "graph" && graph.length > 0 && (
+                  {t === "graph" && mappingKnowledge.length > 0 && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
-                      {graph.length}
+                      {mappingKnowledge.length}
                     </span>
                   )}
                   {t === "data" && artifacts.length > 0 && (
@@ -989,41 +958,8 @@ export default function Workspace() {
               </div>
             ) : tab === "data" ? (
               <WorkspaceExplorer apiUrl={API_URL} threadId={threadId} artifacts={artifacts} />
-            ) : graph.length === 0 ? (
-              <Empty
-                title="The graph is empty"
-                body="Approve or correct a mapping and it gets saved here. The next product that uses the same field starts from your decision."
-              />
             ) : (
-              <div className="space-y-3">
-                <p className="pb-2 text-[13px] leading-relaxed text-muted">
-                  Verified mappings reused across products. These raise MIA&rsquo;s
-                  confidence on the next passport.
-                </p>
-                {graph.map((g) => (
-                  <div
-                    key={g.sourceField}
-                    className="rounded-xl border border-hairline bg-paper p-4 shadow-sm transition-all hover:shadow-md"
-                  >
-                    <p className="font-mono text-[13px]">
-                      {g.sourceField}{" "}
-                      <span className="text-muted">&rarr;</span>{" "}
-                      <span className="text-signal">{g.targetElement}</span>
-                    </p>
-                    <p className="mt-1.5 font-mono text-[11px] text-muted">
-                      {g.semanticId} · verified {g.corrections}&times;
-                    </p>
-                  </div>
-                ))}
-                <div className="pt-2">
-                  <button
-                    onClick={() => setGraph([])}
-                    className="text-[12px] text-muted underline underline-offset-2 hover:text-ink"
-                  >
-                    Clear graph
-                  </button>
-                </div>
-              </div>
+              <IntegrationGraph entries={mappingKnowledge} />
             )}
           </div>
         </section>

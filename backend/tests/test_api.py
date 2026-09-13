@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import replace
 from typing import Any
 
@@ -199,7 +200,7 @@ def test_workspace_artifact_api_lists_reads_and_exports_thread_files() -> None:
 
 def test_trace_endpoint_returns_normalized_events_without_state_snapshots() -> None:
     workspace = app.state.mia.workspace
-    state = MiaState(thread_id="thread-api-trace")
+    state = MiaState(thread_id=f"thread-api-trace-{uuid.uuid4().hex}")
     event = state.add_event("tool.started", "Extracting the product page.")
     workspace.write_json(
         state.thread_id,
@@ -214,7 +215,7 @@ def test_trace_endpoint_returns_normalized_events_without_state_snapshots() -> N
         {"status": "running"},
     )
 
-    response = request("GET", "/api/workspaces/thread-api-trace/trace")
+    response = request("GET", f"/api/workspaces/{state.thread_id}/trace")
 
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [event.id]

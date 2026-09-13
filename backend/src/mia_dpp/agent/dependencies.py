@@ -6,6 +6,7 @@ from typing import Any
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.agent.models import AgentTraceEvent, MiaState
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
+from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.products.research import ProductResearchTool
@@ -31,6 +32,7 @@ class MiaDependencies:
     web_tool: WebExtractionTool
     mapping_tool: ProductResolver
     mapping_review: MappingReviewService
+    mapping_knowledge: MappingKnowledgeStore
     dpp_pipeline: DeterministicDppPipeline
     workspace: WorkspaceStore
 

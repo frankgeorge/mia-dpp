@@ -40,6 +40,7 @@ class SemanticContextObservation(WireModel):
     product_id: str
     evidence: tuple[dict[str, object], ...]
     requirements: tuple[dict[str, object], ...]
+    reviewed_knowledge: tuple[dict[str, object], ...] = ()
 
 
 async def search_companies(
@@ -475,6 +476,7 @@ async def inspect_unresolved_mappings(
             product_id=product_id,
             evidence=(),
             requirements=(),
+            reviewed_knowledge=(),
         )
     context = ctx.deps.mapping_review.semantic_context(work.resolution)
     evidence = tuple(
@@ -500,6 +502,24 @@ async def inspect_unresolved_mappings(
         }
         for item in context.requirements
     )
+    company = ctx.deps.state.selected_company
+    knowledge = tuple(
+        {
+            "sourceField": item.source_field,
+            "targetTemplate": item.target_template,
+            "targetPath": list(item.target_path),
+            "semanticId": item.semantic_id,
+            "confirmations": item.confirmations,
+            "humanComments": list(item.human_comments),
+        }
+        for record in context.evidence
+        for item in ctx.deps.mapping_knowledge.relevant(
+            record.source_label or record.predicate,
+            manufacturer=company.name if company else None,
+            domain=company.domain if company else None,
+            template_keys=ctx.deps.state.target_submodels,
+        )
+    )
     ctx.deps.add_event(
         "mapping.semantic_context",
         (
@@ -515,6 +535,7 @@ async def inspect_unresolved_mappings(
         product_id=product_id,
         evidence=evidence,
         requirements=requirements,
+        reviewed_knowledge=knowledge,
     )
 
 
@@ -557,6 +578,13 @@ async def propose_semantic_mapping(
     except ValueError as error:
         return ToolObservation(outcome="invalid", summary=str(error), count=0)
     work.pending_reviews = (*work.pending_reviews, review)
+    company = ctx.deps.state.selected_company
+    ctx.deps.mapping_knowledge.remember_candidate(
+        review.mapping,
+        manufacturer=company.name if company else None,
+        domain=company.domain if company else None,
+        product_family=work.candidate.family if work.candidate else None,
+    )
     ctx.deps.state.products[product_id] = work
     ctx.deps.state.status = AgentStatus.AWAITING_REVIEW
     ctx.deps.add_event(

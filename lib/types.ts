@@ -260,6 +260,26 @@ export interface GraphEntry {
   corrections: number;
 }
 
+export interface MappingKnowledgeEntry {
+  id: string;
+  sourceField: string;
+  exampleValues: string[];
+  targetTemplate: string;
+  targetPath: string[];
+  semanticId: string;
+  manufacturer: string | null;
+  domain: string | null;
+  productFamily: string | null;
+  llmReviewSummary: string | null;
+  humanComments: string[];
+  confirmations: number;
+  corrections: number;
+  rejections: number;
+  createdAt: string;
+  updatedAt: string;
+  status: "candidate" | "trusted";
+}
+
 export interface Gap {
   templatePath: string[];
   message: string;

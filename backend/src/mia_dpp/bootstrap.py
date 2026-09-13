@@ -15,6 +15,7 @@ from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
+from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.products.research import ProductResearchTool
@@ -38,6 +39,7 @@ class Application:
     website_workflow: WebsiteWorkflow
     agent: MiaAgent
     workspace: FileWorkspaceStore
+    mapping_knowledge: MappingKnowledgeStore
 
 
 def build_application(settings: Settings | None = None) -> Application:
@@ -71,6 +73,11 @@ def build_application(settings: Settings | None = None) -> Application:
         )
     workspace = FileWorkspaceStore(configured.workspace_root)
     mapping_review = MappingReviewService(templates)
+    mapping_knowledge = MappingKnowledgeStore(
+        configured.thread_store_path.with_name(
+            configured.thread_store_path.stem + "-mapping-knowledge.sqlite3"
+        )
+    )
     brain = AutonomousAgent(
         model=agent_model,
         company_tool=company_tool,
@@ -79,12 +86,14 @@ def build_application(settings: Settings | None = None) -> Application:
         web_tool=web_tool,
         mapping_tool=resolver,
         mapping_review=mapping_review,
+        mapping_knowledge=mapping_knowledge,
         dpp_pipeline=DeterministicDppPipeline(templates),
         workspace=workspace,
     )
     agent = MiaAgent(
         brain=brain,
         mapping_review=mapping_review,
+        mapping_knowledge=mapping_knowledge,
         workspace=workspace,
         database_path=configured.thread_store_path,
     )
@@ -96,4 +105,5 @@ def build_application(settings: Settings | None = None) -> Application:
         website_workflow=website_workflow,
         agent=agent,
         workspace=workspace,
+        mapping_knowledge=mapping_knowledge,
     )

@@ -23,6 +23,7 @@ from mia_dpp.agent.models import (
 )
 from mia_dpp.agent.tools import AGENT_TOOLS
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
+from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.products.research import ProductResearchTool
@@ -66,6 +67,12 @@ class FixtureLoader:
         )
 
 
+class SlowFixtureLoader(FixtureLoader):
+    async def load(self, url: str) -> RenderedPage:
+        await asyncio.sleep(0.2)
+        return await super().load(url)
+
+
 class ScriptedTestModel(TestModel):
     def __init__(self, arguments: dict[str, dict[str, object]], **kwargs: object) -> None:
         super().__init__(**kwargs)
@@ -89,6 +96,7 @@ def build_agent(
 
     workspace = FileWorkspaceStore(tmp_path / "workspaces")
     review = MappingReviewService(repository)
+    knowledge = MappingKnowledgeStore(tmp_path / "mapping-knowledge.sqlite3")
     brain = AutonomousAgent(
         model=model,
         company_tool=CompanyDiscoveryTool(search),
@@ -100,6 +108,7 @@ def build_agent(
         ),
         mapping_tool=ProductResolver(repository),
         mapping_review=review,
+        mapping_knowledge=knowledge,
         dpp_pipeline=DeterministicDppPipeline(repository),
         workspace=workspace,
     )
@@ -107,6 +116,7 @@ def build_agent(
         MiaAgent(
             brain=brain,
             mapping_review=review,
+            mapping_knowledge=knowledge,
             workspace=workspace,
             database_path=tmp_path / "threads.sqlite3",
         ),
@@ -167,6 +177,32 @@ def test_one_pydanticai_run_can_call_multiple_tools_and_create_lineage(tmp_path:
     }
     mapping = next(item for item in artifacts if item.kind.value == "mapping")
     assert mapping.derived_from
+
+
+def test_trace_is_observable_before_agent_run_completes(tmp_path: Path) -> None:
+    url = "https://manufacturer.example/products/pg-16"
+    model = ScriptedTestModel(
+        arguments={"extract_product_page": {"url": url, "product_id": "product-live"}},
+        call_tools=["extract_product_page"],
+        custom_output_args={
+            "reply": "Extraction completed.",
+            "status": "awaiting_input",
+            "decision_summary": "The page was extracted.",
+        },
+    )
+    agent, workspace = build_agent(tmp_path, model, loader=SlowFixtureLoader())
+
+    async def observe() -> None:
+        task = asyncio.create_task(agent.message(AgentRequest(message=f"DPP from {url}")))
+        await asyncio.sleep(0.05)
+        thread_dirs = list((tmp_path / "workspaces").glob("thread-*"))
+        assert thread_dirs
+        artifacts = workspace.list_artifacts(thread_dirs[0].name)
+        assert any(item.name == "event.json" for item in artifacts)
+        assert not task.done()
+        await task
+
+    asyncio.run(observe())
 
 
 def test_model_visible_tools_cannot_claim_human_authority() -> None:
@@ -262,6 +298,52 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
     assert proposal.mapping.llm_review.evidence_ids == (context.evidence[0].id,)
     assert proposal.mapping.llm_review.rationale == (
         "The label and expected meaning are compatible."
+    )
+
+    knowledge = MappingKnowledgeStore(tmp_path / "reviewed-knowledge.sqlite3")
+    candidate = knowledge.remember_candidate(
+        proposal.mapping,
+        manufacturer="Example Instruments GmbH",
+        domain="manufacturer.example",
+        product_family="Gauge",
+    )
+    assert candidate.status.value == "candidate"
+    assert not knowledge.relevant(
+        proposal.mapping.source_field,
+        manufacturer="Example Instruments GmbH",
+        domain="manufacturer.example",
+        template_keys=(proposal.mapping.target.template_key,),
+    )
+
+    _, reviewed = service.decide(
+        result,
+        proposal,
+        decision="approve",
+        thread_id="thread-knowledge-test",
+        comment="Confirmed from the manufacturer's terminology.",
+    )
+    trusted = knowledge.remember_review(
+        reviewed.mapping,
+        decision="approve",
+        manufacturer="Example Instruments GmbH",
+        domain="manufacturer.example",
+        product_family="Gauge",
+        comment="Confirmed from the manufacturer's terminology.",
+    )
+    assert trusted.status.value == "trusted"
+    assert trusted.confirmations == 1
+    assert trusted.human_comments == ("Confirmed from the manufacturer's terminology.",)
+    assert knowledge.relevant(
+        proposal.mapping.source_field,
+        manufacturer="Example Instruments GmbH",
+        domain="manufacturer.example",
+        template_keys=(proposal.mapping.target.template_key,),
+    ) == (trusted,)
+    assert not knowledge.relevant(
+        proposal.mapping.source_field,
+        manufacturer="Unrelated Manufacturer",
+        domain="unrelated.example",
+        template_keys=(proposal.mapping.target.template_key,),
     )
 
 

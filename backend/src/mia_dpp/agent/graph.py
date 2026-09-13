@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 from pathlib import Path
+from queue import SimpleQueue
+from threading import Thread
 from typing import Any, Literal, TypedDict
 
 from langchain_core.runnables import RunnableConfig
@@ -27,6 +29,7 @@ from mia_dpp.agent.models import (
     MiaState,
     ProductStatus,
 )
+from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.workspace.models import ArtifactKind
 from mia_dpp.workspace.store import WorkspaceStore
@@ -55,11 +58,13 @@ class MiaAgent:
         *,
         brain: AutonomousAgent,
         mapping_review: MappingReviewService,
+        mapping_knowledge: MappingKnowledgeStore,
         workspace: WorkspaceStore,
         database_path: Path,
     ) -> None:
         self._brain = brain
         self._mapping_review = mapping_review
+        self._mapping_knowledge = mapping_knowledge
         self._workspace = workspace
         self._database_path = database_path
         database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +73,6 @@ class MiaAgent:
         memory_connection = sqlite3.connect(memory_path, check_same_thread=False)
         self._checkpointer = SqliteSaver(checkpoint_connection)
         self._memory = SqliteStore(memory_connection)
-        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mia-brain")
         self._checkpointer.setup()
         self._memory.setup()
         builder = StateGraph(LifecycleState)
@@ -86,6 +90,11 @@ class MiaAgent:
 
     async def message(self, request: AgentRequest) -> AgentResponse:
         """Run one checkpointed user turn through the autonomous PydanticAI loop."""
+
+        return await self._run_background(lambda: self._message(request))
+
+    def _message(self, request: AgentRequest) -> AgentResponse:
+        """Invoke the synchronous LangGraph without blocking FastAPI's event loop."""
 
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
         snapshot = self._graph.get_state(self._config(thread_id))
@@ -108,12 +117,37 @@ class MiaAgent:
     async def review(self, request: AgentReviewRequest) -> AgentResponse:
         """Resume a mapping-review interrupt with trusted API decisions."""
 
-        return self._resume(request.thread_id, request.model_dump(mode="json"))
+        return await self._run_background(
+            lambda: self._resume(request.thread_id, request.model_dump(mode="json"))
+        )
 
     async def provide_value(self, request: AgentValueRequest) -> AgentResponse:
         """Resume a missing-value interrupt without exposing human authority to the model."""
 
-        return self._resume(request.thread_id, request.model_dump(mode="json"))
+        return await self._run_background(
+            lambda: self._resume(request.thread_id, request.model_dump(mode="json"))
+        )
+
+    @staticmethod
+    async def _run_background(operation: Callable[[], AgentResponse]) -> AgentResponse:
+        """Keep the API loop responsive while the synchronous checkpoint graph runs."""
+
+        results: SimpleQueue[AgentResponse | BaseException] = SimpleQueue()
+
+        def execute() -> None:
+            try:
+                results.put(operation())
+            except BaseException as error:
+                results.put(error)
+
+        worker = Thread(target=execute, name="mia-langgraph", daemon=True)
+        worker.start()
+        while worker.is_alive():
+            await asyncio.sleep(0.025)
+        result = results.get()
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     def _resume(self, thread_id: str, payload: dict[str, Any]) -> AgentResponse:
         values = self._graph.invoke(Command(resume=payload), self._config(thread_id))
@@ -125,10 +159,7 @@ class MiaAgent:
         if not state.user_goal:
             state.user_goal = message
         history = ModelMessagesTypeAdapter.validate_json(values.get("model_history_json", "[]"))
-        output, messages, trace_offset = self._executor.submit(
-            asyncio.run,
-            self._brain.run(message, state, history),
-        ).result()
+        output, messages, trace_offset = asyncio.run(self._brain.run(message, state, history))
         self._persist_snapshot(state, output.decision_summary)
         return {
             "job": state.model_dump(mode="json"),
@@ -181,6 +212,15 @@ class MiaAgent:
                 thread_id=state.thread_id,
                 corrected_requirement_id=decision.corrected_requirement_id,
                 corrected_value=decision.corrected_value,
+                comment=decision.comment,
+            )
+            company = state.selected_company
+            self._mapping_knowledge.remember_review(
+                reviewed.mapping,
+                decision=decision.decision,
+                manufacturer=company.name if company else None,
+                domain=company.domain if company else None,
+                product_family=work.candidate.family if work.candidate else None,
                 comment=decision.comment,
             )
             artifact = self._workspace.write_json(
