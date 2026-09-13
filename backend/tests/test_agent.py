@@ -209,7 +209,12 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
                 thread_id=pending.thread_id,
                 product_id="product-review",
                 decisions=tuple(
-                    AgentReviewDecision(review_id=item.id, decision="reject") for item in reviews
+                    AgentReviewDecision(
+                        review_id=item.id,
+                        decision="reject",
+                        comment="The source label means a different product property.",
+                    )
+                    for item in reviews
                 ),
             )
         )
@@ -219,7 +224,45 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
     assert resumed.pending_human_request is None
     assert resumed.current_product is not None
     assert not resumed.current_product.pending_reviews
-    assert any(item.kind.value == "review" for item in workspace.list_artifacts(pending.thread_id))
+    review_artifact = next(
+        item for item in workspace.list_artifacts(pending.thread_id) if item.kind.value == "review"
+    )
+    _, review_data = workspace.read_artifact(pending.thread_id, review_artifact.id)
+    assert b'"comment": "The source label means a different product property."' in review_data
+
+
+def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) -> None:
+    repository = OfficialTemplateRepository()
+
+    async def public_resolver(host: str, port: int) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    extraction = asyncio.run(
+        WebExtractionTool(
+            loader=FixtureLoader(),
+            url_policy=ProductUrlPolicy(public_resolver),
+        ).extract("https://manufacturer.example/products/pg-16")
+    )
+    result = asyncio.run(
+        ProductResolver(repository).resolve_package(
+            extraction.knowledge_package,
+            template_keys=("digital_nameplate", "technical_data"),
+        )
+    )
+    service = MappingReviewService(repository)
+    context = service.semantic_context(result)
+    proposal = service.propose(
+        result,
+        evidence_id=context.evidence[0].id,
+        requirement_id=context.requirements[0].id,
+        reason_summary="The label and expected meaning are compatible.",
+    )
+
+    assert proposal.mapping.llm_review is not None
+    assert proposal.mapping.llm_review.evidence_ids == (context.evidence[0].id,)
+    assert proposal.mapping.llm_review.rationale == (
+        "The label and expected meaning are compatible."
+    )
 
 
 def test_workspace_artifacts_are_isolated_by_thread(tmp_path: Path) -> None:

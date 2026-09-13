@@ -116,6 +116,14 @@ export interface FieldMapping {
   status: MappingStatus;
   mappingOrigin: MappingOrigin;
   humanReviewed: boolean;
+  llmReview?: {
+    conclusion: string;
+    rationale: string;
+    evidenceIds: string[];
+    alternativeTargetIds: string[];
+    uncertainties: string[];
+  } | null;
+  humanComment?: string | null;
   /** True when earlier human review helped resolve the target. */
   fromGraph?: boolean;
 }

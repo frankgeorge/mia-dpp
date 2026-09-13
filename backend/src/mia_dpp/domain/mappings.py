@@ -24,6 +24,16 @@ class MappingOrigin(StrEnum):
     HUMAN = "human"
 
 
+class LlmReview(WireModel):
+    """Concise inspectable explanation for an AI-assisted mapping proposal."""
+
+    conclusion: str = Field(min_length=1, max_length=500)
+    rationale: str = Field(min_length=1, max_length=600)
+    evidence_ids: tuple[str, ...] = Field(min_length=1)
+    alternative_target_ids: tuple[str, ...] = ()
+    uncertainties: tuple[str, ...] = ()
+
+
 class CoverageStatus(StrEnum):
     SATISFIED = "satisfied"
     CANDIDATE = "candidate"
@@ -212,6 +222,8 @@ class MappingDraft(WireModel):
     from_graph: bool = False
     mapping_origin: MappingOrigin = MappingOrigin.DETERMINISTIC
     human_reviewed: bool = False
+    llm_review: LlmReview | None = None
+    human_comment: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def legacy_fields_match_typed_target(self) -> MappingDraft:

@@ -11,6 +11,7 @@ from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
 from mia_dpp.domain.mappings import (
     CoverageStatus,
+    LlmReview,
     MappingOrigin,
     MappingResult,
     MappingStatus,
@@ -147,6 +148,15 @@ class MappingReviewService:
                 ),
                 status=MappingStatus.REVIEW,
                 mapping_origin=MappingOrigin.SEMANTIC_AGENT,
+                llm_review=LlmReview(
+                    conclusion=(
+                        f'"{record.source_label or record.predicate}" most likely maps to '
+                        f"{target.id_short}."
+                    ),
+                    rationale=reason_summary,
+                    evidence_ids=(record.id,),
+                    uncertainties=assessment.remaining_uncertainty,
+                ),
             ),
         )
 
@@ -159,6 +169,7 @@ class MappingReviewService:
         thread_id: str,
         corrected_requirement_id: str | None = None,
         corrected_value: str | None = None,
+        comment: str | None = None,
     ) -> tuple[WebsiteIngestResponse, SemanticReviewItem]:
         """Apply one human decision and return recalculated mapping/coverage state."""
 
@@ -167,7 +178,11 @@ class MappingReviewService:
             reviewed = item.model_copy(
                 update={
                     "mapping": mapping.model_copy(
-                        update={"status": MappingStatus.REJECTED, "human_reviewed": True}
+                        update={
+                            "status": MappingStatus.REJECTED,
+                            "human_reviewed": True,
+                            "human_comment": comment,
+                        }
                     )
                 }
             )
@@ -212,6 +227,7 @@ class MappingReviewService:
                         MappingOrigin.HUMAN if decision == "correct" else mapping.mapping_origin
                     ),
                     "human_reviewed": True,
+                    "human_comment": comment,
                     "reasoning": "Validated and accepted through human mapping review.",
                 }
             ),

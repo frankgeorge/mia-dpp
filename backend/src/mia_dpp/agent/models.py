@@ -227,6 +227,7 @@ class AgentReviewDecision(WireModel):
     decision: Literal["approve", "correct", "reject"]
     corrected_requirement_id: str | None = None
     corrected_value: str | None = Field(default=None, max_length=4096)
+    comment: str | None = Field(default=None, max_length=1000)
 
 
 class AgentReviewRequest(WireModel):

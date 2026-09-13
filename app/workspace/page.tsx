@@ -389,7 +389,7 @@ export default function Workspace() {
     }
   }
 
-  function decide(id: string, status: "approved" | "rejected") {
+  function decide(id: string, status: "approved" | "rejected", comment?: string) {
     setMappings((prev) =>
       prev.map((m) => (m.id === id ? { ...m, status } : m))
     );
@@ -400,6 +400,7 @@ export default function Workspace() {
         [id]: {
           reviewId: id,
           decision: status === "approved" ? "approve" : "reject",
+          comment: comment?.trim() || null,
         },
       }));
     }
@@ -409,7 +410,8 @@ export default function Workspace() {
   function correct(
     id: string,
     selected: NameplateElement,
-    correctedValue?: string
+    correctedValue?: string,
+    comment?: string
   ) {
     const mapping = mappings.find((item) => item.id === id);
     if (!mapping) return;
@@ -422,6 +424,7 @@ export default function Workspace() {
       status: "approved",
       mappingOrigin: "human",
       humanReviewed: true,
+      humanComment: comment?.trim() || null,
       reasoning: "Corrected by you, and saved to the Integration Graph.",
     };
     setMappings((previous) =>
@@ -441,6 +444,7 @@ export default function Workspace() {
             decision: "correct",
             correctedRequirementId: requirement.id,
             correctedValue: correctedValue?.trim() || null,
+            comment: comment?.trim() || null,
           },
         }));
       }
@@ -970,7 +974,7 @@ export default function Workspace() {
                 mappingResult={mappingResult}
               />
             ) : tab === "coverage" ? (
-              <CoveragePanel report={coverageReport} evidence={evidence} completion={completionSummary} />
+              <CoveragePanel report={coverageReport} evidence={evidence} completion={completionSummary} mappingResult={mappingResult} />
             ) : tab === "process" ? (
               <div className="space-y-6">
                 <AgentActivity events={agentActivity} />

@@ -181,6 +181,7 @@ class MiaAgent:
                 thread_id=state.thread_id,
                 corrected_requirement_id=decision.corrected_requirement_id,
                 corrected_value=decision.corrected_value,
+                comment=decision.comment,
             )
             artifact = self._workspace.write_json(
                 state.thread_id,

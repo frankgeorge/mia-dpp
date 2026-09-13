@@ -11,11 +11,12 @@ export function MappingRow({
 }: {
   mapping: FieldMapping;
   elements: NameplateElement[];
-  onDecide: (id: string, status: "approved" | "rejected") => void;
+  onDecide: (id: string, status: "approved" | "rejected", comment?: string) => void;
   onCorrect: (
     id: string,
     target: NameplateElement,
-    correctedValue?: string
+    correctedValue?: string,
+    comment?: string
   ) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -23,6 +24,7 @@ export function MappingRow({
     m.target.instancePath.join("/")
   );
   const [correctedValue, setCorrectedValue] = useState(m.sourceValue);
+  const [comment, setComment] = useState("");
   const pct = Math.round(m.confidence * 100);
   const missingPct = Math.max(0, 100 - pct);
   const strong = m.confidence >= 0.85;
@@ -76,6 +78,15 @@ export function MappingRow({
         {m.humanReviewed ? " · reviewed" : ""}
       </p>
 
+      {m.llmReview && (
+        <div className="mt-3 rounded-lg border border-signal/15 bg-signal/5 p-3 text-[11px] leading-relaxed">
+          <p className="font-semibold text-ink">LLM Review</p>
+          <p className="mt-1"><span className="font-medium">Conclusion:</span> {m.llmReview.conclusion}</p>
+          <p className="mt-1 text-muted"><span className="font-medium text-ink">Why:</span> {m.llmReview.rationale}</p>
+          {m.llmReview.uncertainties.length > 0 && <p className="mt-1 text-muted"><span className="font-medium text-ink">Uncertainty:</span> {m.llmReview.uncertainties.join(" · ")}</p>}
+        </div>
+      )}
+
       <details className="mt-2.5 rounded-lg border border-hairline bg-mist/60 px-3 py-2">
         <summary className="cursor-pointer text-[12px] font-medium text-ink">
           Why {pct}%? {missingPct > 0 && `What is the missing ${missingPct}%?`}
@@ -125,9 +136,11 @@ export function MappingRow({
 
       {/* Approval gate */}
       {m.status === "review" && !editing && (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 space-y-2">
+          <input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Optional comment for this decision" className="w-full rounded-lg border border-hairline bg-paper px-3 py-2 text-[12px]" />
+          <div className="flex items-center gap-2">
           <button
-            onClick={() => onDecide(m.id, "approved")}
+            onClick={() => onDecide(m.id, "approved", comment)}
             className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-85"
           >
             Approve
@@ -139,11 +152,12 @@ export function MappingRow({
             Correct
           </button>
           <button
-            onClick={() => onDecide(m.id, "rejected")}
+            onClick={() => onDecide(m.id, "rejected", comment)}
             className="px-1 text-[12px] text-muted transition-colors hover:text-ink"
           >
             Reject
           </button>
+          </div>
         </div>
       )}
 
@@ -183,7 +197,7 @@ export function MappingRow({
                   (element) =>
                     element.target.instancePath.join("/") === targetPath
                 );
-                if (target) onCorrect(m.id, target, correctedValue);
+                if (target) onCorrect(m.id, target, correctedValue, comment);
                 setEditing(false);
               }}
               className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-medium text-white"
