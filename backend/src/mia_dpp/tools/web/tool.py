@@ -18,7 +18,7 @@ from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 class WebExtractionTool:
     """Turn one public URL into provenance-rich product evidence.
 
-    Agent V2 or the direct website workflow calls this capability. It validates
+    MIA agent or the direct website workflow calls this capability. It validates
     and loads the page, extracts facts, and normalizes evidence, but never maps
     facts to AAS targets.
     """

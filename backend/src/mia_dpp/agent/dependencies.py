@@ -3,13 +3,14 @@
 from dataclasses import dataclass
 
 from mia_dpp.aas.build import DeterministicDppPipeline
-from mia_dpp.agent.v2.models import MiaState
+from mia_dpp.agent.models import MiaState
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.products.research import ProductResearchTool
 from mia_dpp.tools.products.tool import ProductDiscoveryTool
 from mia_dpp.tools.web.tool import WebExtractionTool
+from mia_dpp.workspace.store import WorkspaceStore
 
 
 @dataclass
@@ -29,3 +30,4 @@ class MiaDependencies:
     mapping_tool: ProductResolver
     mapping_review: MappingReviewService
     dpp_pipeline: DeterministicDppPipeline
+    workspace: WorkspaceStore

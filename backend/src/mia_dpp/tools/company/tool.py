@@ -16,7 +16,7 @@ _TITLE_SUFFIX = re.compile(
 
 
 class CompanyDiscoveryTool:
-    """Turn public search results into company candidates for Agent V2.
+    """Turn public search results into company candidates for MIA agent.
 
     The agent-facing ``search_companies`` function calls this capability through
     ``SearchProvider`` and stores the returned candidates in workflow state.

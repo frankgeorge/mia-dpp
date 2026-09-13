@@ -7,8 +7,9 @@ from datetime import UTC, datetime
 from mia_dpp.aas.requirements import build_requirement_inventory
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.completion import build_completion_summary
-from mia_dpp.domain.mappings import MappingProposal
-from mia_dpp.domain.workflow import completed_event
+from mia_dpp.domain.evidence import ProductKnowledgePackage
+from mia_dpp.domain.mappings import GraphEntry, MappingProposal
+from mia_dpp.domain.workflow import WorkflowEvent, completed_event
 from mia_dpp.tools.mapping.catalog import nameplate_catalog
 from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper, MappingStrategy
@@ -20,7 +21,7 @@ from mia_dpp.tools.web.tool import WebExtractionTool
 class ProductResolver:
     """Coordinate deterministic mapping, requirement coverage, and completion.
 
-    The website API and Agent V2 mapping tool call this after extraction. It
+    The website API and MIA agent mapping tool call this after extraction. It
     consumes existing evidence and returns the complete resolution snapshot.
     """
 
@@ -46,17 +47,35 @@ class ProductResolver:
         coverage. Control then returns to the API coordinator or autonomous agent.
         """
 
-        package = extraction.knowledge_package
+        return await self.resolve_package(
+            extraction.knowledge_package,
+            template_keys=request.template_keys,
+            graph=request.graph,
+            source_url=extraction.source_url,
+            workflow_events=extraction.workflow_events,
+        )
+
+    async def resolve_package(
+        self,
+        package: ProductKnowledgePackage,
+        *,
+        template_keys: tuple[str, ...],
+        graph: tuple[GraphEntry, ...] = (),
+        source_url: str = "",
+        workflow_events: tuple[WorkflowEvent, ...] = (),
+    ) -> WebsiteIngestResponse:
+        """Resolve provenance-rich product knowledge independent of its source type."""
+
         evidence = package.evidence
-        events = list(extraction.workflow_events)
+        events = list(workflow_events)
 
         templates_started = datetime.now(UTC)
-        templates = tuple(self._repository.load(key) for key in request.template_keys)
+        templates = tuple(self._repository.load(key) for key in template_keys)
         events.append(
             completed_event(
                 stage="templates.load",
                 started_at=templates_started,
-                input_count=len(request.template_keys),
+                input_count=len(template_keys),
                 output_count=len(templates),
                 summary=f"Loaded {len(templates)} pinned official IDTA templates.",
                 metadata={
@@ -86,7 +105,7 @@ class ProductResolver:
         mapping_started = datetime.now(UTC)
         history = {
             (entry.source_field.casefold(), entry.target_element): max(entry.corrections, 1)
-            for entry in request.graph
+            for entry in graph
         }
         mapping_result = await self._mapping_strategy.propose(evidence, history=history)
         proposals = (*mapping_result.mapped, *mapping_result.ambiguous)
@@ -140,13 +159,13 @@ class ProductResolver:
         )
         return WebsiteIngestResponse(
             reply=(
-                f"Crawl4AI fetched {extraction.source_url}. MIA retained {len(evidence)} facts: "
+                f"MIA retained {len(evidence)} facts from {source_url or 'the product sources'}: "
                 f"{len(mapping_result.mapped)} deterministically mapped, "
                 f"{len(mapping_result.ambiguous)} ambiguous, and "
                 f"{len(mapping_result.unmatched_evidence_ids)} currently unmatched."
             ),
-            source_url=extraction.source_url,
-            proposal=MappingProposal(product_name=extraction.product_name, mappings=proposals),
+            source_url=source_url,
+            proposal=MappingProposal(product_name=package.product_name, mappings=proposals),
             evidence=evidence,
             knowledge_package=package,
             mapping_result=mapping_result,

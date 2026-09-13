@@ -1,5 +1,5 @@
-"""LangGraph orchestration for MIA."""
+"""Checkpointed lifecycle and autonomous decision runtime for MIA."""
 
-from mia_dpp.agent.graph import MiaAgentWorkflow
+from mia_dpp.agent.graph import MiaAgent
 
-__all__ = ["MiaAgentWorkflow"]
+__all__ = ["MiaAgent"]

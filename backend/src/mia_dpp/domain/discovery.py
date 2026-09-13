@@ -10,6 +10,7 @@ class CompanyCandidate(WireModel):
     domain: str
     description: str = ""
     source_uri: str
+    identity_verified: bool = False
 
 
 class ProductCandidate(WireModel):

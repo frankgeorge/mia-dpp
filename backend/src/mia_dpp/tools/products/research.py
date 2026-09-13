@@ -12,7 +12,7 @@ from mia_dpp.tools.search import SearchProvider
 class ProductResearchTool:
     """Find additional source pages for one identified product.
 
-    Agent V2 uses this after coverage reveals gaps. Results record whether each
+    MIA agent uses this after coverage reveals gaps. Results record whether each
     page belongs to the known manufacturer domain before later extraction.
     """
 

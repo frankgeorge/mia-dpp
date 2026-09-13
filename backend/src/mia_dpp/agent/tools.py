@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field
 from pydantic_ai import RunContext, Tool
 
-from mia_dpp.agent.v2.dependencies import MiaDependencies
-from mia_dpp.agent.v2.models import AgentV2Status, ProductWork, TraceStatus
+from mia_dpp.agent.dependencies import MiaDependencies
+from mia_dpp.agent.models import (
+    AgentStatus,
+    HumanRequest,
+    HumanRequestKind,
+    ProductStatus,
+    ProductWork,
+    TraceStatus,
+)
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
-from mia_dpp.tools.mapping.models import WebsiteIngestRequest
 from mia_dpp.tools.search import SearchUnavailableError
+from mia_dpp.workspace.models import ArtifactKind
 
 
 class ToolObservation(WireModel):
@@ -59,7 +65,7 @@ async def search_companies(
         )
         return ToolObservation(outcome="unavailable", summary=str(error), count=0)
     ctx.deps.state.company_candidates = candidates
-    ctx.deps.state.status = AgentV2Status.AWAITING_COMPANY
+    ctx.deps.state.status = AgentStatus.AWAITING_COMPANY
     ctx.deps.state.add_event(
         "company.candidates",
         f"Found {len(candidates)} candidate companies.",
@@ -68,6 +74,13 @@ async def search_companies(
         output_summary=f"{len(candidates)} structured candidates",
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={"count": len(candidates)},
+    )
+    ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.SEARCH,
+        "company-candidates.json",
+        [item.model_dump(mode="json") for item in candidates],
+        created_by="search_companies",
     )
     return ToolObservation(
         outcome="candidates_found" if candidates else "no_results",
@@ -97,8 +110,8 @@ async def select_company(
             summary="The company ID is not in the current candidate set.",
             count=0,
         )
-    ctx.deps.state.selected_company = candidate
-    ctx.deps.state.status = AgentV2Status.RUNNING
+    ctx.deps.state.selected_company = candidate.model_copy(update={"identity_verified": True})
+    ctx.deps.state.status = AgentStatus.RUNNING
     ctx.deps.state.add_event(
         "company.selected",
         f"Selected {candidate.name}.",
@@ -143,7 +156,7 @@ async def discover_products(
         )
         return ToolObservation(outcome="unavailable", summary=str(error), count=0)
     ctx.deps.state.product_candidates = candidates
-    ctx.deps.state.status = AgentV2Status.AWAITING_PRODUCT
+    ctx.deps.state.status = AgentStatus.AWAITING_PRODUCT
     ctx.deps.state.add_event(
         "product.candidates",
         f"Found {len(candidates)} official-domain product candidates.",
@@ -152,6 +165,13 @@ async def discover_products(
         output_summary=f"{len(candidates)} structured candidates",
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={"count": len(candidates)},
+    )
+    ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.SEARCH,
+        "product-candidates.json",
+        [item.model_dump(mode="json") for item in candidates],
+        created_by="discover_products",
     )
     return ToolObservation(
         outcome="candidates_found" if candidates else "no_results",
@@ -188,7 +208,7 @@ async def select_products(
             product_id,
             ProductWork(product_id=product_id, candidate=by_id[product_id]),
         )
-    ctx.deps.state.status = AgentV2Status.RUNNING
+    ctx.deps.state.status = AgentStatus.RUNNING
     ctx.deps.state.add_event(
         "product.selected",
         f"Queued {len(unique)} product{'s' if len(unique) != 1 else ''}.",
@@ -227,11 +247,36 @@ async def extract_product_page(
     )
     if extraction.source_url not in {item.source_url for item in work.extractions}:
         work.extractions = (*work.extractions, extraction)
+    work.status = ProductStatus.IN_PROGRESS
+    source_artifact = ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.SOURCE,
+        "source.json",
+        {
+            "url": extraction.source_url,
+            "productName": extraction.product_name,
+            "sourceArtifactIds": extraction.knowledge_package.source_artifact_ids,
+        },
+        created_by="extract_product_page",
+        product_id=resolved_id,
+        source_url=extraction.source_url,
+    )
+    evidence_artifact = ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.EVIDENCE,
+        "evidence.json",
+        extraction.knowledge_package.model_dump(mode="json"),
+        created_by="extract_product_page",
+        product_id=resolved_id,
+        source_url=extraction.source_url,
+        derived_from=(source_artifact.id,),
+    )
+    work.artifact_ids = (*work.artifact_ids, source_artifact.id, evidence_artifact.id)
     ctx.deps.state.products[resolved_id] = work
     if resolved_id not in ctx.deps.state.selected_product_ids:
         ctx.deps.state.selected_product_ids = (*ctx.deps.state.selected_product_ids, resolved_id)
     ctx.deps.state.current_product_id = resolved_id
-    ctx.deps.state.status = AgentV2Status.RUNNING
+    ctx.deps.state.status = AgentStatus.RUNNING
     evidence = extraction.knowledge_package.evidence
     ctx.deps.state.add_event(
         "web.evidence_extracted",
@@ -271,18 +316,42 @@ async def map_product_evidence(
             count=0,
         )
     started = time.monotonic()
-    request = WebsiteIngestRequest(
-        url=extraction.source_url,
+    resolution = await ctx.deps.mapping_tool.resolve_package(
+        extraction.knowledge_package,
         template_keys=ctx.deps.state.target_submodels,
+        source_url=extraction.source_url,
+        workflow_events=extraction.workflow_events,
     )
-    resolution = await ctx.deps.mapping_tool.resolve(extraction, request)
     work.resolution = resolution
     work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(resolution)
     ctx.deps.state.products[product_id] = work
+    mapping_artifact = ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.MAPPING,
+        "mapping.json",
+        resolution.mapping_result.model_dump(mode="json"),
+        created_by="map_product_evidence",
+        product_id=product_id,
+        derived_from=work.artifact_ids,
+    )
+    coverage_artifact = ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.COVERAGE,
+        "coverage.json",
+        resolution.coverage_report.model_dump(mode="json"),
+        created_by="map_product_evidence",
+        product_id=product_id,
+        derived_from=(mapping_artifact.id,),
+    )
+    work.artifact_ids = (*work.artifact_ids, mapping_artifact.id, coverage_artifact.id)
     stats = resolution.coverage_report.statistics
     ctx.deps.state.status = (
-        AgentV2Status.AWAITING_REVIEW if work.pending_reviews else AgentV2Status.AWAITING_INPUT
+        AgentStatus.AWAITING_REVIEW if work.pending_reviews else AgentStatus.AWAITING_INPUT
     )
+    work.status = (
+        ProductStatus.AWAITING_REVIEW if work.pending_reviews else ProductStatus.IN_PROGRESS
+    )
+    ctx.deps.state.products[product_id] = work
     ctx.deps.state.add_event(
         "mapping.completed",
         (
@@ -339,7 +408,8 @@ async def research_product_sources(
         if extraction is not None
         else product_id
     )
-    domain = ctx.deps.state.selected_company.domain if ctx.deps.state.selected_company else None
+    company = ctx.deps.state.selected_company
+    domain = company.domain if company is not None and company.identity_verified else None
     if domain is None and extraction is not None:
         domain = (urlsplit(extraction.source_url).hostname or "").removeprefix("www.").casefold()
     started = time.monotonic()
@@ -488,7 +558,7 @@ async def propose_semantic_mapping(
         return ToolObservation(outcome="invalid", summary=str(error), count=0)
     work.pending_reviews = (*work.pending_reviews, review)
     ctx.deps.state.products[product_id] = work
-    ctx.deps.state.status = AgentV2Status.AWAITING_REVIEW
+    ctx.deps.state.status = AgentStatus.AWAITING_REVIEW
     ctx.deps.state.add_event(
         "mapping.semantic_proposed",
         "Created a constrained semantic proposal requiring human review.",
@@ -509,18 +579,14 @@ async def propose_semantic_mapping(
     )
 
 
-async def review_semantic_mapping(
+async def request_human_review(
     ctx: RunContext[MiaDependencies],
     product_id: str,
-    review_id: str,
-    decision: Literal["approve", "correct", "reject"],
-    corrected_requirement_id: str | None = None,
-    corrected_value: str | None = None,
 ) -> ToolObservation:
-    """Apply a human decision to one pending semantic proposal.
+    """Pause for trusted human decisions on the product's pending proposals.
 
-    The proposal must exist in trusted product state. Mapping and coverage are
-    recalculated, while rejected source evidence remains retained.
+    This tool can only request input. Approval, correction, and rejection are
+    applied by the LangGraph resume path after an authenticated API action.
     """
 
     work = ctx.deps.state.products.get(product_id)
@@ -530,58 +596,43 @@ async def review_semantic_mapping(
             summary="No mapped product exists for this review.",
             count=0,
         )
-    item = next((item for item in work.pending_reviews if item.id == review_id), None)
-    if item is None:
+    if not work.pending_reviews:
         return ToolObservation(
-            outcome="invalid_review",
-            summary="The review ID is not pending for this product.",
+            outcome="nothing_pending",
+            summary="No mapping proposal currently needs human review.",
             count=0,
         )
-    try:
-        result, reviewed = ctx.deps.mapping_review.decide(
-            work.resolution,
-            item,
-            decision=decision,
-            thread_id=ctx.deps.state.thread_id,
-            corrected_requirement_id=corrected_requirement_id,
-            corrected_value=corrected_value,
-        )
-    except ValueError as error:
-        return ToolObservation(outcome="invalid", summary=str(error), count=0)
-    work.resolution = result
-    work.pending_reviews = tuple(
-        pending for pending in work.pending_reviews if pending.id != review_id
-    )
-    ctx.deps.state.products[product_id] = work
-    ctx.deps.state.status = (
-        AgentV2Status.AWAITING_REVIEW if work.pending_reviews else AgentV2Status.AWAITING_INPUT
-    )
-    ctx.deps.state.add_event(
-        "human.review_received",
-        f"Human review decision recorded: {decision}.",
-        tool_name="review_semantic_mapping",
+    ctx.deps.state.pending_human_request = HumanRequest(
+        kind=HumanRequestKind.MAPPING_REVIEW,
         product_id=product_id,
-        source_ids=(reviewed.mapping.evidence_id,),
-        metadata={"reviewId": review_id, "decision": decision},
+        summary=f"{len(work.pending_reviews)} mapping proposals need a human decision.",
+    )
+    ctx.deps.state.status = AgentStatus.AWAITING_REVIEW
+    ctx.deps.state.add_event(
+        "human.input_requested",
+        "Requested trusted human review for semantic mappings.",
+        tool_name="request_human_review",
+        product_id=product_id,
+        metadata={"count": len(work.pending_reviews)},
     )
     return ToolObservation(
-        outcome="review_applied",
-        summary="The decision was applied and source evidence was retained.",
-        count=1,
-        identifiers=(review_id,),
+        outcome="human_input_required",
+        summary="Wait for the user to approve, correct, or reject the pending proposals.",
+        count=len(work.pending_reviews),
+        identifiers=tuple(item.id for item in work.pending_reviews),
     )
 
 
-async def record_human_requirement_value(
+async def request_human_value(
     ctx: RunContext[MiaDependencies],
     product_id: str,
     requirement_id: str,
-    value: str,
+    question: str,
 ) -> ToolObservation:
-    """Record a missing-field answer as auditable human evidence.
+    """Pause for a value that public evidence and deterministic mapping could not supply.
 
-    Coverage must already identify the official requirement. The answer is
-    added to the evidence ledger, mapped, and followed by a new completion check.
+    The tool validates that the target is genuinely missing but cannot create
+    human evidence. Only the trusted API resume action may record the answer.
     """
 
     work = ctx.deps.state.products.get(product_id)
@@ -591,33 +642,35 @@ async def record_human_requirement_value(
             summary="No product coverage exists for this answer.",
             count=0,
         )
-    try:
-        work.resolution = ctx.deps.mapping_review.record_human_value(
-            work.resolution,
-            requirement_id=requirement_id,
-            value=value,
-            thread_id=ctx.deps.state.thread_id,
+    missing = {
+        item.requirement_id
+        for item in work.resolution.coverage_report.coverage
+        if item.status.value == "missing"
+    }
+    if requirement_id not in missing:
+        return ToolObservation(
+            outcome="invalid",
+            summary="The requested requirement is not currently missing.",
+            count=0,
         )
-    except ValueError as error:
-        return ToolObservation(outcome="invalid", summary=str(error), count=0)
-    ctx.deps.state.products[product_id] = work
+    ctx.deps.state.pending_human_request = HumanRequest(
+        kind=HumanRequestKind.REQUIREMENT_VALUE,
+        product_id=product_id,
+        requirement_id=requirement_id,
+        summary=question,
+    )
+    ctx.deps.state.status = AgentStatus.AWAITING_INPUT
     ctx.deps.state.add_event(
-        "human.evidence_recorded",
-        "Recorded a human-supplied value as provenance-aware evidence.",
-        tool_name="record_human_requirement_value",
+        "human.input_requested",
+        question,
+        tool_name="request_human_value",
         product_id=product_id,
         metadata={"requirementId": requirement_id},
     )
-    missing = sum(
-        item.mandatory_missing for item in work.resolution.completion_summary.fixed_templates
-    )
-    ctx.deps.state.status = (
-        AgentV2Status.AWAITING_INPUT if missing else AgentV2Status.READY_TO_BUILD
-    )
     return ToolObservation(
-        outcome="evidence_recorded",
-        summary=f"The answer was validated and mapped. {missing} mandatory fields remain.",
-        count=1,
+        outcome="human_input_required",
+        summary="Wait for the trusted human response.",
+        count=0,
         identifiers=(requirement_id,),
     )
 
@@ -665,8 +718,38 @@ async def build_product_aas(
         evidence=work.resolution.evidence,
     )
     work.aas_artifact_sha256 = package.artifact_sha256
+    aas_artifact = ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.AAS,
+        "aas.json",
+        package.environment,
+        created_by="build_product_aas",
+        product_id=product_id,
+        derived_from=work.artifact_ids,
+    )
+    validation_artifact = ctx.deps.workspace.write_json(
+        ctx.deps.state.thread_id,
+        ArtifactKind.VALIDATION,
+        "validation.json",
+        package.validation_report.model_dump(mode="json"),
+        created_by="build_product_aas",
+        product_id=product_id,
+        derived_from=(aas_artifact.id,),
+    )
+    work.artifact_ids = (*work.artifact_ids, aas_artifact.id, validation_artifact.id)
+    work.status = ProductStatus.COMPLETED if package.deployable else ProductStatus.FAILED
     ctx.deps.state.products[product_id] = work
-    ctx.deps.state.status = AgentV2Status.COMPLETED
+    remaining = tuple(item for item in ctx.deps.state.product_queue if item != product_id)
+    ctx.deps.state.product_queue = remaining
+    ctx.deps.state.current_product_id = remaining[0] if remaining else product_id
+    ctx.deps.state.status = (
+        AgentStatus.COMPLETED
+        if all(
+            item.status in {ProductStatus.COMPLETED, ProductStatus.FAILED}
+            for item in ctx.deps.state.products.values()
+        )
+        else AgentStatus.RUNNING
+    )
     ctx.deps.state.add_event(
         "aas.validation_completed",
         "Built and deterministically validated the AAS artifact.",
@@ -693,7 +776,7 @@ AGENT_TOOLS = (
     Tool(research_product_sources, sequential=True),
     Tool(inspect_unresolved_mappings, sequential=True),
     Tool(propose_semantic_mapping, sequential=True),
-    Tool(review_semantic_mapping, sequential=True),
-    Tool(record_human_requirement_value, sequential=True),
+    Tool(request_human_review, sequential=True),
+    Tool(request_human_value, sequential=True),
     Tool(build_product_aas, sequential=True),
 )

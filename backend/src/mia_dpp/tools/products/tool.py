@@ -12,7 +12,7 @@ from mia_dpp.tools.search import SearchProvider
 class ProductDiscoveryTool:
     """Find product-page candidates on a selected company's official domain.
 
-    Agent V2 calls this after company selection and stores the structured
+    MIA agent calls this after company selection and stores the structured
     results for the user or model to select.
     """
 

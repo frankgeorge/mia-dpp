@@ -27,7 +27,7 @@ from mia_dpp.errors import MappingError
 class DeterministicDppPipeline:
     """Turn accepted mappings into a compiled and validated DPP package.
 
-    The API or Agent V2 build tool calls this after mapping is complete. It
+    The API or MIA agent build tool calls this after mapping is complete. It
     selects evidence, invokes ``AasCompiler``, invokes ``AasValidator``, and
     returns the artifact with its deployment gate and gap report.
     """

@@ -29,7 +29,7 @@ public sources. A direct product URL can be extracted immediately. A company nam
 company search, then product discovery. After extracting a product, map its evidence. Do not claim
 completion until deterministic tools confirm it. Use inspect_unresolved_mappings before semantic
 proposals. Semantic proposals always require human review. If a user answers a missing-field
-question, record it with record_human_requirement_value rather than mutating a target directly.
+question, request trusted human input; never create human evidence or approve a review yourself.
 Return a concise user-facing reply, a truthful status, and a short decisionSummary. Structured
 candidates and trace data are returned separately by the API, so do not paste long candidate lists
 into prose.

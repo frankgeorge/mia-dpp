@@ -9,21 +9,18 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.agent.graph import MiaAgentWorkflow
-from mia_dpp.agent.v2.runtime import MiaAgentV2
-from mia_dpp.agent.v2.store import SQLiteThreadStore
+from mia_dpp.agent.brain import AutonomousAgent
+from mia_dpp.agent.graph import MiaAgent
 from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
-from mia_dpp.integrations.openrouter import OpenRouterClient
-from mia_dpp.llm.chat import ChatLLM, ChatModel, UnconfiguredChatLLM
-from mia_dpp.llm.semantic import SemanticLLM, SemanticModel, UnconfiguredSemanticLLM
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.products.research import ProductResearchTool
 from mia_dpp.tools.products.tool import ProductDiscoveryTool
 from mia_dpp.tools.web.tool import WebExtractionTool
+from mia_dpp.workspace.store import FileWorkspaceStore
 
 
 @dataclass(frozen=True)
@@ -39,10 +36,8 @@ class Application:
     web_tool: WebExtractionTool
     resolver: ProductResolver
     website_workflow: WebsiteWorkflow
-    chat_llm: ChatModel
-    semantic_llm: SemanticModel
-    agent_workflow: MiaAgentWorkflow
-    agent_v2: MiaAgentV2
+    agent: MiaAgent
+    workspace: FileWorkspaceStore
 
 
 def build_application(settings: Settings | None = None) -> Application:
@@ -63,37 +58,35 @@ def build_application(settings: Settings | None = None) -> Application:
     product_tool = ProductDiscoveryTool(search)
     product_research_tool = ProductResearchTool(search)
 
-    chat_llm: ChatModel
-    semantic_llm: SemanticModel
+    agent_model = None
     if configured.openrouter_api_key is not None:
         api_key = configured.openrouter_api_key.get_secret_value()
-        client = OpenRouterClient(api_key)
-        chat_llm = ChatLLM(client, model=configured.conversation_model)
-        semantic_llm = SemanticLLM(client, model=configured.semantic_model)
-        agent_v2_model = OpenRouterModel(
-            configured.agent_v2_model,
+        agent_model = OpenRouterModel(
+            configured.agent_model,
             provider=OpenRouterProvider(
                 api_key=api_key,
                 app_url="https://mia-dpp.vercel.app",
                 app_title="MIA Digital Product Passport",
             ),
         )
-    else:
-        chat_llm = UnconfiguredChatLLM()
-        semantic_llm = UnconfiguredSemanticLLM()
-        agent_v2_model = None
-
-    agent = MiaAgentWorkflow(templates, web_tool, resolver, chat_llm, semantic_llm)
-    agent_v2 = MiaAgentV2(
-        model=agent_v2_model,
-        store=SQLiteThreadStore(configured.thread_store_path),
+    workspace = FileWorkspaceStore(configured.workspace_root)
+    mapping_review = MappingReviewService(templates)
+    brain = AutonomousAgent(
+        model=agent_model,
         company_tool=company_tool,
         product_tool=product_tool,
         product_research_tool=product_research_tool,
         web_tool=web_tool,
         mapping_tool=resolver,
-        mapping_review=MappingReviewService(templates),
+        mapping_review=mapping_review,
         dpp_pipeline=DeterministicDppPipeline(templates),
+        workspace=workspace,
+    )
+    agent = MiaAgent(
+        brain=brain,
+        mapping_review=mapping_review,
+        workspace=workspace,
+        database_path=configured.thread_store_path,
     )
     return Application(
         settings=configured,
@@ -101,8 +94,6 @@ def build_application(settings: Settings | None = None) -> Application:
         web_tool=web_tool,
         resolver=resolver,
         website_workflow=website_workflow,
-        chat_llm=chat_llm,
-        semantic_llm=semantic_llm,
-        agent_workflow=agent,
-        agent_v2=agent_v2,
+        agent=agent,
+        workspace=workspace,
     )
