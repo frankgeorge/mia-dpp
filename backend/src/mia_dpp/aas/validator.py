@@ -19,7 +19,7 @@ from mia_dpp.aas.models import (
     ValidationReport,
 )
 from mia_dpp.canonical import sha256_json
-from mia_dpp.domain.mappings import MappingSpecification, MappingTarget
+from mia_dpp.domain.mappings import FieldMapping, MappingTarget
 from mia_dpp.domain.targets import Cardinality, SubmodelTemplate, TemplateElement
 
 
@@ -34,7 +34,7 @@ class AasValidator:
         self,
         artifact: AasArtifact,
         template: SubmodelTemplate,
-        specification: MappingSpecification,
+        mappings: Sequence[FieldMapping],
     ) -> ValidationReport:
         """Return metamodel, template, and policy findings for one artifact."""
 
@@ -91,7 +91,7 @@ class AasValidator:
                 parent_present=True,
             )
         )
-        for approved in specification.mappings:
+        for approved in mappings:
             findings.extend(self._validate_mapped_target(approved.target, actual_elements))
         if template.release.key == "digital_nameplate":
             findings.append(

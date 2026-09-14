@@ -14,12 +14,7 @@ from mia_dpp.domain.evidence import (
     ProductKnowledgePackage,
     SourceLocation,
 )
-from mia_dpp.domain.mappings import (
-    ApprovedMapping,
-    FieldMapping,
-    MappingSpecification,
-    MappingStatus,
-)
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.domain.targets import TargetProfile
 from mia_dpp.errors import MappingError
 
@@ -76,21 +71,8 @@ class DeterministicDppPipeline:
             name="IDTA Digital Nameplate 3.0.1",
             template=template.release,
         )
-        specification = MappingSpecification(
-            id=f"mapping-{hashlib.sha256(self._spec_seed(accepted).encode()).hexdigest()[:24]}",
-            target_profile=profile,
-            mappings=tuple(
-                ApprovedMapping(
-                    evidence_id=mapping.evidence_id,
-                    target=mapping.target,
-                    assessment=mapping.assessment,
-                )
-                for mapping in accepted
-            ),
-            approved_at=moment,
-        )
-        artifact = self._compiler.compile(package, specification, template)
-        validation = self._validator.validate(artifact, template, specification)
+        artifact = self._compiler.compile(package, accepted, template)
+        validation = self._validator.validate(artifact, template, accepted)
         gaps = gap_report_from_validation(validation)
         shell = artifact.environment["assetAdministrationShells"][0]
         passport_id = str(shell["id"])
@@ -169,13 +151,6 @@ class DeterministicDppPipeline:
                 else EvidenceStatus.OBSERVED
             ),
             acquired_at=acquired_at,
-        )
-
-    @staticmethod
-    def _spec_seed(mappings: list[FieldMapping]) -> str:
-        return "\n".join(
-            f"{mapping.evidence_id}:{'/'.join(mapping.target.instance_path)}"
-            for mapping in sorted(mappings, key=lambda item: item.target.instance_path)
         )
 
 

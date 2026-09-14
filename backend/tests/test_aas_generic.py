@@ -12,8 +12,7 @@ from mia_dpp.domain.evidence import (
     ProductKnowledgePackage,
     SourceLocation,
 )
-from mia_dpp.domain.mappings import ApprovedMapping, MappingSpecification
-from mia_dpp.domain.targets import TargetProfile
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
@@ -59,31 +58,25 @@ def test_compiles_nested_technical_data_from_the_second_official_template() -> N
         product_name="PG-16",
         evidence=evidence,
     )
-    profile = TargetProfile(
-        id="technical-data-2-0-1",
-        name="IDTA Technical Data 2.0.1",
-        template=template.release,
-    )
     mappings = tuple(
-        ApprovedMapping(
+        FieldMapping(
+            id=f"mapping-{record.id}",
             evidence_id=record.id,
+            source_field=name,
+            source_value=str(record.value),
             target=mapping_target(
                 template,
                 ("TechnicalData", "GeneralInformation", name),
             ),
             assessment=assessment,
+            reasoning="Exact fixture mapping.",
+            status=MappingStatus.AUTO,
         )
         for record, name in zip(evidence, values, strict=True)
     )
-    specification = MappingSpecification(
-        id="mapping-technical-data",
-        target_profile=profile,
-        mappings=mappings,
-        approved_at=acquired_at,
-    )
 
-    artifact = AasCompiler(repository).compile(package, specification, template)
-    report = AasValidator().validate(artifact, template, specification)
+    artifact = AasCompiler(repository).compile(package, mappings, template)
+    report = AasValidator().validate(artifact, template, mappings)
 
     environment = jsonization.environment_from_jsonable(artifact.environment)
     assert list(verification.verify(environment)) == []

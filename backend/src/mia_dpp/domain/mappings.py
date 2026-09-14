@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import Field, model_validator
 
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import EvidenceRecord
-from mia_dpp.domain.targets import SemanticReference, TargetProfile, TemplateIndex
+from mia_dpp.domain.targets import SemanticReference, TemplateIndex
 
 
 class MappingStatus(StrEnum):
@@ -225,28 +225,6 @@ class MappingResult(WireModel):
         accepted = {item.evidence_id for item in (*self.mapped, *self.ambiguous)}
         if accepted & unmatched:
             raise ValueError("accepted or proposed evidence cannot also be unmatched")
-        return self
-
-
-class ApprovedMapping(WireModel):
-    evidence_id: str
-    target: MappingTarget
-    assessment: MappingAssessment
-
-
-class MappingSpecification(WireModel):
-    """Frozen deterministic instructions produced by the review action."""
-
-    id: str
-    target_profile: TargetProfile
-    mappings: tuple[ApprovedMapping, ...]
-    approved_at: AwareDatetime
-
-    @model_validator(mode="after")
-    def instance_targets_are_unique(self) -> MappingSpecification:
-        paths = [item.target.instance_path for item in self.mappings]
-        if len(paths) != len(set(paths)):
-            raise ValueError("mapping instance paths must be unique")
         return self
 
 

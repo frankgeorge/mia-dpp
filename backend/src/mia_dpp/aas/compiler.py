@@ -15,7 +15,7 @@ from mia_dpp.aas.models import AasArtifact
 from mia_dpp.aas.templates import OfficialTemplateRepository, resolve_element
 from mia_dpp.canonical import sha256_json
 from mia_dpp.domain.evidence import ProductKnowledgePackage
-from mia_dpp.domain.mappings import ApprovedMapping, MappingSpecification, MappingTarget
+from mia_dpp.domain.mappings import FieldMapping, MappingTarget
 from mia_dpp.domain.targets import SemanticReference, SubmodelTemplate
 from mia_dpp.errors import CompilationError, MappingError
 
@@ -79,7 +79,7 @@ def _metadata(raw: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _set_leaf_value(raw: dict[str, Any], mapping: ApprovedMapping, value: str) -> None:
+def _set_leaf_value(raw: dict[str, Any], mapping: FieldMapping, value: str) -> None:
     target = mapping.target
     raw["idShort"] = target.id_short
     raw["semanticId"] = _reference_json(target.semantic_id)
@@ -117,16 +117,17 @@ class AasCompiler:
     def compile(
         self,
         package: ProductKnowledgePackage,
-        specification: MappingSpecification,
+        mappings: Sequence[FieldMapping],
         template: SubmodelTemplate,
     ) -> AasArtifact:
-        """Build one stable AAS artifact from an approved mapping specification."""
+        """Build one stable AAS artifact from accepted mappings."""
 
-        if specification.target_profile.template != template.release:
-            raise MappingError("mapping specification does not select the loaded template")
+        paths = [item.target.instance_path for item in mappings]
+        if len(paths) != len(set(paths)):
+            raise MappingError("mapping instance paths must be unique")
         evidence = {item.id: item for item in package.evidence}
-        resolved: list[tuple[ApprovedMapping, str]] = []
-        for approved in specification.mappings:
+        resolved: list[tuple[FieldMapping, str]] = []
+        for approved in mappings:
             if approved.evidence_id not in evidence:
                 raise MappingError(f"mapping references unknown evidence {approved.evidence_id!r}")
             value = evidence[approved.evidence_id].value
@@ -159,7 +160,7 @@ class AasCompiler:
         raw_elements = raw_submodel.get("submodelElements")
         if not isinstance(raw_elements, list):
             raise CompilationError("official template submodelElements is not a list")
-        mappings = sorted(
+        ordered_mappings = sorted(
             (approved for approved, _ in resolved),
             key=lambda item: item.target.instance_path,
         )
@@ -168,7 +169,7 @@ class AasCompiler:
             raw_elements,
             parent_path=(template.id_short,),
             parent_model_type="Submodel",
-            mappings=mappings,
+            mappings=ordered_mappings,
             values=values,
         )
         projected = self._add_system_elements(projected, raw_elements, template, asset_id)
@@ -250,7 +251,7 @@ class AasCompiler:
         *,
         parent_path: tuple[str, ...],
         parent_model_type: str,
-        mappings: Sequence[ApprovedMapping],
+        mappings: Sequence[FieldMapping],
         values: Mapping[str, str],
     ) -> list[dict[str, Any]]:
         projected: list[dict[str, Any]] = []
