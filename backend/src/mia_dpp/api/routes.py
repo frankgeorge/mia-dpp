@@ -28,6 +28,7 @@ from mia_dpp.api.schemas import (
 from mia_dpp.domain.targets import TemplateSummary
 from mia_dpp.errors import ExtractionError, MiaError
 from mia_dpp.mia import Mia
+from mia_dpp.store import WorkspaceArtifact
 from mia_dpp.tools.mapping.models import (
     MappingKnowledgeEntry,
     WebsiteIngestRequest,
@@ -39,7 +40,6 @@ from mia_dpp.tools.web.models import (
     PageLoadError,
     ProductUrlRejectedError,
 )
-from mia_dpp.workspace.models import WorkspaceArtifact
 
 router = APIRouter()
 

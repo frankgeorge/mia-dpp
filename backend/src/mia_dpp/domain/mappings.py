@@ -228,9 +228,7 @@ class MappingResult(WireModel):
 
     @model_validator(mode="after")
     def evidence_outcomes_are_unique(self) -> MappingResult:
-        proposals = [
-            item.evidence_id for item in (*self.mapped, *self.ambiguous, *self.rejected)
-        ]
+        proposals = [item.evidence_id for item in (*self.mapped, *self.ambiguous, *self.rejected)]
         if len(proposals) != len(set(proposals)):
             raise ValueError("an evidence record must have exactly one mapping outcome")
         unmatched = set(self.unmatched_evidence_ids)

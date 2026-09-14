@@ -13,11 +13,11 @@ from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import AgentResponse, AgentStatus, MiaState
 from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.main import app
+from mia_dpp.store import ArtifactKind
 from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
-from mia_dpp.workspace.models import ArtifactKind
 
 
 def request(

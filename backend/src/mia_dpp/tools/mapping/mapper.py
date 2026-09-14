@@ -110,8 +110,7 @@ class DeterministicWebsiteMapper:
             candidate = candidates[0]
             claimed_targets.add(candidate.target.instance_path)
             has_competing_destination = any(
-                "target destinations remain" in item
-                for item in candidate.assessment.uncertainties
+                "target destinations remain" in item for item in candidate.assessment.uncertainties
             )
             proposal = ProposedFieldMapping(
                 **candidate.model_copy(

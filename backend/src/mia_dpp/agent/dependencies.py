@@ -6,11 +6,10 @@ from typing import Any
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import AgentTraceEvent, MiaState
-from mia_dpp.store import Store
+from mia_dpp.store import ArtifactKind, Store
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
-from mia_dpp.workspace.models import ArtifactKind
 
 
 @dataclass

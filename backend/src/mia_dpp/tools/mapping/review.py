@@ -201,9 +201,7 @@ class MappingReviewService:
             package = result.knowledge_package.model_copy(
                 update={"evidence": (*result.evidence, record)}
             )
-            result = result.model_copy(
-                update={"knowledge_package": package}
-            )
+            result = result.model_copy(update={"knowledge_package": package})
             mapping = mapping.model_copy(
                 update={"evidence_id": record.id, "source_value": corrected_value}
             )
@@ -294,9 +292,7 @@ class MappingReviewService:
         package = result.knowledge_package.model_copy(
             update={"evidence": (*result.evidence, evidence)}
         )
-        updated = result.model_copy(
-            update={"knowledge_package": package}
-        )
+        updated = result.model_copy(update={"knowledge_package": package})
         review_seed = f"{requirement_id}\0{evidence.id}"
         review = SemanticReviewItem(
             id="review-" + hashlib.sha256(review_seed.encode()).hexdigest()[:24],

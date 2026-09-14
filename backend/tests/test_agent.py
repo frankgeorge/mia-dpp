@@ -27,14 +27,13 @@ from mia_dpp.agent.tools import AGENT_TOOLS, extract_product_page
 from mia_dpp.config import Settings
 from mia_dpp.domain.discovery import ProductSourceCandidate
 from mia_dpp.mia import Mia
-from mia_dpp.store import Store
+from mia_dpp.store import ArtifactKind, Store
 from mia_dpp.tools.mapping.resolver import resolve_product
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchHit
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
-from mia_dpp.workspace.models import ArtifactKind
 
 
 class FakeSearch:

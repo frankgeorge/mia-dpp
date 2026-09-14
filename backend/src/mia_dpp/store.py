@@ -10,19 +10,53 @@ import uuid
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from pydantic import AwareDatetime
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 from mia_dpp.agent.models import HumanRequest, HumanRequestKind, MiaState
+from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import ProposedFieldMapping
 from mia_dpp.tools.mapping.models import MappingKnowledgeEntry, MappingKnowledgeStatus
-from mia_dpp.workspace.models import ArtifactKind, WorkspaceArtifact
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
+
+
+class ArtifactKind(StrEnum):
+    SEARCH = "search"
+    SOURCE = "source"
+    RAW = "raw"
+    EVIDENCE = "evidence"
+    MAPPING = "mapping"
+    COVERAGE = "coverage"
+    REVIEW = "review"
+    AAS = "aas"
+    VALIDATION = "validation"
+    TRACE = "trace"
+    EXPORT = "export"
+
+
+class WorkspaceArtifact(WireModel):
+    """Inspectable artifact metadata; contents remain in the artifact directory."""
+
+    id: str
+    kind: ArtifactKind
+    name: str
+    relative_path: str
+    created_at: AwareDatetime
+    created_by: str
+    content_type: str
+    sha256: str
+    size: int
+    product_id: str | None = None
+    source_url: str | None = None
+    derived_from: tuple[str, ...] = ()
+    downloadable: bool = True
 
 
 @dataclass(frozen=True)
@@ -241,9 +275,7 @@ class Store:
             ).fetchall()
         return tuple(WorkspaceArtifact.model_validate_json(row[0]) for row in rows)
 
-    def read_artifact(
-        self, thread_id: str, artifact_id: str
-    ) -> tuple[WorkspaceArtifact, bytes]:
+    def read_artifact(self, thread_id: str, artifact_id: str) -> tuple[WorkspaceArtifact, bytes]:
         self._validate_id(thread_id, "session")
         self._validate_id(artifact_id, "artifact")
         with self._connect() as connection:
@@ -462,8 +494,7 @@ class Store:
                     "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, payload TEXT NOT NULL)"
                 )
                 connection.execute(
-                    "CREATE INDEX IF NOT EXISTS artifacts_session "
-                    "ON artifacts(session_id)"
+                    "CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id)"
                 )
                 connection.execute(
                     "CREATE TABLE IF NOT EXISTS mapping_knowledge ("

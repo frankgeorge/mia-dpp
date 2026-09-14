@@ -35,13 +35,12 @@ from mia_dpp.agent.tools import AGENT_TOOLS
 from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
-from mia_dpp.store import SessionSnapshot, Store
+from mia_dpp.store import ArtifactKind, SessionSnapshot, Store
 from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
 from mia_dpp.tools.mapping.resolver import ingest_website
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
-from mia_dpp.workspace.models import ArtifactKind
 
 
 class Mia:
@@ -108,7 +107,6 @@ class Mia:
                 capabilities=[skill],
                 retries=2,
             )
-
 
     @property
     def configured(self) -> bool:

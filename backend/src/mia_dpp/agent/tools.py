@@ -20,6 +20,7 @@ from mia_dpp.agent.models import (
 )
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
+from mia_dpp.store import ArtifactKind
 from mia_dpp.tools.mapping.resolver import resolve_product
 from mia_dpp.tools.search import (
     SearchUnavailableError,
@@ -27,7 +28,6 @@ from mia_dpp.tools.search import (
     find_product_sources,
     find_products,
 )
-from mia_dpp.workspace.models import ArtifactKind
 
 
 class ToolObservation(WireModel):

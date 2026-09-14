@@ -37,14 +37,10 @@ class SearchUnavailableError(RuntimeError):
     """A public search provider was unavailable or returned malformed data."""
 
 
-async def find_companies(
-    search: SearchProvider, company_name: str
-) -> tuple[CompanyCandidate, ...]:
+async def find_companies(search: SearchProvider, company_name: str) -> tuple[CompanyCandidate, ...]:
     """Project public results into deduplicated company candidates."""
 
-    hits = await search.search(
-        f"{company_name} manufacturer official website company", limit=10
-    )
+    hits = await search.search(f"{company_name} manufacturer official website company", limit=10)
     candidates: list[CompanyCandidate] = []
     seen_domains: set[str] = set()
     for hit in hits:

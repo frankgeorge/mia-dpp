@@ -231,9 +231,7 @@ def test_same_value_is_not_attached_to_the_wrong_json_ld_field() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(
-        ingest(WebsiteIngestRequest(url=PRODUCT_URL), RepeatedValueLoader())
-    )
+    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), RepeatedValueLoader()))
 
     order_code = next(item for item in response.evidence if item.source_label == "Article number")
     assert order_code.source_location.selector == "dt:nth-of-type(1)"
@@ -341,9 +339,7 @@ def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(
-        ingest(WebsiteIngestRequest(url=PRODUCT_URL), FactorySettingLoader())
-    )
+    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), FactorySettingLoader()))
 
     assert "ManufacturingSite" not in {item.target_element for item in response.proposal.mappings}
 

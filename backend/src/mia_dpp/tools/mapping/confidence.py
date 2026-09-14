@@ -44,9 +44,7 @@ def assess_mapping(
         raise ValueError("destination_candidates must be at least one")
     uncertainties: list[str] = []
     if destination_candidates > 1:
-        uncertainties.append(
-            f"{destination_candidates} compatible target destinations remain."
-        )
+        uncertainties.append(f"{destination_candidates} compatible target destinations remain.")
     if source_label in {MatchQuality.NONE, MatchQuality.WEAK}:
         uncertainties.append("The source label does not identify the target exactly.")
     if value_format in {ValueFormatQuality.INVALID, ValueFormatQuality.UNKNOWN}:
