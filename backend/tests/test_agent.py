@@ -27,7 +27,7 @@ from mia_dpp.agent.tools import AGENT_TOOLS, extract_product_page
 from mia_dpp.config import Settings
 from mia_dpp.domain.discovery import ProductSourceCandidate
 from mia_dpp.mia import Mia
-from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
+from mia_dpp.store import Store
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchHit
@@ -35,7 +35,6 @@ from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 from mia_dpp.workspace.models import ArtifactKind
-from mia_dpp.workspace.store import FileWorkspaceStore
 
 
 class FakeSearch:
@@ -93,7 +92,7 @@ def build_mia(
     model: TestModel,
     *,
     loader: FixtureLoader | None = None,
-) -> tuple[Mia, FileWorkspaceStore]:
+) -> tuple[Mia, Store]:
     search = FakeSearch()
 
     async def public_resolver(host: str, port: int) -> tuple[str, ...]:
@@ -112,7 +111,7 @@ def build_mia(
             url_policy=ProductUrlPolicy(public_resolver),
         ),
     )
-    return mia, mia.workspace
+    return mia, mia.store
 
 
 def test_pydanticai_session_store_preserves_state_between_turns(tmp_path: Path) -> None:
@@ -246,7 +245,7 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
             )
         },
     )
-    workspace = FileWorkspaceStore(tmp_path / "workspaces")
+    store = Store(tmp_path / "store.sqlite3", tmp_path / "workspaces")
     review = MappingReviewService(repository)
     dependencies = MiaDependencies(
         state=state,
@@ -254,9 +253,8 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
         web_tool=web_tool,
         mapping_tool=ProductResolver(repository),
         mapping_review=review,
-        mapping_knowledge=MappingKnowledgeStore(tmp_path / "knowledge.sqlite3"),
         dpp_pipeline=DeterministicDppPipeline(repository),
-        workspace=workspace,
+        store=store,
     )
 
     observation = asyncio.run(
@@ -401,15 +399,15 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
         "The label and expected meaning are compatible."
     )
 
-    knowledge = MappingKnowledgeStore(tmp_path / "reviewed-knowledge.sqlite3")
-    candidate = knowledge.remember_candidate(
+    knowledge = Store(tmp_path / "reviewed-knowledge.sqlite3")
+    candidate = knowledge.remember_mapping_candidate(
         proposal.mapping,
         manufacturer="Example Instruments GmbH",
         domain="manufacturer.example",
         product_family="Gauge",
     )
     assert candidate.status.value == "candidate"
-    assert not knowledge.relevant(
+    assert not knowledge.relevant_mapping_knowledge(
         proposal.mapping.source_field,
         manufacturer="Example Instruments GmbH",
         domain="manufacturer.example",
@@ -423,7 +421,7 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
         thread_id="thread-knowledge-test",
         comment="Confirmed from the manufacturer's terminology.",
     )
-    trusted = knowledge.remember_review(
+    trusted = knowledge.remember_mapping_review(
         reviewed.mapping,
         decision="approve",
         manufacturer="Example Instruments GmbH",
@@ -434,13 +432,13 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
     assert trusted.status.value == "trusted"
     assert trusted.confirmations == 1
     assert trusted.human_comments == ("Confirmed from the manufacturer's terminology.",)
-    assert knowledge.relevant(
+    assert knowledge.relevant_mapping_knowledge(
         proposal.mapping.source_field,
         manufacturer="Example Instruments GmbH",
         domain="manufacturer.example",
         template_keys=(proposal.mapping.target.template_key,),
     ) == (trusted,)
-    assert not knowledge.relevant(
+    assert not knowledge.relevant_mapping_knowledge(
         proposal.mapping.source_field,
         manufacturer="Unrelated Manufacturer",
         domain="unrelated.example",
@@ -449,7 +447,7 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
 
 
 def test_workspace_artifacts_are_isolated_by_thread(tmp_path: Path) -> None:
-    store = FileWorkspaceStore(tmp_path / "workspaces")
+    store = Store(tmp_path / "store.sqlite3", tmp_path / "workspaces")
     first = store.write_json("thread-aaaaaaaa", ArtifactKind.EVIDENCE, "evidence.json", {"a": 1})
     store.write_json("thread-bbbbbbbb", ArtifactKind.EVIDENCE, "evidence.json", {"b": 2})
 

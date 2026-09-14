@@ -141,7 +141,7 @@ async def list_workspace_artifacts(
     """List the manifest entries belonging to one thread workspace."""
 
     try:
-        return _application(http_request).workspace.list_artifacts(thread_id)
+        return _application(http_request).store.list_artifacts(thread_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -156,7 +156,7 @@ async def read_workspace_artifact(
     """Read or download an artifact resolved only through its manifest ID."""
 
     try:
-        artifact, data = _application(http_request).workspace.read_artifact(thread_id, artifact_id)
+        artifact, data = _application(http_request).store.read_artifact(thread_id, artifact_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -172,7 +172,7 @@ async def download_workspace(thread_id: str, http_request: Request) -> Response:
     """Download all manifest-registered artifacts in one ZIP archive."""
 
     try:
-        data = _application(http_request).workspace.export_zip(thread_id)
+        data = _application(http_request).store.export_zip(thread_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return Response(
@@ -187,7 +187,7 @@ async def export_workspace(thread_id: str, http_request: Request) -> dict[str, o
     """Return the combined structured workspace export as JSON."""
 
     try:
-        return _application(http_request).workspace.combined_export(thread_id)
+        return _application(http_request).store.combined_export(thread_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -202,7 +202,7 @@ async def workspace_trace(
 ) -> tuple[AgentTraceEvent, ...]:
     """Return normalized activity events without exposing hidden model reasoning."""
 
-    workspace = _application(http_request).workspace
+    workspace = _application(http_request).store
     events: list[AgentTraceEvent] = []
     for artifact in workspace.list_artifacts(thread_id):
         if artifact.kind.value != "trace" or artifact.name != "event.json":
@@ -219,7 +219,7 @@ async def workspace_trace(
 async def mapping_knowledge(http_request: Request) -> tuple[MappingKnowledgeEntry, ...]:
     """List backend-owned mapping knowledge for the Integration Graph."""
 
-    return _application(http_request).mapping_knowledge.list()
+    return _application(http_request).store.list_mapping_knowledge()
 
 
 @router.post("/api/dpp", response_model=DppPackage)

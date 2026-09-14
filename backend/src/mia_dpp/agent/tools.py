@@ -102,7 +102,7 @@ async def search_companies(
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={"count": len(candidates)},
     )
-    ctx.deps.workspace.write_json(
+    ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.SEARCH,
         "company-candidates.json",
@@ -193,7 +193,7 @@ async def discover_products(
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={"count": len(candidates)},
     )
-    ctx.deps.workspace.write_json(
+    ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.SEARCH,
         "product-candidates.json",
@@ -318,7 +318,7 @@ async def extract_product_page(
     if extraction.source_url not in {item.source_url for item in work.extractions}:
         work.extractions = (*work.extractions, extraction)
     work.status = ProductStatus.IN_PROGRESS
-    source_artifact = ctx.deps.workspace.write_json(
+    source_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.SOURCE,
         "source.json",
@@ -331,7 +331,7 @@ async def extract_product_page(
         product_id=resolved_id,
         source_url=extraction.source_url,
     )
-    evidence_artifact = ctx.deps.workspace.write_json(
+    evidence_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.EVIDENCE,
         "evidence.json",
@@ -416,7 +416,7 @@ async def map_product_evidence(
     work.resolution = resolution
     work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(resolution)
     ctx.deps.state.products[product_id] = work
-    mapping_artifact = ctx.deps.workspace.write_json(
+    mapping_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.MAPPING,
         "mapping.json",
@@ -425,7 +425,7 @@ async def map_product_evidence(
         product_id=product_id,
         derived_from=work.artifact_ids,
     )
-    coverage_artifact = ctx.deps.workspace.write_json(
+    coverage_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.COVERAGE,
         "coverage.json",
@@ -614,7 +614,7 @@ async def inspect_unresolved_mappings(
             "humanComments": list(item.human_comments),
         }
         for record in context.evidence
-        for item in ctx.deps.mapping_knowledge.relevant(
+        for item in ctx.deps.store.relevant_mapping_knowledge(
             record.source_label or record.predicate,
             manufacturer=company.name if company else None,
             domain=company.domain if company else None,
@@ -680,7 +680,7 @@ async def propose_semantic_mapping(
         return ToolObservation(outcome="invalid", summary=str(error), count=0)
     work.pending_reviews = (*work.pending_reviews, review)
     company = ctx.deps.state.selected_company
-    ctx.deps.mapping_knowledge.remember_candidate(
+    ctx.deps.store.remember_mapping_candidate(
         review.mapping,
         manufacturer=company.name if company else None,
         domain=company.domain if company else None,
@@ -857,7 +857,7 @@ async def build_product_aas(
         evidence=work.resolution.evidence,
     )
     work.aas_artifact_sha256 = package.artifact_sha256
-    aas_artifact = ctx.deps.workspace.write_json(
+    aas_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.AAS,
         "aas.json",
@@ -866,7 +866,7 @@ async def build_product_aas(
         product_id=product_id,
         derived_from=work.artifact_ids,
     )
-    validation_artifact = ctx.deps.workspace.write_json(
+    validation_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.VALIDATION,
         "validation.json",

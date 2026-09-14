@@ -175,7 +175,7 @@ def test_pydantic_rejects_unknown_request_fields() -> None:
 
 
 def test_workspace_artifact_api_lists_reads_and_exports_thread_files() -> None:
-    workspace = app.state.mia.workspace
+    workspace = app.state.mia.store
     artifact = workspace.write_json(
         "thread-api-workspace",
         ArtifactKind.EVIDENCE,
@@ -198,7 +198,7 @@ def test_workspace_artifact_api_lists_reads_and_exports_thread_files() -> None:
 
 
 def test_trace_endpoint_returns_normalized_events_without_state_snapshots() -> None:
-    workspace = app.state.mia.workspace
+    workspace = app.state.mia.store
     state = MiaState(thread_id=f"thread-api-trace-{uuid.uuid4().hex}")
     event = state.add_event("tool.started", "Extracting the product page.")
     workspace.write_json(

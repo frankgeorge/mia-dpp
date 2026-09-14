@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 
 from pydantic import AwareDatetime
@@ -40,12 +39,3 @@ class WorkspaceArtifact(WireModel):
     source_url: str | None = None
     derived_from: tuple[str, ...] = ()
     downloadable: bool = True
-
-
-class WorkspaceManifest(WireModel):
-    """Small registry of a thread's artifacts; file contents stay separate."""
-
-    thread_id: str
-    created_at: datetime
-    updated_at: datetime
-    artifacts: tuple[WorkspaceArtifact, ...] = ()

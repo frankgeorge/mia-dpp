@@ -5,13 +5,12 @@ from typing import Any
 
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.agent.models import AgentTraceEvent, MiaState
-from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
+from mia_dpp.store import Store
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.workspace.models import ArtifactKind
-from mia_dpp.workspace.store import WorkspaceStore
 
 
 @dataclass
@@ -28,9 +27,8 @@ class MiaDependencies:
     web_tool: WebExtractionTool
     mapping_tool: ProductResolver
     mapping_review: MappingReviewService
-    mapping_knowledge: MappingKnowledgeStore
     dpp_pipeline: DeterministicDppPipeline
-    workspace: WorkspaceStore
+    store: Store
 
     def add_event(self, event_type: str, summary: str, **details: Any) -> AgentTraceEvent:
         """Append and immediately persist one safe activity event.
@@ -40,7 +38,7 @@ class MiaDependencies:
         """
 
         event = self.state.add_event(event_type, summary, **details)
-        self.workspace.write_json(
+        self.store.write_json(
             self.state.thread_id,
             ArtifactKind.TRACE,
             "event.json",

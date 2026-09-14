@@ -6,8 +6,11 @@ import hashlib
 import json
 import re
 import sqlite3
+import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -15,6 +18,9 @@ from typing import Any
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 from mia_dpp.agent.models import HumanRequest, HumanRequestKind, MiaState
+from mia_dpp.domain.mappings import ProposedFieldMapping
+from mia_dpp.tools.mapping.models import MappingKnowledgeEntry, MappingKnowledgeStatus
+from mia_dpp.workspace.models import ArtifactKind, WorkspaceArtifact
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 
@@ -47,8 +53,9 @@ class Store:
     a shared development database.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, artifact_root: Path | None = None) -> None:
         self._path = path
+        self._artifact_root = (artifact_root or path.with_suffix(".artifacts")).resolve()
         self._setup_lock = Lock()
         self._ready = False
 
@@ -174,6 +181,249 @@ class Store:
                 raise ValueError("deferred call was consumed concurrently")
         return PendingCall(call_id=call_id, session_id=session_id, request=request)
 
+    def write_json(
+        self,
+        thread_id: str,
+        kind: ArtifactKind,
+        name: str,
+        value: Any,
+        **metadata: Any,
+    ) -> WorkspaceArtifact:
+        data = json.dumps(value, ensure_ascii=False, indent=2, default=str).encode()
+        return self.write_bytes(
+            thread_id, kind, name, data, content_type="application/json", **metadata
+        )
+
+    def write_bytes(
+        self,
+        thread_id: str,
+        kind: ArtifactKind,
+        name: str,
+        data: bytes,
+        *,
+        content_type: str,
+        **metadata: Any,
+    ) -> WorkspaceArtifact:
+        """Write one artifact file and register its metadata in SQLite."""
+
+        directory = self._thread_dir(thread_id)
+        category = directory / kind.value
+        category.mkdir(parents=True, exist_ok=True)
+        artifact_id = "artifact-" + uuid.uuid4().hex
+        relative = f"{kind.value}/{artifact_id}-{self._safe_name(name)}"
+        (directory / relative).write_bytes(data)
+        artifact = WorkspaceArtifact(
+            id=artifact_id,
+            kind=kind,
+            name=name,
+            relative_path=relative,
+            created_at=datetime.now(UTC),
+            created_by=str(metadata.get("created_by", "mia")),
+            product_id=metadata.get("product_id"),
+            source_url=metadata.get("source_url"),
+            derived_from=tuple(metadata.get("derived_from", ())),
+            content_type=content_type,
+            sha256=hashlib.sha256(data).hexdigest(),
+            size=len(data),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO artifacts(id, session_id, payload) VALUES (?, ?, ?)",
+                (artifact.id, thread_id, artifact.model_dump_json()),
+            )
+        return artifact
+
+    def list_artifacts(self, thread_id: str) -> tuple[WorkspaceArtifact, ...]:
+        self._validate_id(thread_id, "session")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM artifacts WHERE session_id=? ORDER BY rowid", (thread_id,)
+            ).fetchall()
+        return tuple(WorkspaceArtifact.model_validate_json(row[0]) for row in rows)
+
+    def read_artifact(
+        self, thread_id: str, artifact_id: str
+    ) -> tuple[WorkspaceArtifact, bytes]:
+        self._validate_id(thread_id, "session")
+        self._validate_id(artifact_id, "artifact")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM artifacts WHERE id=? AND session_id=?",
+                (artifact_id, thread_id),
+            ).fetchone()
+        if row is None:
+            raise KeyError("unknown artifact")
+        artifact = WorkspaceArtifact.model_validate_json(row[0])
+        directory = self._thread_dir(thread_id)
+        path = (directory / artifact.relative_path).resolve()
+        if directory not in path.parents:
+            raise ValueError("artifact path escapes workspace")
+        return artifact, path.read_bytes()
+
+    def export_zip(self, thread_id: str) -> bytes:
+        artifacts = self.list_artifacts(thread_id)
+        output = BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "manifest.json",
+                json.dumps([item.model_dump(mode="json") for item in artifacts], indent=2),
+            )
+            archive.writestr(
+                "exports/workspace.json",
+                json.dumps(self.combined_export(thread_id), indent=2),
+            )
+            for artifact in artifacts:
+                _, data = self.read_artifact(thread_id, artifact.id)
+                archive.writestr(artifact.relative_path, data)
+        return output.getvalue()
+
+    def combined_export(self, thread_id: str) -> dict[str, Any]:
+        artifacts = self.list_artifacts(thread_id)
+        contents: dict[str, Any] = {}
+        for artifact in artifacts:
+            if artifact.content_type == "application/json":
+                _, data = self.read_artifact(thread_id, artifact.id)
+                contents[artifact.id] = json.loads(data)
+        return {
+            "artifacts": [item.model_dump(mode="json") for item in artifacts],
+            "jsonArtifacts": contents,
+        }
+
+    def remember_mapping_candidate(
+        self,
+        mapping: ProposedFieldMapping,
+        *,
+        manufacturer: str | None,
+        domain: str | None,
+        product_family: str | None,
+    ) -> MappingKnowledgeEntry:
+        return self._upsert_mapping_knowledge(
+            mapping,
+            manufacturer=manufacturer,
+            domain=domain,
+            product_family=product_family,
+            status=MappingKnowledgeStatus.CANDIDATE,
+        )
+
+    def remember_mapping_review(
+        self,
+        mapping: ProposedFieldMapping,
+        *,
+        decision: str,
+        manufacturer: str | None,
+        domain: str | None,
+        product_family: str | None,
+        comment: str | None,
+    ) -> MappingKnowledgeEntry:
+        status = (
+            MappingKnowledgeStatus.TRUSTED
+            if decision in {"approve", "correct"}
+            else MappingKnowledgeStatus.CANDIDATE
+        )
+        return self._upsert_mapping_knowledge(
+            mapping,
+            manufacturer=manufacturer,
+            domain=domain,
+            product_family=product_family,
+            status=status,
+            decision=decision,
+            comment=comment,
+        )
+
+    def list_mapping_knowledge(self) -> tuple[MappingKnowledgeEntry, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM mapping_knowledge ORDER BY rowid DESC"
+            ).fetchall()
+        return tuple(MappingKnowledgeEntry.model_validate_json(row[0]) for row in rows)
+
+    def relevant_mapping_knowledge(
+        self,
+        source_field: str,
+        *,
+        manufacturer: str | None,
+        domain: str | None,
+        template_keys: tuple[str, ...],
+    ) -> tuple[MappingKnowledgeEntry, ...]:
+        label = self._normalize(source_field)
+        return tuple(
+            item
+            for item in self.list_mapping_knowledge()
+            if item.status is MappingKnowledgeStatus.TRUSTED
+            and item.target_template in template_keys
+            and self._normalize(item.source_field) == label
+            and (not item.domain or not domain or item.domain == domain)
+            and (not item.manufacturer or not manufacturer or item.manufacturer == manufacturer)
+        )
+
+    def _upsert_mapping_knowledge(
+        self,
+        mapping: ProposedFieldMapping,
+        *,
+        manufacturer: str | None,
+        domain: str | None,
+        product_family: str | None,
+        status: MappingKnowledgeStatus,
+        decision: str | None = None,
+        comment: str | None = None,
+    ) -> MappingKnowledgeEntry:
+        identity = "\0".join(
+            (
+                self._normalize(mapping.source_field),
+                domain or "",
+                mapping.target.template_key,
+                "/".join(mapping.target.template_path),
+            )
+        )
+        entry_id = "knowledge-" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM mapping_knowledge WHERE id=?", (entry_id,)
+            ).fetchone()
+            existing = MappingKnowledgeEntry.model_validate_json(row[0]) if row else None
+            now = datetime.now(UTC)
+            values = tuple(
+                dict.fromkeys(
+                    (*((existing.example_values) if existing else ()), mapping.source_value)
+                )
+            )
+            comments = tuple(
+                dict.fromkeys(
+                    (
+                        *((existing.human_comments) if existing else ()),
+                        *((comment,) if comment else ()),
+                    )
+                )
+            )
+            entry = MappingKnowledgeEntry(
+                id=entry_id,
+                source_field=mapping.source_field,
+                example_values=values[-5:],
+                target_template=mapping.target.template_key,
+                target_path=mapping.target.template_path,
+                semantic_id=mapping.semantic_id,
+                manufacturer=manufacturer,
+                domain=domain,
+                product_family=product_family,
+                llm_review_summary=(mapping.llm_review.conclusion if mapping.llm_review else None),
+                human_comments=comments,
+                confirmations=(existing.confirmations if existing else 0) + (decision == "approve"),
+                corrections=(existing.corrections if existing else 0) + (decision == "correct"),
+                rejections=(existing.rejections if existing else 0) + (decision == "reject"),
+                created_at=existing.created_at if existing else now,
+                updated_at=now,
+                status=(
+                    status
+                    if status is MappingKnowledgeStatus.TRUSTED
+                    else (existing.status if existing else status)
+                ),
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO mapping_knowledge(id, payload) VALUES (?, ?)",
+                (entry.id, entry.model_dump_json()),
+            )
+        return entry
+
     def _connect(self) -> sqlite3.Connection:
         self._setup()
         connection = sqlite3.connect(self._path, timeout=10)
@@ -207,6 +457,18 @@ class Store:
                     "CREATE INDEX IF NOT EXISTS deferred_calls_session_status "
                     "ON deferred_calls(session_id, status)"
                 )
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS artifacts ("
+                    "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, payload TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS artifacts_session "
+                    "ON artifacts(session_id)"
+                )
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS mapping_knowledge ("
+                    "id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+                )
             self._ready = True
 
     @staticmethod
@@ -218,3 +480,20 @@ class Store:
     def _validate_call_id(value: str) -> None:
         if not value or len(value) > 512 or "\x00" in value:
             raise ValueError("invalid deferred call ID")
+
+    def _thread_dir(self, thread_id: str) -> Path:
+        self._validate_id(thread_id, "session")
+        path = (self._artifact_root / thread_id).resolve()
+        if self._artifact_root not in path.parents:
+            raise ValueError("thread path escapes artifact root")
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _safe_name(name: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(name).name).strip("-.")
+        return cleaned or "artifact"
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return " ".join(value.casefold().split())

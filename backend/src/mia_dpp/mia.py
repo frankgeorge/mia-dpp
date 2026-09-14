@@ -36,13 +36,11 @@ from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
 from mia_dpp.store import SessionSnapshot, Store
-from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.workspace.models import ArtifactKind
-from mia_dpp.workspace.store import FileWorkspaceStore
 
 
 class Mia:
@@ -75,11 +73,9 @@ class Mia:
         self.web_tool = web_tool or WebExtractionTool(loader=Crawl4AIPageLoader())
         self.resolver = ProductResolver(self.templates)
         self.website_workflow = WebsiteWorkflow(self.web_tool, self.resolver)
-        self.workspace = FileWorkspaceStore(self.settings.workspace_root)
-        self.mapping_knowledge = MappingKnowledgeStore(
-            self.settings.thread_store_path.with_name(
-                self.settings.thread_store_path.stem + "-mapping-knowledge.sqlite3"
-            )
+        self.store = Store(
+            self.settings.thread_store_path,
+            artifact_root=self.settings.workspace_root,
         )
 
         self._search = search
@@ -114,7 +110,6 @@ class Mia:
                 retries=2,
             )
 
-        self._store = Store(self.settings.thread_store_path)
 
     @property
     def configured(self) -> bool:
@@ -126,8 +121,8 @@ class Mia:
         """Load one trusted session and run an autonomous PydanticAI turn."""
 
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
-        snapshot = self._store.load(thread_id)
-        if snapshot is not None and self._store.pending(thread_id):
+        snapshot = self.store.load(thread_id)
+        if snapshot is not None and self.store.pending(thread_id):
             return self._response(
                 snapshot.state,
                 reply="MIA is waiting for the requested human input before continuing.",
@@ -165,11 +160,11 @@ class Mia:
         expected_kind: HumanRequestKind,
         payload: dict[str, Any],
     ) -> AgentResponse:
-        snapshot = self._store.load(thread_id)
+        snapshot = self.store.load(thread_id)
         if snapshot is None:
             raise ValueError("unknown session")
         matching = [
-            call for call in self._store.pending(thread_id) if call.request.kind is expected_kind
+            call for call in self.store.pending(thread_id) if call.request.kind is expected_kind
         ]
         if len(matching) != 1:
             raise ValueError("exactly one matching human action must be pending")
@@ -180,7 +175,7 @@ class Mia:
             self._apply_reviews(state, payload)
         else:
             self._apply_human_value(state, payload)
-        self._store.consume(
+        self.store.consume(
             thread_id,
             call.call_id,
             expected_kind=expected_kind,
@@ -239,12 +234,12 @@ class Mia:
             decision_summary=decision,
             trace_offset=trace_offset,
         )
-        self._store.save(snapshot)
+        self.store.save(snapshot)
         if isinstance(output, DeferredToolRequests):
             request = state.pending_human_request
             if request is None:
                 raise ValueError("deferred human request disappeared before persistence")
-            self._store.remember_deferred(
+            self.store.remember_deferred(
                 state.thread_id,
                 [(call.tool_call_id, request) for call in output.calls],
             )
@@ -272,9 +267,8 @@ class Mia:
             web_tool=self.web_tool,
             mapping_tool=self.resolver,
             mapping_review=self._mapping_review,
-            mapping_knowledge=self.mapping_knowledge,
             dpp_pipeline=self._dpp_pipeline,
-            workspace=self.workspace,
+            store=self.store,
         )
         if self._agent is None:
             state.status = AgentStatus.AWAITING_INPUT
@@ -389,7 +383,7 @@ class Mia:
                 comment=decision.comment,
             )
             company = state.selected_company
-            self.mapping_knowledge.remember_review(
+            self.store.remember_mapping_review(
                 reviewed.mapping,
                 decision=decision.decision,
                 manufacturer=company.name if company else None,
@@ -397,7 +391,7 @@ class Mia:
                 product_family=work.candidate.family if work.candidate else None,
                 comment=decision.comment,
             )
-            artifact = self.workspace.write_json(
+            artifact = self.store.write_json(
                 state.thread_id,
                 ArtifactKind.REVIEW,
                 "mapping-review.json",
@@ -424,7 +418,7 @@ class Mia:
             value=request.value,
             thread_id=state.thread_id,
         )
-        artifact = self.workspace.write_json(
+        artifact = self.store.write_json(
             state.thread_id,
             ArtifactKind.REVIEW,
             "human-evidence.json",
@@ -458,7 +452,7 @@ class Mia:
             current_product=current,
             pending_human_request=state.pending_human_request,
             trace_events=state.trace[trace_offset:],
-            artifact_count=len(self.workspace.list_artifacts(state.thread_id)),
+            artifact_count=len(self.store.list_artifacts(state.thread_id)),
         )
 
     @staticmethod
@@ -492,7 +486,7 @@ class Mia:
         current = state.products.get(state.current_product_id) if state.current_product_id else None
         resolution = current.resolution if current is not None else None
         statistics = resolution.coverage_report.statistics if resolution is not None else None
-        self.workspace.write_json(
+        self.store.write_json(
             state.thread_id,
             ArtifactKind.TRACE,
             "state-snapshot.json",
@@ -510,7 +504,7 @@ class Mia:
                 ),
                 "missingMandatory": statistics.required_missing if statistics else 0,
                 "pendingReviews": len(current.pending_reviews) if current else 0,
-                "artifactCount": len(self.workspace.list_artifacts(state.thread_id)),
+                "artifactCount": len(self.store.list_artifacts(state.thread_id)),
             },
             created_by="mia",
             product_id=state.current_product_id,
