@@ -730,6 +730,8 @@ async def request_human_review(
         product_id=product_id,
         summary=f"{len(work.pending_reviews)} mapping proposals need a human decision.",
     )
+    work.status = ProductStatus.AWAITING_REVIEW
+    ctx.deps.state.products[product_id] = work
     ctx.deps.state.status = AgentStatus.AWAITING_REVIEW
     ctx.deps.add_event(
         "human.input_requested",

@@ -36,6 +36,7 @@ from mia_dpp.agent.models import (
     HumanRequestKind,
     MiaState,
     ProductStatus,
+    ProductWork,
     TraceStatus,
 )
 from mia_dpp.agent.prompts import AGENT_INSTRUCTIONS, DPP_CREATION_SKILL
@@ -473,9 +474,10 @@ class Mia:
         trace_offset: int,
     ) -> AgentResponse:
         current = state.products.get(state.current_product_id) if state.current_product_id else None
+        trusted_reply = self._human_request_reply(state, current) or reply
         return AgentResponse(
             thread_id=state.thread_id,
-            reply=reply,
+            reply=trusted_reply,
             status=state.status,
             decision_summary=decision_summary,
             company_candidates=state.company_candidates,
@@ -486,6 +488,33 @@ class Mia:
             pending_human_request=state.pending_human_request,
             trace_events=state.trace[trace_offset:],
             artifact_count=len(self.workspace.list_artifacts(state.thread_id)),
+        )
+
+    @staticmethod
+    def _human_request_reply(state: MiaState, current: ProductWork | None) -> str | None:
+        """Describe a trusted interrupt using counts from state rather than model prose."""
+
+        request = state.pending_human_request
+        if request is None:
+            return None
+        if request.kind is HumanRequestKind.REQUIREMENT_VALUE:
+            return request.summary
+        if current is None or current.resolution is None:
+            return "Mapping proposals need review. Please approve, correct, or reject them."
+
+        resolution = current.resolution
+        mapping_count = len(resolution.mapping_result.mapped)
+        review_count = len(current.pending_reviews)
+        unmatched_count = len(resolution.mapping_result.unmatched_evidence_ids)
+        return (
+            "I finished processing the currently available source evidence.\n\n"
+            f"- {len(resolution.evidence)} source facts retained\n"
+            f"- {mapping_count} mapping{'s' if mapping_count != 1 else ''} accepted "
+            "deterministically\n"
+            f"- {review_count} mapping proposal{'s' if review_count != 1 else ''} "
+            f"{'needs' if review_count == 1 else 'need'} review\n"
+            f"- {unmatched_count} source facts remain unmatched"
+            "\n\nPlease approve, correct, or reject the pending mapping review."
         )
 
     def _persist_trace(self, state: MiaState, offset: int) -> None:

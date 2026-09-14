@@ -328,7 +328,7 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
             "request_human_review",
         ],
         custom_output_args={
-            "reply": "Please review the mappings.",
+            "reply": "The model claims an untrusted number of reviews.",
             "status": "awaiting_review",
             "decision_summary": "A human decision is required.",
         },
@@ -339,9 +339,12 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
     assert pending.pending_human_request is not None
     assert pending.pending_human_request.kind.value == "mapping_review"
     assert pending.current_product is not None
+    assert pending.current_product.status.value == "awaiting_review"
     assert not any(event.tool_name == "request_human_value" for event in pending.trace_events)
     reviews = pending.current_product.pending_reviews
     assert reviews
+    assert f"- {len(reviews)} mapping proposal" in pending.reply
+    assert "untrusted number" not in pending.reply
     resumed = asyncio.run(
         agent.review(
             AgentReviewRequest(
