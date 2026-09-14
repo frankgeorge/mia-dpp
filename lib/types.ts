@@ -396,7 +396,7 @@ export interface HumanRequest {
 
 export interface WorkspaceArtifact {
   id: string;
-  kind: "search" | "source" | "raw" | "evidence" | "mapping" | "coverage" | "review" | "aas" | "validation" | "trace" | "export";
+  kind: "search" | "source" | "raw" | "evidence" | "mapping" | "coverage" | "review" | "aas" | "validation" | "export";
   name: string;
   relativePath: string;
   createdAt: string;

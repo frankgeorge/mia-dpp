@@ -193,23 +193,10 @@ def test_workspace_artifact_api_lists_reads_and_exports_thread_files() -> None:
     assert exported.headers["content-type"] == "application/zip"
 
 
-def test_trace_endpoint_returns_normalized_events_without_state_snapshots() -> None:
+def test_trace_endpoint_returns_normalized_events() -> None:
     workspace = app.state.mia.store
     state = MiaState(thread_id=f"thread-api-trace-{uuid.uuid4().hex}")
-    event = state.add_event("tool.started", "Extracting the product page.")
-    workspace.write_json(
-        state.thread_id,
-        ArtifactKind.TRACE,
-        "event.json",
-        event.model_dump(mode="json"),
-    )
-    workspace.write_json(
-        state.thread_id,
-        ArtifactKind.TRACE,
-        "state-snapshot.json",
-        {"status": "running"},
-    )
-
+    event = workspace.add_event(state.thread_id, "tool.started", "Extracting the product page.")
     response = request("GET", f"/api/workspaces/{state.thread_id}/trace")
 
     assert response.status_code == 200

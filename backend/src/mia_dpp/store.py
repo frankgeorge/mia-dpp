@@ -19,7 +19,13 @@ from typing import Any
 from pydantic import AwareDatetime
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
-from mia_dpp.agent.models import HumanRequest, HumanRequestKind, MiaState
+from mia_dpp.agent.models import (
+    AgentTraceEvent,
+    HumanRequest,
+    HumanRequestKind,
+    MiaState,
+    TraceStatus,
+)
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import ProposedFieldMapping
 from mia_dpp.tools.mapping.models import MappingKnowledgeEntry, MappingKnowledgeStatus
@@ -37,7 +43,6 @@ class ArtifactKind(StrEnum):
     REVIEW = "review"
     AAS = "aas"
     VALIDATION = "validation"
-    TRACE = "trace"
     EXPORT = "export"
 
 
@@ -67,7 +72,6 @@ class SessionSnapshot:
     history: list[ModelMessage]
     reply: str = ""
     decision_summary: str = ""
-    trace_offset: int = 0
 
 
 @dataclass(frozen=True)
@@ -104,7 +108,7 @@ class Store:
         self._validate_id(session_id, "session")
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT state_json, history_json, reply, decision_summary, trace_offset "
+                "SELECT state_json, history_json, reply, decision_summary "
                 "FROM sessions WHERE id = ?",
                 (session_id,),
             ).fetchone()
@@ -115,7 +119,6 @@ class Store:
             history=list(ModelMessagesTypeAdapter.validate_json(row[1])),
             reply=row[2],
             decision_summary=row[3],
-            trace_offset=int(row[4]),
         )
 
     def save(
@@ -227,6 +230,65 @@ class Store:
             )
             for row in rows
         )
+
+    def add_event(
+        self,
+        session_id: str,
+        event_type: str,
+        summary: str,
+        *,
+        status: TraceStatus = TraceStatus.COMPLETED,
+        tool_name: str | None = None,
+        product_id: str | None = None,
+        input_summary: str | None = None,
+        output_summary: str | None = None,
+        source_ids: tuple[str, ...] = (),
+        duration_ms: int | None = None,
+        metadata: dict[str, str | int | float | bool | None] | None = None,
+    ) -> AgentTraceEvent:
+        """Persist one safe user-visible activity event."""
+
+        self._validate_id(session_id, "session")
+        event = AgentTraceEvent(
+            id="trace-" + uuid.uuid4().hex[:24],
+            thread_id=session_id,
+            event_type=event_type,
+            status=status,
+            timestamp=datetime.now(UTC),
+            summary=summary,
+            tool_name=tool_name,
+            product_id=product_id,
+            input_summary=input_summary,
+            output_summary=output_summary,
+            source_ids=source_ids,
+            duration_ms=duration_ms,
+            metadata=metadata or {},
+        )
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO events(id, session_id, payload) VALUES (?, ?, ?)",
+                (event.id, session_id, event.model_dump_json()),
+            )
+        return event
+
+    def list_events(self, session_id: str, offset: int = 0) -> tuple[AgentTraceEvent, ...]:
+        """Return activity events in creation order, optionally after an offset."""
+
+        self._validate_id(session_id, "session")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM events WHERE session_id=? ORDER BY rowid LIMIT -1 OFFSET ?",
+                (session_id, offset),
+            ).fetchall()
+        return tuple(AgentTraceEvent.model_validate_json(row[0]) for row in rows)
+
+    def event_count(self, session_id: str) -> int:
+        self._validate_id(session_id, "session")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM events WHERE session_id=?", (session_id,)
+            ).fetchone()
+        return int(row[0])
 
     def write_json(
         self,
@@ -518,6 +580,13 @@ class Store:
                     "CREATE TABLE IF NOT EXISTS mapping_knowledge ("
                     "id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
                 )
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS events ("
+                    "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, payload TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS events_session ON events(session_id)"
+                )
             self._ready = True
 
     @staticmethod
@@ -537,7 +606,7 @@ class Store:
                 history,
                 snapshot.reply,
                 snapshot.decision_summary,
-                snapshot.trace_offset,
+                0,
                 datetime.now(UTC).isoformat(),
             ),
         )

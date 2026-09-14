@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -186,47 +184,6 @@ class MiaState(WireModel):
     target_submodels: tuple[str, ...] = ("digital_nameplate", "technical_data")
     status: AgentStatus = AgentStatus.RUNNING
     pending_human_request: HumanRequest | None = None
-    trace: tuple[AgentTraceEvent, ...] = ()
-
-    def add_event(
-        self,
-        event_type: str,
-        summary: str,
-        *,
-        status: TraceStatus = TraceStatus.COMPLETED,
-        tool_name: str | None = None,
-        product_id: str | None = None,
-        input_summary: str | None = None,
-        output_summary: str | None = None,
-        source_ids: tuple[str, ...] = (),
-        duration_ms: int | None = None,
-        metadata: dict[str, str | int | float | bool | None] | None = None,
-    ) -> AgentTraceEvent:
-        """Append one safe execution event and return it to the caller.
-
-        Agent tools use this to make state changes visible to the activity UI.
-        The runtime later returns only events added during the current turn.
-        """
-
-        now = datetime.now(UTC)
-        seed = f"{self.thread_id}\0{event_type}\0{now.isoformat()}\0{len(self.trace)}"
-        event = AgentTraceEvent(
-            id="trace-" + hashlib.sha256(seed.encode()).hexdigest()[:24],
-            thread_id=self.thread_id,
-            event_type=event_type,
-            status=status,
-            timestamp=now,
-            summary=summary,
-            tool_name=tool_name,
-            product_id=product_id,
-            input_summary=input_summary,
-            output_summary=output_summary,
-            source_ids=source_ids,
-            duration_ms=duration_ms,
-            metadata=metadata or {},
-        )
-        self.trace = (*self.trace, event)
-        return event
 
 
 class AgentRunOutput(WireModel):

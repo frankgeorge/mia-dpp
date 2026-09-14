@@ -123,7 +123,7 @@ class Mia:
                 "Continue after the trusted human action.",
                 snapshot.state,
                 snapshot.history,
-                trace_offset=len(snapshot.state.trace),
+                trace_offset=self.store.event_count(thread_id),
                 deferred_results=DeferredToolResults(
                     calls={call.call_id: call.result for call in resolved}
                 ),
@@ -134,11 +134,11 @@ class Mia:
                 snapshot.state,
                 reply="MIA is waiting for the requested human input before continuing.",
                 decision_summary="A trusted human action is required.",
-                trace_offset=len(snapshot.state.trace),
+                trace_offset=self.store.event_count(thread_id),
             )
         state = snapshot.state if snapshot is not None else MiaState(thread_id=thread_id)
         history = snapshot.history if snapshot is not None else []
-        trace_offset = len(state.trace)
+        trace_offset = self.store.event_count(thread_id)
         if not state.user_goal:
             state.user_goal = request.message
         return await self._execute(request.message, state, history, trace_offset=trace_offset)
@@ -177,13 +177,14 @@ class Mia:
             raise ValueError("exactly one matching human action must be pending")
         call = matching[0]
         state = snapshot.state
-        trace_offset = len(state.trace)
+        trace_offset = self.store.event_count(thread_id)
         if expected_kind is HumanRequestKind.MAPPING_REVIEW:
             self._apply_reviews(state, payload)
         else:
             self._apply_human_value(state, payload)
         state.pending_human_request = None
-        state.add_event(
+        self.store.add_event(
+            state.thread_id,
             "human.input_received",
             "Trusted human input was applied to the paused workflow.",
             product_id=call.request.product_id,
@@ -202,7 +203,6 @@ class Mia:
                 history=snapshot.history,
                 reply="Trusted human input was accepted; MIA can continue.",
                 decision_summary="Resume the deferred agent action.",
-                trace_offset=trace_offset,
             ),
             call.call_id,
             expected_kind=expected_kind,
@@ -247,7 +247,6 @@ class Mia:
             history=messages,
             reply=reply,
             decision_summary=decision,
-            trace_offset=trace_offset,
         )
         request = state.pending_human_request if isinstance(output, DeferredToolRequests) else None
         deferred_calls = (
@@ -264,7 +263,6 @@ class Mia:
             request = state.pending_human_request
             if request is None:
                 raise ValueError("deferred human request disappeared before persistence")
-        self._persist_snapshot(state, decision)
         return self._response(
             state,
             reply=reply,
@@ -488,7 +486,7 @@ class Mia:
             selected_product_ids=state.selected_product_ids,
             current_product=current,
             pending_human_request=state.pending_human_request,
-            trace_events=state.trace[trace_offset:],
+            trace_events=self.store.list_events(state.thread_id, trace_offset),
             artifact_count=len(self.store.list_artifacts(state.thread_id)),
         )
 
@@ -517,36 +515,4 @@ class Mia:
             f"{'needs' if review_count == 1 else 'need'} review\n"
             f"- {unmatched_count} source facts remain unmatched"
             "\n\nPlease approve, correct, or reject the pending mapping review."
-        )
-
-    def _persist_snapshot(self, state: MiaState, decision: str) -> None:
-        current = state.products.get(state.current_product_id) if state.current_product_id else None
-        report = current.coverage_report() if current is not None else None
-        statistics = report.statistics if report is not None else None
-        self.store.write_json(
-            state.thread_id,
-            ArtifactKind.TRACE,
-            "state-snapshot.json",
-            {
-                "status": state.status,
-                "decisionSummary": decision,
-                "selectedCompany": state.selected_company.name if state.selected_company else None,
-                "currentProductId": state.current_product_id,
-                "queuedProducts": list(state.product_queue),
-                "sourceCount": len(current.source_urls) if current else 0,
-                "evidenceCount": len(current.evidence) if current else 0,
-                "mappedCount": (
-                    len(current.mapping_result.mapped) if current and current.mapping_result else 0
-                ),
-                "unmatchedCount": (
-                    len(current.mapping_result.unmatched_evidence_ids)
-                    if current and current.mapping_result
-                    else 0
-                ),
-                "missingMandatory": statistics.required_missing if statistics else 0,
-                "pendingReviews": len(current.pending_reviews) if current else 0,
-                "artifactCount": len(self.store.list_artifacts(state.thread_id)),
-            },
-            created_by="mia",
-            product_id=state.current_product_id,
         )

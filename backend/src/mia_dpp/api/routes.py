@@ -200,14 +200,7 @@ async def workspace_trace(
 ) -> tuple[AgentTraceEvent, ...]:
     """Return normalized activity events without exposing hidden model reasoning."""
 
-    workspace = _application(http_request).store
-    events: list[AgentTraceEvent] = []
-    for artifact in workspace.list_artifacts(thread_id):
-        if artifact.kind.value != "trace" or artifact.name != "event.json":
-            continue
-        _, data = workspace.read_artifact(thread_id, artifact.id)
-        events.append(AgentTraceEvent.model_validate_json(data))
-    return tuple(events)
+    return _application(http_request).store.list_events(thread_id)
 
 
 @router.get(

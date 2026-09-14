@@ -156,14 +156,13 @@ def test_one_pydanticai_run_can_call_multiple_tools_and_create_lineage(tmp_path:
 
     assert result.current_product is not None
     assert result.current_product.resolution is not None
-    assert result.artifact_count >= 6
+    assert result.artifact_count >= 4
     artifacts = workspace.list_artifacts(result.thread_id)
     assert {item.kind.value for item in artifacts} >= {
         "source",
         "evidence",
         "mapping",
         "coverage",
-        "trace",
     }
     mapping = next(item for item in artifacts if item.kind.value == "mapping")
     assert mapping.derived_from
@@ -282,14 +281,14 @@ def test_trace_is_observable_before_agent_run_completes(tmp_path: Path) -> None:
         },
     )
     agent, workspace = build_mia(tmp_path, model, loader=SlowFixtureLoader())
+    thread_id = "thread-live-events"
 
     async def observe() -> None:
-        task = asyncio.create_task(agent.message(AgentRequest(message=f"DPP from {url}")))
+        task = asyncio.create_task(
+            agent.message(AgentRequest(thread_id=thread_id, message=f"DPP from {url}"))
+        )
         await asyncio.sleep(0.05)
-        thread_dirs = list((tmp_path / "workspaces").glob("thread-*"))
-        assert thread_dirs
-        artifacts = workspace.list_artifacts(thread_dirs[0].name)
-        assert any(item.name == "event.json" for item in artifacts)
+        assert workspace.list_events(thread_id)
         assert not task.done()
         await task
 

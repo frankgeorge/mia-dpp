@@ -6,7 +6,7 @@ from typing import Any
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import AgentTraceEvent, MiaState
-from mia_dpp.store import ArtifactKind, Store
+from mia_dpp.store import Store
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
@@ -36,13 +36,4 @@ class MiaDependencies:
         autonomous PydanticAI run is still in flight.
         """
 
-        event = self.state.add_event(event_type, summary, **details)
-        self.store.write_json(
-            self.state.thread_id,
-            ArtifactKind.TRACE,
-            "event.json",
-            event.model_dump(mode="json"),
-            created_by="agent",
-            product_id=event.product_id,
-        )
-        return event
+        return self.store.add_event(self.state.thread_id, event_type, summary, **details)
