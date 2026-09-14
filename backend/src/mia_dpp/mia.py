@@ -36,7 +36,8 @@ from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
 from mia_dpp.store import SessionSnapshot, Store
-from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
+from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
+from mia_dpp.tools.mapping.resolver import ingest_website
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
@@ -71,8 +72,6 @@ class Mia:
 
         search = search_provider or DdgsSearchProvider()
         self.web_tool = web_tool or WebExtractionTool(loader=Crawl4AIPageLoader())
-        self.resolver = ProductResolver(self.templates)
-        self.website_workflow = WebsiteWorkflow(self.web_tool, self.resolver)
         self.store = Store(
             self.settings.thread_store_path,
             artifact_root=self.settings.workspace_root,
@@ -153,6 +152,11 @@ class Mia:
             HumanRequestKind.REQUIREMENT_VALUE,
             request.model_dump(mode="json"),
         )
+
+    async def ingest_website(self, request: WebsiteIngestRequest) -> WebsiteIngestResponse:
+        """Run the direct extraction-and-resolution compatibility endpoint."""
+
+        return await ingest_website(request, self.web_tool, self.templates)
 
     async def _resume(
         self,
@@ -265,7 +269,7 @@ class Mia:
             state=state,
             search=self._search,
             web_tool=self.web_tool,
-            mapping_tool=self.resolver,
+            templates=self.templates,
             mapping_review=self._mapping_review,
             dpp_pipeline=self._dpp_pipeline,
             store=self.store,

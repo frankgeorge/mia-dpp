@@ -13,7 +13,6 @@ from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import AgentResponse, AgentStatus, MiaState
 from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.main import app
-from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
@@ -240,15 +239,11 @@ def test_website_endpoint_feeds_provenance_into_dpp(
     async def resolver(host: str, port: int) -> tuple[str, ...]:
         return ("93.184.216.34",)
 
-    repository = OfficialTemplateRepository()
-    workflow = WebsiteWorkflow(
-        WebExtractionTool(
-            loader=Loader(),
-            url_policy=ProductUrlPolicy(resolver),
-        ),
-        ProductResolver(repository),
+    web_tool = WebExtractionTool(
+        loader=Loader(),
+        url_policy=ProductUrlPolicy(resolver),
     )
-    monkeypatch.setattr(app.state.mia, "website_workflow", workflow)
+    monkeypatch.setattr(app.state.mia, "web_tool", web_tool)
 
     imported = request("POST", "/api/website", {"url": url, "graph": []})
 

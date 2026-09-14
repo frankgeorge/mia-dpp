@@ -28,7 +28,7 @@ from mia_dpp.config import Settings
 from mia_dpp.domain.discovery import ProductSourceCandidate
 from mia_dpp.mia import Mia
 from mia_dpp.store import Store
-from mia_dpp.tools.mapping.resolver import ProductResolver
+from mia_dpp.tools.mapping.resolver import resolve_product
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchHit
 from mia_dpp.tools.web.models import RenderedPage
@@ -251,7 +251,7 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
         state=state,
         search=search,
         web_tool=web_tool,
-        mapping_tool=ProductResolver(repository),
+        templates=repository,
         mapping_review=review,
         dpp_pipeline=DeterministicDppPipeline(repository),
         store=store,
@@ -379,8 +379,9 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
         ).extract("https://manufacturer.example/products/pg-16")
     )
     result = asyncio.run(
-        ProductResolver(repository).resolve_package(
+        resolve_product(
             extraction.knowledge_package,
+            repository,
             template_keys=("digital_nameplate", "technical_data"),
         )
     )

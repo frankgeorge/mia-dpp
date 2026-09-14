@@ -20,6 +20,7 @@ from mia_dpp.agent.models import (
 )
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
+from mia_dpp.tools.mapping.resolver import resolve_product
 from mia_dpp.tools.search import (
     SearchUnavailableError,
     find_companies,
@@ -407,8 +408,9 @@ async def map_product_evidence(
                 identifiers=(product_id,),
             )
     started = time.monotonic()
-    resolution = await ctx.deps.mapping_tool.resolve_package(
+    resolution = await resolve_product(
         extraction.knowledge_package,
+        ctx.deps.templates,
         template_keys=ctx.deps.state.target_submodels,
         source_url=extraction.source_url,
         workflow_events=extraction.workflow_events,

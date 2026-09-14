@@ -246,7 +246,7 @@ async def ingest_website(
     """Fetch a public product page with Crawl4AI and propose reviewed mappings."""
 
     try:
-        return await _application(http_request).website_workflow.ingest(payload)
+        return await _application(http_request).ingest_website(payload)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import ClassVar, Protocol
+from typing import ClassVar
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord
@@ -19,21 +19,10 @@ from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
 MappingHistory = Mapping[tuple[str, str], int]
 
 
-class MappingStrategy(Protocol):
-    """Boundary used by ``ProductResolver`` to obtain mapping candidates."""
-
-    async def propose(
-        self,
-        evidence: Sequence[EvidenceRecord],
-        *,
-        history: MappingHistory,
-    ) -> MappingResult: ...
-
-
 class DeterministicWebsiteMapper:
     """Propose evidence-to-target mappings from deterministic rules.
 
-    ``ProductResolver`` calls this after evidence exists. Recognized facts become
+    Resolution calls this after evidence exists. Recognized facts become
     automatic or review mappings; every other evidence ID remains unmatched.
     """
 

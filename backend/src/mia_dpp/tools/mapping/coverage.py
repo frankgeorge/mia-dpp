@@ -60,7 +60,7 @@ class _Match:
 class CoverageAnalyzer:
     """Compare retained evidence with every selected template requirement.
 
-    ``ProductResolver`` and mapping review call this after mapping decisions.
+    Resolution and mapping review call this after mapping decisions.
     The report records satisfied, candidate, ambiguous, and missing targets while
     accounting separately for evidence that remains unmatched.
     """
