@@ -92,7 +92,7 @@ class Store:
                 "trace_offset=excluded.trace_offset, updated_at=excluded.updated_at",
                 (
                     session_id,
-                    snapshot.state.model_dump_json(),
+                    snapshot.state.model_dump_json(exclude_computed_fields=True),
                     history,
                     snapshot.reply,
                     snapshot.decision_summary,

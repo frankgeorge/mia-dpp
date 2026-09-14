@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation, SourceType
 from mia_dpp.domain.mappings import (
     CoverageStatus,
@@ -21,7 +20,6 @@ from mia_dpp.domain.mappings import (
     SemanticReviewItem,
 )
 from mia_dpp.domain.targets import RequirementKind
-from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
 from mia_dpp.tools.mapping.models import SemanticMappingContext, WebsiteIngestResponse
 from mia_dpp.tools.mapping.targets import mapping_target
 
@@ -36,7 +34,6 @@ class MappingReviewService:
 
     def __init__(self, repository: OfficialTemplateRepository) -> None:
         self._repository = repository
-        self._coverage = CoverageAnalyzer()
 
     @staticmethod
     def pending_deterministic_reviews(
@@ -205,7 +202,7 @@ class MappingReviewService:
                 update={"evidence": (*result.evidence, record)}
             )
             result = result.model_copy(
-                update={"knowledge_package": package, "evidence": package.evidence}
+                update={"knowledge_package": package}
             )
             mapping = mapping.model_copy(
                 update={"evidence_id": record.id, "source_value": corrected_value}
@@ -298,7 +295,7 @@ class MappingReviewService:
             update={"evidence": (*result.evidence, evidence)}
         )
         updated = result.model_copy(
-            update={"knowledge_package": package, "evidence": package.evidence}
+            update={"knowledge_package": package}
         )
         review_seed = f"{requirement_id}\0{evidence.id}"
         review = SemanticReviewItem(
@@ -315,41 +312,36 @@ class MappingReviewService:
     ) -> WebsiteIngestResponse:
         retained = [
             item
-            for item in (*result.mapping_result.mapped, *result.mapping_result.ambiguous)
+            for item in (
+                *result.mapping_result.mapped,
+                *result.mapping_result.ambiguous,
+                *result.mapping_result.rejected,
+            )
             if item.evidence_id != reviewed.mapping.evidence_id
             and item.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
         ]
-        if reviewed.mapping.status is MappingStatus.APPROVED:
+        rejected = [
+            item
+            for item in result.mapping_result.rejected
+            if item.evidence_id != reviewed.mapping.evidence_id
+        ]
+        if reviewed.mapping.status is MappingStatus.REJECTED:
+            rejected.append(reviewed.mapping)
+        else:
             retained.append(reviewed.mapping)
-        mapped_ids = {item.evidence_id for item in retained}
+        mapped_ids = {
+            item.evidence_id
+            for item in retained
+            if item.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
+        }
         mapping_result = MappingResult(
             mapped=tuple(retained),
+            rejected=tuple(rejected),
             unmatched_evidence_ids=tuple(
                 item.id for item in result.evidence if item.id not in mapped_ids
             ),
         )
-        coverage = self._coverage.analyze(
-            result.knowledge_package,
-            result.coverage_report.inventory,
-            mapping_result=mapping_result,
-        )
-        return result.model_copy(
-            update={
-                "proposal": result.proposal.model_copy(update={"mappings": mapping_result.mapped}),
-                "mapping_result": mapping_result,
-                "coverage_report": coverage,
-                "completion_summary": build_completion_summary(
-                    coverage,
-                    mapping_result,
-                    result.evidence,
-                    rejected_evidence_ids=(
-                        {reviewed.mapping.evidence_id}
-                        if reviewed.mapping.status is MappingStatus.REJECTED
-                        else set()
-                    ),
-                ),
-            }
-        )
+        return result.model_copy(update={"mapping_result": mapping_result})
 
     @staticmethod
     def _human_evidence(

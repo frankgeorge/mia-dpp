@@ -6,9 +6,8 @@ from datetime import UTC, datetime
 
 from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.evidence import ProductKnowledgePackage
-from mia_dpp.domain.mappings import GraphEntry, MappingProposal
+from mia_dpp.domain.mappings import GraphEntry
 from mia_dpp.domain.workflow import WorkflowEvent, completed_event
 from mia_dpp.tools.mapping.catalog import nameplate_catalog
 from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
@@ -134,7 +133,6 @@ class ProductResolver:
             inventory,
             mapping_result=mapping_result,
         )
-        completion = build_completion_summary(coverage, mapping_result, evidence)
         statistics = coverage.statistics
         events.append(
             completed_event(
@@ -165,12 +163,9 @@ class ProductResolver:
                 f"{len(mapping_result.unmatched_evidence_ids)} currently unmatched."
             ),
             source_url=source_url,
-            proposal=MappingProposal(product_name=package.product_name, mappings=proposals),
-            evidence=evidence,
             knowledge_package=package,
             mapping_result=mapping_result,
-            coverage_report=coverage,
-            completion_summary=completion,
+            template_index=inventory,
             workflow_events=tuple(events),
             nameplate_elements=nameplate_catalog(self._repository),
         )

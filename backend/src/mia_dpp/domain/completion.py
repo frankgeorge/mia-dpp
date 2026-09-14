@@ -74,7 +74,7 @@ def build_completion_summary(
     fixed = actionable_fixed_requirements(report)
     fixed_ids = {item.id for item in fixed}
     requirement_by_id = {item.id: item for item in report.inventory.requirements}
-    outcomes = (*mapping_result.mapped, *mapping_result.ambiguous)
+    outcomes = (*mapping_result.mapped, *mapping_result.ambiguous, *mapping_result.rejected)
     accepted_targets = {
         (
             item.target.template_key,

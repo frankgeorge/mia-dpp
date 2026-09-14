@@ -6,10 +6,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, computed_field, model_validator
 
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.completion import CompletionSummary
+from mia_dpp.domain.completion import CompletionSummary, build_completion_summary
 from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
 from mia_dpp.domain.mappings import (
     CoverageReport,
@@ -18,8 +18,9 @@ from mia_dpp.domain.mappings import (
     MappingResult,
     NameplateElement,
 )
-from mia_dpp.domain.targets import Requirement
+from mia_dpp.domain.targets import Requirement, TemplateIndex
 from mia_dpp.domain.workflow import WorkflowEvent
+from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
 
 
 class WebsiteIngestRequest(WireModel):
@@ -39,26 +40,55 @@ class WebsiteIngestRequest(WireModel):
 class WebsiteIngestResponse(WireModel):
     reply: str
     source_url: str
-    proposal: MappingProposal
-    evidence: tuple[EvidenceRecord, ...]
     knowledge_package: ProductKnowledgePackage
     mapping_result: MappingResult
-    coverage_report: CoverageReport
-    completion_summary: CompletionSummary
+    template_index: TemplateIndex
     workflow_events: tuple[WorkflowEvent, ...]
     mode: Literal["website"] = "website"
     nameplate_elements: tuple[NameplateElement, ...]
 
-    @model_validator(mode="after")
-    def legacy_evidence_matches_knowledge_package(self) -> WebsiteIngestResponse:
-        if self.evidence != self.knowledge_package.evidence:
-            raise ValueError("evidence must match knowledgePackage.evidence")
-        proposal = (*self.mapping_result.mapped, *self.mapping_result.ambiguous)
-        if self.proposal.mappings != proposal:
-            raise ValueError("proposal mappings must match mappingResult")
-        if self.coverage_report.analyzed_evidence_ids != tuple(item.id for item in self.evidence):
-            raise ValueError("coverageReport must analyze every evidence record in order")
-        return self
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def evidence(self) -> tuple[EvidenceRecord, ...]:
+        """Compatibility view derived from the authoritative knowledge package."""
+
+        return self.knowledge_package.evidence
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def proposal(self) -> MappingProposal:
+        """Compatibility view derived from the authoritative mapping result."""
+
+        return MappingProposal(
+            product_name=self.knowledge_package.product_name,
+            mappings=(
+                *self.mapping_result.mapped,
+                *self.mapping_result.ambiguous,
+                *self.mapping_result.rejected,
+            ),
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def coverage_report(self) -> CoverageReport:
+        """Derive coverage from official targets and current mappings."""
+
+        return CoverageAnalyzer().analyze(
+            self.knowledge_package,
+            self.template_index,
+            mapping_result=self.mapping_result,
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def completion_summary(self) -> CompletionSummary:
+        """Derive the human completion view from current authoritative data."""
+
+        return build_completion_summary(
+            self.coverage_report,
+            self.mapping_result,
+            self.knowledge_package.evidence,
+        )
 
 
 class SemanticMappingContext(WireModel):

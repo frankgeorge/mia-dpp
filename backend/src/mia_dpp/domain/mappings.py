@@ -223,14 +223,22 @@ class MappingResult(WireModel):
 
     mapped: tuple[ProposedFieldMapping, ...] = ()
     ambiguous: tuple[ProposedFieldMapping, ...] = ()
+    rejected: tuple[ProposedFieldMapping, ...] = ()
     unmatched_evidence_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def evidence_outcomes_are_unique(self) -> MappingResult:
-        identifiers = [item.evidence_id for item in (*self.mapped, *self.ambiguous)]
-        identifiers.extend(self.unmatched_evidence_ids)
-        if len(identifiers) != len(set(identifiers)):
+        proposals = [
+            item.evidence_id for item in (*self.mapped, *self.ambiguous, *self.rejected)
+        ]
+        if len(proposals) != len(set(proposals)):
             raise ValueError("an evidence record must have exactly one mapping outcome")
+        unmatched = set(self.unmatched_evidence_ids)
+        if len(unmatched) != len(self.unmatched_evidence_ids):
+            raise ValueError("unmatched evidence IDs must be unique")
+        accepted = {item.evidence_id for item in (*self.mapped, *self.ambiguous)}
+        if accepted & unmatched:
+            raise ValueError("accepted or proposed evidence cannot also be unmatched")
         return self
 
 
