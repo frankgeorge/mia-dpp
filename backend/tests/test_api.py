@@ -151,7 +151,6 @@ def test_client_cannot_forge_official_semantic_metadata() -> None:
     )
     first = payload["mappings"][0]
     forged = "https://attacker.example/not-idta"
-    first["semanticId"] = forged
     first["target"]["semanticId"]["keys"][0]["value"] = forged
 
     response = request("POST", "/api/dpp", payload)

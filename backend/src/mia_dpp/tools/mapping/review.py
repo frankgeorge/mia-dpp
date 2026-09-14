@@ -146,8 +146,6 @@ class MappingReviewService:
                 evidence_id=record.id,
                 source_field=record.source_label or record.predicate,
                 source_value=self._display_value(record.value, record.unit),
-                target_element=target.id_short,
-                semantic_id=target.semantic_id.primary_value,
                 target=target,
                 assessment=assessment,
                 reasoning=(
@@ -224,8 +222,6 @@ class MappingReviewService:
             requirement_id=requirement_id,
             mapping=mapping.model_copy(
                 update={
-                    "target_element": target.id_short,
-                    "semantic_id": target.semantic_id.primary_value,
                     "target": target,
                     "status": MappingStatus.APPROVED,
                     "mapping_origin": (
@@ -289,8 +285,6 @@ class MappingReviewService:
             evidence_id=evidence.id,
             source_field=requirement.id_short or target.id_short,
             source_value=cleaned,
-            target_element=target.id_short,
-            semantic_id=target.semantic_id.primary_value,
             target=target,
             assessment=assessment,
             reasoning="Human supplied this value for the identified official requirement.",

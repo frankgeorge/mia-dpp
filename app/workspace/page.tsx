@@ -409,8 +409,6 @@ export default function Workspace() {
     if (!mapping) return;
     const corrected: FieldMapping = {
       ...mapping,
-      targetElement: selected.name,
-      semanticId: selected.semanticId,
       target: selected.target,
       sourceValue: correctedValue?.trim() || mapping.sourceValue,
       status: "approved",

@@ -36,7 +36,7 @@ def accepted_mappings(text: str = PRODUCT) -> tuple[str, list[FieldMapping]]:
 def test_text_mapping_uses_official_and_wildcard_template_paths() -> None:
     proposal = propose_text_mappings(PRODUCT, OfficialTemplateRepository())
 
-    targets = {item.target_element: item.target for item in proposal.mappings}
+    targets = {item.target.id_short: item.target for item in proposal.mappings}
     assert proposal.product_name == "RF100-16"
     assert targets["ManufacturerName"].template_release == "3.0.1"
     assert targets["ManufacturerName"].semantic_id.primary_value == ("0112/2///61987#ABA565#009")
@@ -110,13 +110,10 @@ def test_client_cannot_replace_an_official_fixed_semantic_id() -> None:
     target_data = original.target.model_dump(by_alias=False)
     target_data["semantic_id"] = forged_reference
     forged_target = MappingTarget(**target_data)
-    mapping_data = original.model_dump(
-        exclude={"target", "semantic_id"},
-    )
+    mapping_data = original.model_dump(exclude={"target"})
     forged = FieldMapping(
         **mapping_data,
         target=forged_target,
-        semantic_id=forged_reference.primary_value,
     )
 
     with pytest.raises(MappingError, match="semantic ID differs"):

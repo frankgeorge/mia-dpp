@@ -72,8 +72,6 @@ class DeterministicWebsiteMapper:
                         evidence_id=record.id,
                         source_field=label,
                         source_value=str(record.value),
-                        target_element=target.id_short,
-                        semantic_id=target.semantic_id.primary_value,
                         target=target,
                         assessment=assessment,
                         reasoning=(

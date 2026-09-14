@@ -41,7 +41,7 @@ export function MappingRow({
           <p className="truncate font-mono text-[13px]">
             <span className="text-muted">{m.sourceField}</span>
             <span className="text-hairline"> &rarr; </span>
-            <span className="text-signal">{m.targetElement}</span>
+            <span className="text-signal">{m.target.idShort}</span>
           </p>
           <p className="mt-1 truncate text-[14px]">{m.sourceValue}</p>
         </div>

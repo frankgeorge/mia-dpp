@@ -99,9 +99,6 @@ export interface FieldMapping {
   /** Field name as it appears in the manufacturer's own system. */
   sourceField: string;
   sourceValue: string;
-  /** Compatibility label; target contains the authoritative template metadata. */
-  targetElement: string;
-  semanticId: string;
   target: MappingTarget;
   assessment: MappingAssessment;
   reasoning: string;

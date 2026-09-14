@@ -139,7 +139,7 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
     designation = next(
         item
         for item in resolved_mappings(response)
-        if item.target_element == "ManufacturerProductDesignation"
+        if item.target.id_short == "ManufacturerProductDesignation"
     )
     assert designation.source_value == "PG-16"
     assert (
@@ -150,7 +150,7 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
         ).extraction_method
         == "json_ld"
     )
-    targets = {item.target_element for item in resolved_mappings(response)}
+    targets = {item.target.id_short for item in resolved_mappings(response)}
     assert {
         "ManufacturerName",
         "ManufacturerProductDesignation",
@@ -339,7 +339,9 @@ def test_website_does_not_treat_footer_year_as_construction_year() -> None:
 
     response = asyncio.run(ingest(loader=FooterLoader()))
 
-    assert "YearOfConstruction" not in {item.target_element for item in resolved_mappings(response)}
+    assert "YearOfConstruction" not in {
+        item.target.id_short for item in resolved_mappings(response)
+    }
 
 
 def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
@@ -361,7 +363,7 @@ def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
 
     response = asyncio.run(ingest(loader=FactorySettingLoader()))
 
-    assert "ManufacturingSite" not in {item.target_element for item in resolved_mappings(response)}
+    assert "ManufacturingSite" not in {item.target.id_short for item in resolved_mappings(response)}
 
 
 def test_website_evidence_survives_review_and_aas_compilation() -> None:
@@ -373,7 +375,7 @@ def test_website_evidence_survives_review_and_aas_compilation() -> None:
             status=MappingStatus.APPROVED,
         )
         for index, mapping in enumerate(resolved_mappings(response))
-        if mapping.target_element != "MarkingName"
+        if mapping.target.id_short != "MarkingName"
     ]
 
     package = build_dpp(

@@ -508,7 +508,7 @@ class Store:
                 example_values=values[-5:],
                 target_template=mapping.target.template_key,
                 target_path=mapping.target.template_path,
-                semantic_id=mapping.semantic_id,
+                semantic_id=mapping.target.semantic_id.primary_value,
                 manufacturer=manufacturer,
                 domain=domain,
                 product_family=product_family,

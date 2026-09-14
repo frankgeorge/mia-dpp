@@ -188,8 +188,6 @@ class MappingDraft(WireModel):
     evidence_id: str = Field(min_length=1)
     source_field: str
     source_value: str
-    target_element: str
-    semantic_id: str
     target: MappingTarget
     assessment: MappingAssessment
     reasoning: str
@@ -197,14 +195,6 @@ class MappingDraft(WireModel):
     human_reviewed: bool = False
     llm_review: LlmReview | None = None
     human_comment: str | None = Field(default=None, max_length=1000)
-
-    @model_validator(mode="after")
-    def legacy_fields_match_typed_target(self) -> MappingDraft:
-        if self.target_element != self.target.id_short:
-            raise ValueError("targetElement must match target.idShort")
-        if self.semantic_id != self.target.semantic_id.primary_value:
-            raise ValueError("semanticId must match the authoritative target")
-        return self
 
 
 class FieldMapping(MappingDraft):

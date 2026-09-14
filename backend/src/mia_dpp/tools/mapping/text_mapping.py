@@ -197,8 +197,6 @@ def _draft(
         evidence_id=evidence.id,
         source_field=source_field,
         source_value=str(evidence.value),
-        target_element=target.id_short,
-        semantic_id=target.semantic_id.primary_value,
         target=target,
         assessment=assessment,
         reasoning=reasoning,
@@ -340,7 +338,7 @@ def propose_text_mappings(
         (
             item.source_value
             for item in mappings
-            if item.target_element == "ManufacturerProductDesignation"
+            if item.target.id_short == "ManufacturerProductDesignation"
         ),
         None,
     )
