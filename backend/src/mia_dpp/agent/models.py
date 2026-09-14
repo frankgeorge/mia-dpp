@@ -235,7 +235,7 @@ class AgentReviewRequest(WireModel):
 
 
 class AgentValueRequest(WireModel):
-    """Trusted human value submitted while LangGraph is paused for a requirement."""
+    """Trusted human value submitted for a deferred requirement request."""
 
     thread_id: str = Field(min_length=8, max_length=128)
     product_id: str

@@ -79,6 +79,13 @@ class PendingCall:
     request: HumanRequest
 
 
+@dataclass(frozen=True)
+class ResolvedCall(PendingCall):
+    """A trusted result persisted before the model continuation starts."""
+
+    result: dict[str, Any]
+
+
 class Store:
     """Persist sessions and enforce one-time consumption of deferred calls.
 
@@ -111,29 +118,28 @@ class Store:
             trace_offset=int(row[4]),
         )
 
-    def save(self, snapshot: SessionSnapshot) -> None:
+    def save(
+        self,
+        snapshot: SessionSnapshot,
+        *,
+        deferred_calls: list[tuple[str, HumanRequest]] | None = None,
+        completed_call_ids: tuple[str, ...] = (),
+    ) -> None:
+        """Atomically save a turn and its deferred-call state transitions."""
+
         session_id = snapshot.state.thread_id
         self._validate_id(session_id, "session")
-        history = ModelMessagesTypeAdapter.dump_json(snapshot.history).decode()
         with self._connect() as connection:
-            connection.execute(
-                "INSERT INTO sessions"
-                "(id, state_json, history_json, reply, decision_summary, trace_offset, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET "
-                "state_json=excluded.state_json, history_json=excluded.history_json, "
-                "reply=excluded.reply, decision_summary=excluded.decision_summary, "
-                "trace_offset=excluded.trace_offset, updated_at=excluded.updated_at",
-                (
-                    session_id,
-                    snapshot.state.model_dump_json(exclude_computed_fields=True),
-                    history,
-                    snapshot.reply,
-                    snapshot.decision_summary,
-                    snapshot.trace_offset,
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
+            self._save_session(connection, snapshot)
+            self._insert_deferred(connection, session_id, deferred_calls or [])
+            for call_id in completed_call_ids:
+                changed = connection.execute(
+                    "UPDATE deferred_calls SET status='completed' "
+                    "WHERE call_id=? AND session_id=? AND status='resolved'",
+                    (call_id, session_id),
+                ).rowcount
+                if changed != 1:
+                    raise ValueError("resolved deferred call could not be completed")
 
     def remember_deferred(
         self,
@@ -142,20 +148,7 @@ class Store:
     ) -> None:
         self._validate_id(session_id, "session")
         with self._connect() as connection:
-            for call_id, request in calls:
-                self._validate_call_id(call_id)
-                connection.execute(
-                    "INSERT INTO deferred_calls"
-                    "(call_id, session_id, kind, request_json, status, created_at) "
-                    "VALUES (?, ?, ?, ?, 'pending', ?)",
-                    (
-                        call_id,
-                        session_id,
-                        request.kind.value,
-                        request.model_dump_json(),
-                        datetime.now(UTC).isoformat(),
-                    ),
-                )
+            self._insert_deferred(connection, session_id, calls)
 
     def pending(self, session_id: str) -> tuple[PendingCall, ...]:
         self._validate_id(session_id, "session")
@@ -174,16 +167,17 @@ class Store:
             for row in rows
         )
 
-    def consume(
+    def resolve(
         self,
-        session_id: str,
+        snapshot: SessionSnapshot,
         call_id: str,
         *,
         expected_kind: HumanRequestKind,
         result: dict[str, Any],
-    ) -> PendingCall:
-        """Atomically consume one expected call, rejecting wrong IDs and replays."""
+    ) -> ResolvedCall:
+        """Persist a trusted result and updated state before model continuation."""
 
+        session_id = snapshot.state.thread_id
         self._validate_id(session_id, "session")
         self._validate_call_id(call_id)
         with self._connect() as connection:
@@ -202,18 +196,46 @@ class Store:
                 raise ValueError("deferred call does not accept this human action")
             payload = json.dumps(result, sort_keys=True, separators=(",", ":"))
             changed = connection.execute(
-                "UPDATE deferred_calls SET status='consumed', resolved_at=?, result_sha256=? "
+                "UPDATE deferred_calls SET status='resolved', resolved_at=?, result_sha256=?, "
+                "result_json=? "
                 "WHERE call_id=? AND session_id=? AND status='pending'",
                 (
                     datetime.now(UTC).isoformat(),
                     hashlib.sha256(payload.encode()).hexdigest(),
+                    payload,
                     call_id,
                     session_id,
                 ),
             ).rowcount
             if changed != 1:
                 raise ValueError("deferred call was consumed concurrently")
-        return PendingCall(call_id=call_id, session_id=session_id, request=request)
+            self._save_session(connection, snapshot)
+        return ResolvedCall(
+            call_id=call_id,
+            session_id=session_id,
+            request=request,
+            result=result,
+        )
+
+    def resolved(self, session_id: str) -> tuple[ResolvedCall, ...]:
+        """Return trusted results whose model continuation has not completed."""
+
+        self._validate_id(session_id, "session")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT call_id, request_json, result_json FROM deferred_calls "
+                "WHERE session_id=? AND status='resolved' ORDER BY resolved_at, call_id",
+                (session_id,),
+            ).fetchall()
+        return tuple(
+            ResolvedCall(
+                call_id=row[0],
+                session_id=session_id,
+                request=HumanRequest.model_validate_json(row[1]),
+                result=json.loads(row[2]),
+            )
+            for row in rows
+        )
 
     def write_json(
         self,
@@ -482,9 +504,14 @@ class Store:
                     "CREATE TABLE IF NOT EXISTS deferred_calls ("
                     "call_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, kind TEXT NOT NULL, "
                     "request_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, "
-                    "resolved_at TEXT, result_sha256 TEXT, "
+                    "resolved_at TEXT, result_sha256 TEXT, result_json TEXT, "
                     "FOREIGN KEY(session_id) REFERENCES sessions(id))"
                 )
+                columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(deferred_calls)")
+                }
+                if "result_json" not in columns:
+                    connection.execute("ALTER TABLE deferred_calls ADD COLUMN result_json TEXT")
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS deferred_calls_session_status "
                     "ON deferred_calls(session_id, status)"
@@ -501,6 +528,50 @@ class Store:
                     "id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
                 )
             self._ready = True
+
+    @staticmethod
+    def _save_session(connection: sqlite3.Connection, snapshot: SessionSnapshot) -> None:
+        history = ModelMessagesTypeAdapter.dump_json(snapshot.history).decode()
+        connection.execute(
+            "INSERT INTO sessions"
+            "(id, state_json, history_json, reply, decision_summary, trace_offset, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "state_json=excluded.state_json, history_json=excluded.history_json, "
+            "reply=excluded.reply, decision_summary=excluded.decision_summary, "
+            "trace_offset=excluded.trace_offset, updated_at=excluded.updated_at",
+            (
+                snapshot.state.thread_id,
+                snapshot.state.model_dump_json(exclude_computed_fields=True),
+                history,
+                snapshot.reply,
+                snapshot.decision_summary,
+                snapshot.trace_offset,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+
+    @classmethod
+    def _insert_deferred(
+        cls,
+        connection: sqlite3.Connection,
+        session_id: str,
+        calls: list[tuple[str, HumanRequest]],
+    ) -> None:
+        for call_id, request in calls:
+            cls._validate_call_id(call_id)
+            connection.execute(
+                "INSERT INTO deferred_calls"
+                "(call_id, session_id, kind, request_json, status, created_at) "
+                "VALUES (?, ?, ?, ?, 'pending', ?)",
+                (
+                    call_id,
+                    session_id,
+                    request.kind.value,
+                    request.model_dump_json(),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
 
     @staticmethod
     def _validate_id(value: str, label: str) -> None:

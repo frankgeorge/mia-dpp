@@ -27,17 +27,25 @@ def test_store_survives_restart_and_consumes_a_call_once(tmp_path: Path) -> None
     assert snapshot is not None
     assert snapshot.state.thread_id == session_id
     assert restarted.pending(session_id)[0].call_id == "call-one"
+    snapshot.state.user_goal = "Human input already applied"
 
-    restarted.consume(
-        session_id,
+    resolved = restarted.resolve(
+        snapshot,
         "call-one",
         expected_kind=HumanRequestKind.MAPPING_REVIEW,
         result={"decision": "reject"},
     )
     assert restarted.pending(session_id) == ()
+    assert restarted.resolved(session_id) == (resolved,)
+    recovered = Store(path).load(session_id)
+    assert recovered is not None
+    assert recovered.state.user_goal == "Human input already applied"
+    assert Store(path).resolved(session_id)[0].result == {"decision": "reject"}
+    restarted.save(snapshot, completed_call_ids=("call-one",))
+    assert restarted.resolved(session_id) == ()
     with pytest.raises(ValueError, match="already been consumed"):
-        restarted.consume(
-            session_id,
+        restarted.resolve(
+            snapshot,
             "call-one",
             expected_kind=HumanRequestKind.MAPPING_REVIEW,
             result={"decision": "approve"},
@@ -46,19 +54,20 @@ def test_store_survives_restart_and_consumes_a_call_once(tmp_path: Path) -> None
 
 def test_store_rejects_wrong_session_call_and_action_type(tmp_path: Path) -> None:
     store = Store(tmp_path / "mia.sqlite3")
-    store.save(SessionSnapshot(state=MiaState(thread_id="thread-store-two"), history=[]))
+    snapshot = SessionSnapshot(state=MiaState(thread_id="thread-store-two"), history=[])
+    store.save(snapshot)
     store.remember_deferred("thread-store-two", [("call-two", _request())])
 
     with pytest.raises(ValueError, match="unknown deferred call"):
-        store.consume(
-            "thread-other",
+        store.resolve(
+            SessionSnapshot(state=MiaState(thread_id="thread-other"), history=[]),
             "call-two",
             expected_kind=HumanRequestKind.MAPPING_REVIEW,
             result={},
         )
     with pytest.raises(ValueError, match="does not accept"):
-        store.consume(
-            "thread-store-two",
+        store.resolve(
+            snapshot,
             "call-two",
             expected_kind=HumanRequestKind.REQUIREMENT_VALUE,
             result={},

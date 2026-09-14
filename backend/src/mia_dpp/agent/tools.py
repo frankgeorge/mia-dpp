@@ -649,7 +649,7 @@ async def propose_semantic_mapping(
 ) -> ToolObservation:
     """Propose one semantic match between allowed evidence and target IDs.
 
-    Python validates both IDs, calculates confidence, and stores the proposal as
+    Python validates both IDs, applies review policy, and stores the proposal as
     a pending review. The proposal cannot become authoritative by model choice.
     """
 

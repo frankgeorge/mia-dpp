@@ -117,6 +117,18 @@ class Mia:
 
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
         snapshot = self.store.load(thread_id)
+        resolved = self.store.resolved(thread_id)
+        if snapshot is not None and resolved:
+            return await self._execute(
+                "Continue after the trusted human action.",
+                snapshot.state,
+                snapshot.history,
+                trace_offset=len(snapshot.state.trace),
+                deferred_results=DeferredToolResults(
+                    calls={call.call_id: call.result for call in resolved}
+                ),
+                completed_call_ids=tuple(call.call_id for call in resolved),
+            )
         if snapshot is not None and self.store.pending(thread_id):
             return self._response(
                 snapshot.state,
@@ -170,12 +182,6 @@ class Mia:
             self._apply_reviews(state, payload)
         else:
             self._apply_human_value(state, payload)
-        self.store.consume(
-            thread_id,
-            call.call_id,
-            expected_kind=expected_kind,
-            result=payload,
-        )
         state.pending_human_request = None
         state.add_event(
             "human.input_received",
@@ -190,12 +196,25 @@ class Mia:
                 }
             }
         )
+        self.store.resolve(
+            SessionSnapshot(
+                state=state,
+                history=snapshot.history,
+                reply="Trusted human input was accepted; MIA can continue.",
+                decision_summary="Resume the deferred agent action.",
+                trace_offset=trace_offset,
+            ),
+            call.call_id,
+            expected_kind=expected_kind,
+            result=payload,
+        )
         return await self._execute(
             "Continue after the trusted human action.",
             state,
             snapshot.history,
             trace_offset=trace_offset,
             deferred_results=deferred_results,
+            completed_call_ids=(call.call_id,),
         )
 
     async def _execute(
@@ -206,6 +225,7 @@ class Mia:
         *,
         trace_offset: int,
         deferred_results: DeferredToolResults | None = None,
+        completed_call_ids: tuple[str, ...] = (),
     ) -> AgentResponse:
         output, messages = await self._run_agent(
             message,
@@ -229,15 +249,21 @@ class Mia:
             decision_summary=decision,
             trace_offset=trace_offset,
         )
-        self.store.save(snapshot)
+        request = state.pending_human_request if isinstance(output, DeferredToolRequests) else None
+        deferred_calls = (
+            [(call.tool_call_id, request) for call in output.calls]
+            if request is not None and isinstance(output, DeferredToolRequests)
+            else []
+        )
+        self.store.save(
+            snapshot,
+            deferred_calls=deferred_calls,
+            completed_call_ids=completed_call_ids,
+        )
         if isinstance(output, DeferredToolRequests):
             request = state.pending_human_request
             if request is None:
                 raise ValueError("deferred human request disappeared before persistence")
-            self.store.remember_deferred(
-                state.thread_id,
-                [(call.tool_call_id, request) for call in output.calls],
-            )
         self._persist_snapshot(state, decision)
         return self._response(
             state,

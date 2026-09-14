@@ -1,4 +1,4 @@
-"""Mapping, confidence, coverage, and semantic-review concepts."""
+"""Mapping, assessment, coverage, and semantic-review concepts."""
 
 from __future__ import annotations
 
