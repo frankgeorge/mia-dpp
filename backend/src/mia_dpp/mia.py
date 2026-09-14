@@ -468,7 +468,7 @@ class Mia:
         unmatched_count = len(resolution.mapping_result.unmatched_evidence_ids)
         return (
             "I finished processing the currently available source evidence.\n\n"
-            f"- {len(resolution.evidence)} source facts retained\n"
+            f"- {len(resolution.knowledge_package.evidence)} source facts retained\n"
             f"- {mapping_count} mapping{'s' if mapping_count != 1 else ''} accepted "
             "deterministically\n"
             f"- {review_count} mapping proposal{'s' if review_count != 1 else ''} "
@@ -492,7 +492,7 @@ class Mia:
                 "currentProductId": state.current_product_id,
                 "queuedProducts": list(state.product_queue),
                 "sourceCount": len(current.extractions) if current else 0,
-                "evidenceCount": len(resolution.evidence) if resolution else 0,
+                "evidenceCount": len(resolution.knowledge_package.evidence) if resolution else 0,
                 "mappedCount": len(resolution.mapping_result.mapped) if resolution else 0,
                 "unmatchedCount": (
                     len(resolution.mapping_result.unmatched_evidence_ids) if resolution else 0

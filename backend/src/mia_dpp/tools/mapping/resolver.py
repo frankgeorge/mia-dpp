@@ -8,7 +8,7 @@ from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.tools.mapping.catalog import nameplate_catalog
 from mia_dpp.tools.mapping.coverage import coverage
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
-from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import ProductResolution
 
 
 async def resolve_product(
@@ -16,8 +16,7 @@ async def resolve_product(
     repository: OfficialTemplateRepository,
     *,
     template_keys: tuple[str, ...],
-    source_url: str = "",
-) -> WebsiteIngestResponse:
+) -> ProductResolution:
     """Map one source-neutral knowledge package and expose derived coverage."""
 
     templates = tuple(repository.load(key) for key in template_keys)
@@ -25,15 +24,7 @@ async def resolve_product(
     mapping = await DeterministicWebsiteMapper(repository).propose(package.evidence)
     # Evaluate once here so invalid accounting fails before the result is returned.
     coverage(package, index, mapping_result=mapping)
-    return WebsiteIngestResponse(
-        reply=(
-            f"MIA retained {len(package.evidence)} facts from "
-            f"{source_url or 'the product sources'}: "
-            f"{len(mapping.mapped)} deterministically mapped, "
-            f"{len(mapping.ambiguous)} ambiguous, and "
-            f"{len(mapping.unmatched_evidence_ids)} currently unmatched."
-        ),
-        source_url=source_url,
+    return ProductResolution(
         knowledge_package=package,
         mapping_result=mapping,
         template_index=index,

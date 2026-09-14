@@ -380,7 +380,7 @@ export interface AgentProductWork {
   candidate: ProductCandidate | null;
   sourceCandidates: ProductSourceCandidate[];
   extractions: unknown[];
-  resolution: WebsiteIngestResponse | null;
+  resolution: ProductResolution | null;
   pendingReviews: SemanticReviewItem[];
   reviewComplete: boolean;
   aasArtifactSha256: string | null;
@@ -426,18 +426,10 @@ export interface AgentResponse {
   mode: "agent";
 }
 
-export interface WebsiteIngestResponse {
-  reply: string;
-  sourceUrl: string;
-  proposal: {
-    productName: string;
-    mappings: ProposedFieldMapping[];
-  };
-  evidence: EvidenceRecord[];
+export interface ProductResolution {
   knowledgePackage: ProductKnowledgePackage;
   mappingResult: MappingResult;
   coverageReport: CoverageReport;
   completionSummary: CompletionSummary;
-  mode: "website";
   nameplateElements: NameplateElement[];
 }

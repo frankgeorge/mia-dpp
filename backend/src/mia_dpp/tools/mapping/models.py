@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import computed_field
 
@@ -13,7 +12,6 @@ from mia_dpp.domain.completion import CompletionSummary, build_completion_summar
 from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
 from mia_dpp.domain.mappings import (
     CoverageReport,
-    MappingProposal,
     MappingResult,
     NameplateElement,
 )
@@ -21,35 +19,11 @@ from mia_dpp.domain.targets import Requirement, TemplateIndex
 from mia_dpp.tools.mapping.coverage import coverage
 
 
-class WebsiteIngestResponse(WireModel):
-    reply: str
-    source_url: str
+class ProductResolution(WireModel):
     knowledge_package: ProductKnowledgePackage
     mapping_result: MappingResult
     template_index: TemplateIndex
-    mode: Literal["website"] = "website"
     nameplate_elements: tuple[NameplateElement, ...]
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def evidence(self) -> tuple[EvidenceRecord, ...]:
-        """Compatibility view derived from the authoritative knowledge package."""
-
-        return self.knowledge_package.evidence
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def proposal(self) -> MappingProposal:
-        """Compatibility view derived from the authoritative mapping result."""
-
-        return MappingProposal(
-            product_name=self.knowledge_package.product_name,
-            mappings=(
-                *self.mapping_result.mapped,
-                *self.mapping_result.ambiguous,
-                *self.mapping_result.rejected,
-            ),
-        )
 
     @computed_field  # type: ignore[prop-decorator]
     @property

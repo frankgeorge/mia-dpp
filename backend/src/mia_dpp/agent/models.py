@@ -13,7 +13,7 @@ from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate, ProductSourceCandidate
 from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.domain.mappings import SemanticReviewItem
-from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import ProductResolution
 from mia_dpp.tools.web.models import WebExtractionResult
 
 
@@ -94,7 +94,7 @@ class ProductWork(WireModel):
     candidate: ProductCandidate | None = None
     source_candidates: tuple[ProductSourceCandidate, ...] = ()
     extractions: tuple[WebExtractionResult, ...] = ()
-    resolution: WebsiteIngestResponse | None = None
+    resolution: ProductResolution | None = None
     pending_reviews: tuple[SemanticReviewItem, ...] = ()
     review_complete: bool = False
     aas_artifact_sha256: str | None = None

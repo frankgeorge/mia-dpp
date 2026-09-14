@@ -388,7 +388,7 @@ async def map_product_evidence(
         )
     if work.resolution is not None:
         current_evidence_ids = {item.id for item in extraction.knowledge_package.evidence}
-        mapped_evidence_ids = {item.id for item in work.resolution.evidence}
+        mapped_evidence_ids = {item.id for item in work.resolution.knowledge_package.evidence}
         if current_evidence_ids == mapped_evidence_ids:
             resolution = work.resolution
             ctx.deps.add_event(
@@ -412,7 +412,6 @@ async def map_product_evidence(
         extraction.knowledge_package,
         ctx.deps.templates,
         template_keys=ctx.deps.state.target_submodels,
-        source_url=extraction.source_url,
     )
     work.resolution = resolution
     work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(resolution)
@@ -453,7 +452,7 @@ async def map_product_evidence(
         ),
         tool_name="map_product_evidence",
         product_id=product_id,
-        input_summary=f"{len(resolution.evidence)} evidence records",
+        input_summary=f"{len(resolution.knowledge_package.evidence)} evidence records",
         output_summary=f"{stats.required_satisfied} required requirements satisfied",
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={
@@ -855,7 +854,7 @@ async def build_product_aas(
     package = ctx.deps.dpp_pipeline.build(
         work.resolution.knowledge_package.product_name,
         accepted,
-        evidence=work.resolution.evidence,
+        evidence=work.resolution.knowledge_package.evidence,
     )
     work.aas_artifact_sha256 = package.artifact_sha256
     aas_artifact = ctx.deps.store.write_json(

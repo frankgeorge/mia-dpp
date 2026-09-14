@@ -11,9 +11,9 @@ import pytest
 
 from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.domain.mappings import FieldMapping, MappingStatus
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus, ProposedFieldMapping
 from mia_dpp.errors import MappingError
-from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import ProductResolution
 from mia_dpp.tools.mapping.resolver import resolve_product
 from mia_dpp.tools.web.artifacts import raw_website_artifact
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
@@ -56,7 +56,7 @@ async def ingest(
     loader: FixtureLoader | None = None,
     *,
     template_keys: tuple[str, ...] = ("digital_nameplate", "technical_data"),
-) -> WebsiteIngestResponse:
+) -> ProductResolution:
     repository = OfficialTemplateRepository()
     web_tool = WebExtractionTool(
         loader=loader or FixtureLoader(),
@@ -67,8 +67,12 @@ async def ingest(
         extraction.knowledge_package,
         repository,
         template_keys=template_keys,
-        source_url=extraction.source_url,
     )
+
+
+def resolved_mappings(response: ProductResolution) -> tuple[ProposedFieldMapping, ...]:
+    result = response.mapping_result
+    return (*result.mapped, *result.ambiguous, *result.rejected)
 
 
 def test_generic_fact_extraction_retains_heterogeneous_source_facts() -> None:
@@ -117,23 +121,23 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
     response = asyncio.run(ingest(loader=loader))
 
     assert loader.calls == [PRODUCT_URL]
-    assert response.mode == "website"
-    assert response.proposal.product_name == "Pressure Gauge PG-16"
-    assert response.knowledge_package.evidence == response.evidence
-    assert len(response.evidence) >= 18
+    assert response.knowledge_package.product_name == "Pressure Gauge PG-16"
+    assert len(response.knowledge_package.evidence) >= 18
     designation = next(
         item
-        for item in response.proposal.mappings
+        for item in resolved_mappings(response)
         if item.target_element == "ManufacturerProductDesignation"
     )
     assert designation.source_value == "PG-16"
     assert (
         next(
-            item for item in response.evidence if item.id == designation.evidence_id
+            item
+            for item in response.knowledge_package.evidence
+            if item.id == designation.evidence_id
         ).extraction_method
         == "json_ld"
     )
-    targets = {item.target_element for item in response.proposal.mappings}
+    targets = {item.target_element for item in resolved_mappings(response)}
     assert {
         "ManufacturerName",
         "ManufacturerProductDesignation",
@@ -145,11 +149,15 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
         "MeasuringRange",
     } <= targets
     expected_hash = hashlib.sha256(product_page().html.encode()).hexdigest()
-    assert {item.source_uri for item in response.evidence} == {PRODUCT_URL}
-    assert {item.source_content_sha256 for item in response.evidence} == {expected_hash}
-    assert {item.acquired_at for item in response.evidence} == {ACQUIRED_AT}
-    assert all(item.id.startswith("ev-web-") for item in response.evidence)
-    order_code = next(item for item in response.evidence if item.source_label == "SKU")
+    assert {item.source_uri for item in response.knowledge_package.evidence} == {PRODUCT_URL}
+    assert {item.source_content_sha256 for item in response.knowledge_package.evidence} == {
+        expected_hash
+    }
+    assert {item.acquired_at for item in response.knowledge_package.evidence} == {ACQUIRED_AT}
+    assert all(item.id.startswith("ev-web-") for item in response.knowledge_package.evidence)
+    order_code = next(
+        item for item in response.knowledge_package.evidence if item.source_label == "SKU"
+    )
     assert order_code.source_location.json_pointer == "/sku"
 
     mapped_ids = {
@@ -158,7 +166,7 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
     }
     unknown = {
         item.source_label: item.id
-        for item in response.evidence
+        for item in response.knowledge_package.evidence
         if item.source_label in {"Processor", "Protocol", "Material"}
     }
     assert set(unknown) == {"Processor", "Protocol", "Material"}
@@ -171,14 +179,16 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
         "digital_nameplate",
         "technical_data",
     ]
-    assert coverage.analyzed_evidence_ids == tuple(item.id for item in response.evidence)
+    assert coverage.analyzed_evidence_ids == tuple(
+        item.id for item in response.knowledge_package.evidence
+    )
     assert coverage.statistics.selected_templates == 2
     assert coverage.statistics.requirements == len(coverage.coverage) == 79
     assert coverage.statistics.required_requirements == 9
     completion = response.completion_summary
-    assert completion.source.total_discovered == len(response.evidence)
+    assert completion.source.total_discovered == len(response.knowledge_package.evidence)
     assert completion.source.automatically_resolved == len(
-        [item for item in response.proposal.mappings if item.status is MappingStatus.AUTO]
+        [item for item in resolved_mappings(response) if item.status is MappingStatus.AUTO]
     )
     by_template = {item.template_key: item for item in completion.fixed_templates}
     assert by_template["digital_nameplate"].mandatory_total == 4
@@ -234,7 +244,11 @@ def test_same_value_is_not_attached_to_the_wrong_json_ld_field() -> None:
 
     response = asyncio.run(ingest(loader=RepeatedValueLoader()))
 
-    order_code = next(item for item in response.evidence if item.source_label == "Article number")
+    order_code = next(
+        item
+        for item in response.knowledge_package.evidence
+        if item.source_label == "Article number"
+    )
     assert order_code.source_location.selector == "dt:nth-of-type(1)"
     assert order_code.source_location.json_pointer is None
 
@@ -266,14 +280,13 @@ def test_mapping_failure_never_deletes_or_collapses_evidence() -> None:
 
     technical = [
         item
-        for item in response.evidence
+        for item in response.knowledge_package.evidence
         if item.source_label
         in {"Processor", "Protocol", "Material", "Supply voltage", "Rated current", "Weight"}
     ]
     assert len(technical) == 6
     assert len({item.id for item in technical}) == 6
     assert {item.id for item in technical} <= set(response.mapping_result.unmatched_evidence_ids)
-    assert response.knowledge_package.evidence == response.evidence
 
 
 def test_repeated_technical_concepts_keep_component_context() -> None:
@@ -320,7 +333,7 @@ def test_website_does_not_treat_footer_year_as_construction_year() -> None:
 
     response = asyncio.run(ingest(loader=FooterLoader()))
 
-    assert "YearOfConstruction" not in {item.target_element for item in response.proposal.mappings}
+    assert "YearOfConstruction" not in {item.target_element for item in resolved_mappings(response)}
 
 
 def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
@@ -342,7 +355,7 @@ def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
 
     response = asyncio.run(ingest(loader=FactorySettingLoader()))
 
-    assert "ManufacturingSite" not in {item.target_element for item in response.proposal.mappings}
+    assert "ManufacturingSite" not in {item.target_element for item in resolved_mappings(response)}
 
 
 def test_website_evidence_survives_review_and_aas_compilation() -> None:
@@ -353,14 +366,14 @@ def test_website_evidence_survives_review_and_aas_compilation() -> None:
             id=f"mapping-{index}",
             status=MappingStatus.APPROVED,
         )
-        for index, mapping in enumerate(response.proposal.mappings)
+        for index, mapping in enumerate(resolved_mappings(response))
         if mapping.target_element != "MarkingName"
     ]
 
     package = build_dpp(
-        response.proposal.product_name,
+        response.knowledge_package.product_name,
         accepted,
-        evidence=response.evidence,
+        evidence=response.knowledge_package.evidence,
         now=ACQUIRED_AT,
     )
 
@@ -372,7 +385,7 @@ def test_website_evidence_survives_review_and_aas_compilation() -> None:
 
 def test_compiler_rejects_a_website_mapping_without_its_evidence() -> None:
     response = asyncio.run(ingest())
-    mapping = response.proposal.mappings[0]
+    mapping = resolved_mappings(response)[0]
     accepted = FieldMapping(
         **mapping.model_dump(exclude={"status"}),
         id="mapping-with-missing-evidence",
@@ -381,9 +394,13 @@ def test_compiler_rejects_a_website_mapping_without_its_evidence() -> None:
 
     with pytest.raises(MappingError, match="missing supplied evidence"):
         build_dpp(
-            response.proposal.product_name,
+            response.knowledge_package.product_name,
             [accepted],
-            evidence=tuple(item for item in response.evidence if item.id != mapping.evidence_id),
+            evidence=tuple(
+                item
+                for item in response.knowledge_package.evidence
+                if item.id != mapping.evidence_id
+            ),
             now=ACQUIRED_AT,
         )
 

@@ -20,7 +20,7 @@ from mia_dpp.domain.mappings import (
     SemanticReviewItem,
 )
 from mia_dpp.domain.targets import RequirementKind
-from mia_dpp.tools.mapping.models import SemanticMappingContext, WebsiteIngestResponse
+from mia_dpp.tools.mapping.models import ProductResolution, SemanticMappingContext
 from mia_dpp.tools.mapping.targets import mapping_target
 
 
@@ -37,7 +37,7 @@ class MappingReviewService:
 
     @staticmethod
     def pending_deterministic_reviews(
-        result: WebsiteIngestResponse,
+        result: ProductResolution,
     ) -> tuple[SemanticReviewItem, ...]:
         """Convert deterministic review mappings into stable frontend review items."""
 
@@ -69,11 +69,13 @@ class MappingReviewService:
         return tuple(reviews)
 
     @staticmethod
-    def semantic_context(result: WebsiteIngestResponse) -> SemanticMappingContext:
+    def semantic_context(result: ProductResolution) -> SemanticMappingContext:
         """Return only unmatched evidence and unresolved official value requirements."""
 
         unresolved = set(result.mapping_result.unmatched_evidence_ids)
-        evidence = tuple(item for item in result.evidence if item.id in unresolved)
+        evidence = tuple(
+            item for item in result.knowledge_package.evidence if item.id in unresolved
+        )
         unresolved_requirements = {
             item.requirement_id
             for item in result.coverage_report.coverage
@@ -95,7 +97,7 @@ class MappingReviewService:
 
     def propose(
         self,
-        result: WebsiteIngestResponse,
+        result: ProductResolution,
         *,
         evidence_id: str,
         requirement_id: str,
@@ -155,7 +157,7 @@ class MappingReviewService:
 
     def decide(
         self,
-        result: WebsiteIngestResponse,
+        result: ProductResolution,
         item: SemanticReviewItem,
         *,
         decision: Literal["approve", "correct", "reject"],
@@ -163,7 +165,7 @@ class MappingReviewService:
         corrected_requirement_id: str | None = None,
         corrected_value: str | None = None,
         comment: str | None = None,
-    ) -> tuple[WebsiteIngestResponse, SemanticReviewItem]:
+    ) -> tuple[ProductResolution, SemanticReviewItem]:
         """Apply one human decision and return recalculated mapping/coverage state."""
 
         mapping = item.mapping
@@ -199,7 +201,7 @@ class MappingReviewService:
         if corrected_value is not None:
             record = self._human_evidence(mapping, corrected_value, thread_id)
             package = result.knowledge_package.model_copy(
-                update={"evidence": (*result.evidence, record)}
+                update={"evidence": (*result.knowledge_package.evidence, record)}
             )
             result = result.model_copy(update={"knowledge_package": package})
             mapping = mapping.model_copy(
@@ -227,12 +229,12 @@ class MappingReviewService:
 
     def record_human_value(
         self,
-        result: WebsiteIngestResponse,
+        result: ProductResolution,
         *,
         requirement_id: str,
         value: str,
         thread_id: str,
-    ) -> WebsiteIngestResponse:
+    ) -> ProductResolution:
         """Turn a missing-field answer into human evidence and recalculate coverage."""
 
         cleaned = value.strip()
@@ -290,7 +292,7 @@ class MappingReviewService:
             human_reviewed=True,
         )
         package = result.knowledge_package.model_copy(
-            update={"evidence": (*result.evidence, evidence)}
+            update={"evidence": (*result.knowledge_package.evidence, evidence)}
         )
         updated = result.model_copy(update={"knowledge_package": package})
         review_seed = f"{requirement_id}\0{evidence.id}"
@@ -303,9 +305,9 @@ class MappingReviewService:
 
     def _reconcile(
         self,
-        result: WebsiteIngestResponse,
+        result: ProductResolution,
         reviewed: SemanticReviewItem,
-    ) -> WebsiteIngestResponse:
+    ) -> ProductResolution:
         retained = [
             item
             for item in (
@@ -334,7 +336,7 @@ class MappingReviewService:
             mapped=tuple(retained),
             rejected=tuple(rejected),
             unmatched_evidence_ids=tuple(
-                item.id for item in result.evidence if item.id not in mapped_ids
+                item.id for item in result.knowledge_package.evidence if item.id not in mapped_ids
             ),
         )
         return result.model_copy(update={"mapping_result": mapping_result})

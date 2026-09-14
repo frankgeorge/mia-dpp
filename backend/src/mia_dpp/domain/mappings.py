@@ -266,11 +266,6 @@ class TextMappingProposal(WireModel):
     mappings: tuple[MappingDraft, ...]
 
 
-class MappingProposal(WireModel):
-    product_name: str
-    mappings: tuple[ProposedFieldMapping, ...]
-
-
 class NameplateElement(WireModel):
     name: str
     path: tuple[str, ...]

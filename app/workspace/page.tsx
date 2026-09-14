@@ -18,7 +18,7 @@ import type {
   NameplateElement,
   SemanticReviewItem,
   ProductCandidate,
-  WebsiteIngestResponse,
+  ProductResolution,
   WorkspaceArtifact,
   MappingKnowledgeEntry,
 } from "@/lib/types";
@@ -306,16 +306,21 @@ export default function Workspace() {
   }
 
   function applyWebsiteResult(
-    website: WebsiteIngestResponse,
+    website: ProductResolution,
     reviewItems: SemanticReviewItem[],
     awaitingReview: boolean
   ) {
     const mappingKey = (mapping: Omit<FieldMapping, "id">) =>
       `${mapping.evidenceId}|${mapping.target.templateKey}|${mapping.target.templatePath.join("/")}`;
+    const resolvedMappings = [
+      ...website.mappingResult.mapped,
+      ...website.mappingResult.ambiguous,
+      ...website.mappingResult.rejected,
+    ];
     const reviewByMapping = new Map(
       reviewItems.map((item) => [mappingKey(item.mapping), item])
     );
-    const deterministic: FieldMapping[] = website.proposal.mappings.map(
+    const deterministic: FieldMapping[] = resolvedMappings.map(
       (mapping, index) => ({
         ...(reviewByMapping.get(mappingKey(mapping))?.mapping ?? mapping),
         id:
@@ -323,18 +328,18 @@ export default function Workspace() {
           `${Date.now()}-website-${index}`,
       })
     );
-    const proposalKeys = new Set(website.proposal.mappings.map(mappingKey));
+    const proposalKeys = new Set(resolvedMappings.map(mappingKey));
     const semantic: FieldMapping[] = reviewItems
       .filter((item) => !proposalKeys.has(mappingKey(item.mapping)))
       .map((item) => ({
         ...item.mapping,
         id: item.id,
       }));
-    setProductName(website.proposal.productName || "Website product");
+    setProductName(website.knowledgePackage.productName || "Website product");
     setMappings([...deterministic, ...semantic]);
     setSemanticReview(awaitingReview ? reviewItems : []);
     if (awaitingReview) setReviewDecisions({});
-    setEvidence(website.evidence);
+    setEvidence(website.knowledgePackage.evidence);
     setMappingResult(website.mappingResult);
     setCoverageReport(website.coverageReport);
     setCompletionSummary(website.completionSummary);
