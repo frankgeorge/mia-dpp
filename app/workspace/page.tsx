@@ -19,7 +19,6 @@ import type {
   SemanticReviewItem,
   ProductCandidate,
   WebsiteIngestResponse,
-  WorkflowEvent,
   WorkspaceArtifact,
   MappingKnowledgeEntry,
 } from "@/lib/types";
@@ -27,7 +26,6 @@ import { CoveragePanel } from "@/components/CoveragePanel";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
-import { WorkflowTrace } from "@/components/WorkflowTrace";
 import { AgentActivity } from "@/components/AgentActivity";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { LiveActivity } from "@/components/LiveActivity";
@@ -70,7 +68,6 @@ export default function Workspace() {
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
   const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
   const [completionSummary, setCompletionSummary] = useState<CompletionSummary | null>(null);
-  const [workflowEvents, setWorkflowEvents] = useState<WorkflowEvent[]>([]);
   const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
     NameplateElement[]
@@ -341,7 +338,6 @@ export default function Workspace() {
     setMappingResult(website.mappingResult);
     setCoverageReport(website.coverageReport);
     setCompletionSummary(website.completionSummary);
-    setWorkflowEvents(website.workflowEvents);
     setNameplateElements(website.nameplateElements);
     setDpp(null);
     setTab("mappings");
@@ -945,17 +941,7 @@ export default function Workspace() {
             ) : tab === "coverage" ? (
               <CoveragePanel report={coverageReport} evidence={evidence} completion={completionSummary} mappingResult={mappingResult} />
             ) : tab === "process" ? (
-              <div className="space-y-6">
-                <AgentActivity events={agentActivity} />
-                {workflowEvents.length > 0 && (
-                  <div>
-                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
-                      Deterministic pipeline
-                    </p>
-                    <WorkflowTrace events={workflowEvents} />
-                  </div>
-                )}
-              </div>
+              <AgentActivity events={agentActivity} />
             ) : tab === "data" ? (
               <WorkspaceExplorer apiUrl={API_URL} threadId={threadId} artifacts={artifacts} />
             ) : (

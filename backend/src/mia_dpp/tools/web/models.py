@@ -12,7 +12,6 @@ from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import ProductKnowledgePackage, SourceLocation, SourceType
-from mia_dpp.domain.workflow import WorkflowEvent
 from mia_dpp.errors import ExtractionError
 
 
@@ -125,4 +124,3 @@ class WebExtractionResult(WireModel):
     source_url: str
     product_name: str
     knowledge_package: ProductKnowledgePackage
-    workflow_events: tuple[WorkflowEvent, ...]

@@ -413,7 +413,6 @@ async def map_product_evidence(
         ctx.deps.templates,
         template_keys=ctx.deps.state.target_submodels,
         source_url=extraction.source_url,
-        workflow_events=extraction.workflow_events,
     )
     work.resolution = resolution
     work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(resolution)

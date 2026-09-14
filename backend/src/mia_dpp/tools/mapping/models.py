@@ -19,7 +19,6 @@ from mia_dpp.domain.mappings import (
     NameplateElement,
 )
 from mia_dpp.domain.targets import Requirement, TemplateIndex
-from mia_dpp.domain.workflow import WorkflowEvent
 from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
 
 
@@ -43,7 +42,6 @@ class WebsiteIngestResponse(WireModel):
     knowledge_package: ProductKnowledgePackage
     mapping_result: MappingResult
     template_index: TemplateIndex
-    workflow_events: tuple[WorkflowEvent, ...]
     mode: Literal["website"] = "website"
     nameplate_elements: tuple[NameplateElement, ...]
 

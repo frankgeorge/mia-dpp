@@ -218,19 +218,8 @@ export interface CompletionSummary {
 export interface MappingResult {
   mapped: ProposedFieldMapping[];
   ambiguous: ProposedFieldMapping[];
+  rejected: ProposedFieldMapping[];
   unmatchedEvidenceIds: string[];
-}
-
-export interface WorkflowEvent {
-  id: string;
-  stage: string;
-  status: "done" | "failed";
-  startedAt: string;
-  completedAt: string;
-  inputCount: number;
-  outputCount: number;
-  summary: string;
-  metadata: Record<string, unknown>;
 }
 
 export interface NameplateElement {
@@ -459,7 +448,6 @@ export interface WebsiteIngestResponse {
   mappingResult: MappingResult;
   coverageReport: CoverageReport;
   completionSummary: CompletionSummary;
-  workflowEvents: WorkflowEvent[];
   mode: "website";
   nameplateElements: NameplateElement[];
 }

@@ -158,25 +158,6 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
     assert mapped_ids.isdisjoint(response.mapping_result.unmatched_evidence_ids)
     assert len(response.mapping_result.unmatched_evidence_ids) > len(mapped_ids)
 
-    assert [event.stage for event in response.workflow_events] == [
-        "source.fetch",
-        "facts.extract",
-        "evidence.normalize",
-        "templates.load",
-        "requirements.build",
-        "mapping.deterministic",
-        "coverage.analyze",
-    ]
-    assert response.workflow_events[1].output_count == len(response.evidence)
-    assert response.workflow_events[3].output_count == 2
-    assert response.workflow_events[4].output_count == len(
-        response.coverage_report.inventory.requirements
-    )
-    mapping_event = response.workflow_events[5]
-    assert mapping_event.input_count == len(response.evidence)
-    assert mapping_event.metadata["unmatched"] == len(
-        response.mapping_result.unmatched_evidence_ids
-    )
     coverage = response.coverage_report
     assert [item.key for item in coverage.inventory.selected_templates] == [
         "digital_nameplate",
@@ -186,8 +167,6 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
     assert coverage.statistics.selected_templates == 2
     assert coverage.statistics.requirements == len(coverage.coverage) == 79
     assert coverage.statistics.required_requirements == 9
-    assert response.workflow_events[-1].output_count == 79
-
     completion = response.completion_summary
     assert completion.source.total_discovered == len(response.evidence)
     assert completion.source.automatically_resolved == len(

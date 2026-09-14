@@ -13,7 +13,6 @@ from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate, ProductSourceCandidate
 from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.domain.mappings import SemanticReviewItem
-from mia_dpp.domain.workflow import WorkflowEvent
 from mia_dpp.tools.mapping.models import WebsiteIngestResponse
 from mia_dpp.tools.web.models import WebExtractionResult
 
@@ -114,9 +113,7 @@ class ProductWork(WireModel):
         evidence = []
         evidence_ids: set[str] = set()
         artifact_ids: list[str] = []
-        events: list[WorkflowEvent] = []
         for extraction in self.extractions:
-            events.extend(extraction.workflow_events)
             for artifact_id in extraction.knowledge_package.source_artifact_ids:
                 if artifact_id not in artifact_ids:
                     artifact_ids.append(artifact_id)
@@ -134,7 +131,6 @@ class ProductWork(WireModel):
             source_url=primary.source_url,
             product_name=primary.product_name,
             knowledge_package=package,
-            workflow_events=tuple(events),
         )
 
 
