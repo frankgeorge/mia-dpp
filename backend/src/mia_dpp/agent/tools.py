@@ -7,7 +7,7 @@ import time
 from urllib.parse import urlsplit
 
 from pydantic import Field
-from pydantic_ai import RunContext, Tool
+from pydantic_ai import CallDeferred, RunContext, Tool
 
 from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.models import (
@@ -740,12 +740,7 @@ async def request_human_review(
         product_id=product_id,
         metadata={"count": len(work.pending_reviews)},
     )
-    return ToolObservation(
-        outcome="human_input_required",
-        summary="Wait for the user to approve, correct, or reject the pending proposals.",
-        count=len(work.pending_reviews),
-        identifiers=tuple(item.id for item in work.pending_reviews),
-    )
+    raise CallDeferred
 
 
 async def request_human_value(
@@ -809,12 +804,7 @@ async def request_human_value(
         product_id=product_id,
         metadata={"requirementId": requirement_id},
     )
-    return ToolObservation(
-        outcome="human_input_required",
-        summary="Wait for the trusted human response.",
-        count=0,
-        identifiers=(requirement_id,),
-    )
+    raise CallDeferred
 
 
 async def build_product_aas(

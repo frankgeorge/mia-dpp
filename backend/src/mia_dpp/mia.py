@@ -2,23 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import sqlite3
 import uuid
-from collections.abc import Callable, Sequence
-from queue import SimpleQueue
-from threading import Thread
-from typing import Any, Literal, TypedDict
+from collections.abc import Sequence
+from typing import Any
 
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.store.sqlite import SqliteStore
-from langgraph.types import Command, interrupt
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.capabilities import Capability
-from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
@@ -44,6 +35,7 @@ from mia_dpp.agent.tools import AGENT_TOOLS
 from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
+from mia_dpp.store import SessionSnapshot, Store
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
@@ -56,23 +48,12 @@ from mia_dpp.workspace.models import ArtifactKind
 from mia_dpp.workspace.store import FileWorkspaceStore
 
 
-class LifecycleState(TypedDict, total=False):
-    """Checkpointed job state plus PydanticAI history and the current API turn."""
-
-    job: dict[str, Any]
-    model_history_json: str
-    user_message: str
-    reply: str
-    decision_summary: str
-    trace_offset: int
-
-
 class Mia:
-    """Compose MIA and own its autonomous, checkpointed application behavior.
+    """Compose MIA and own its autonomous, persisted application behavior.
 
-    FastAPI calls the small public message/review/value surface. LangGraph owns
-    thread lifetime and trusted interrupts, while PydanticAI alone selects and
-    repeats reusable tools. Deterministic capabilities remain separate modules.
+    FastAPI calls the small public message/review/value surface. PydanticAI
+    selects and repeats reusable tools; this class persists trusted sessions and
+    applies human results without exposing that authority to the model.
     """
 
     def __init__(
@@ -83,7 +64,7 @@ class Mia:
         search_provider: SearchProvider | None = None,
         web_tool: WebExtractionTool | None = None,
     ) -> None:
-        """Connect concrete capabilities, PydanticAI, and the LangGraph lifecycle.
+        """Connect concrete capabilities, PydanticAI, and session persistence.
 
         Production uses configured OpenRouter, DDGS, and Crawl4AI implementations.
         Tests may inject a model, search provider, or web capability while running
@@ -120,7 +101,7 @@ class Mia:
                     app_title="MIA Digital Product Passport",
                 ),
             )
-        self._agent: Agent[MiaDependencies, AgentRunOutput] | None = None
+        self._agent: Agent[MiaDependencies, AgentRunOutput | DeferredToolRequests] | None = None
         if agent_model is not None:
             skill = Capability[MiaDependencies](
                 id="dpp-creation",
@@ -131,33 +112,14 @@ class Mia:
                 agent_model,
                 name="mia-agent",
                 deps_type=MiaDependencies,
-                output_type=AgentRunOutput,
+                output_type=[AgentRunOutput, DeferredToolRequests],  # type: ignore[list-item]
                 instructions=AGENT_INSTRUCTIONS,
                 tools=AGENT_TOOLS,
                 capabilities=[skill],
                 retries=2,
             )
 
-        database_path = self.settings.thread_store_path
-        database_path.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint_connection = sqlite3.connect(database_path, check_same_thread=False)
-        memory_path = database_path.with_name(database_path.stem + "-memory.sqlite3")
-        memory_connection = sqlite3.connect(memory_path, check_same_thread=False)
-        self._checkpointer = SqliteSaver(checkpoint_connection)
-        self._memory = SqliteStore(memory_connection)
-        self._checkpointer.setup()
-        self._memory.setup()
-        builder = StateGraph(LifecycleState)
-        builder.add_node("autonomous_agent", self._agent_node)  # type: ignore[call-overload]
-        builder.add_node("human_interrupt", self._human_interrupt)  # type: ignore[call-overload]
-        builder.add_edge(START, "autonomous_agent")
-        builder.add_conditional_edges(
-            "autonomous_agent",
-            self._after_agent,
-            {"human": "human_interrupt", "done": END},
-        )
-        builder.add_edge("human_interrupt", END)
-        self._graph = builder.compile(checkpointer=self._checkpointer, store=self._memory)
+        self._store = Store(self.settings.thread_store_path)
 
     @property
     def configured(self) -> bool:
@@ -166,96 +128,149 @@ class Mia:
         return self._agent is not None
 
     async def message(self, request: AgentRequest) -> AgentResponse:
-        """Run one checkpointed user turn through the autonomous PydanticAI loop."""
-
-        return await self._run_background(lambda: self._message(request))
-
-    def _message(self, request: AgentRequest) -> AgentResponse:
-        """Invoke the synchronous LangGraph without blocking FastAPI's event loop."""
+        """Load one trusted session and run an autonomous PydanticAI turn."""
 
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
-        snapshot = self._graph.get_state(self._config(thread_id))
-        if snapshot.next:
-            state = MiaState.model_validate(snapshot.values["job"])
+        snapshot = self._store.load(thread_id)
+        if snapshot is not None and self._store.pending(thread_id):
             return self._response(
-                state,
+                snapshot.state,
                 reply="MIA is waiting for the requested human input before continuing.",
                 decision_summary="A trusted human action is required.",
-                trace_offset=len(state.trace),
+                trace_offset=len(snapshot.state.trace),
             )
-        graph_input = (
-            {"user_message": request.message}
-            if snapshot.values
-            else self._initial_state(thread_id, request.message)
-        )
-        values = self._graph.invoke(graph_input, self._config(thread_id))
-        return self._response_from_values(thread_id, values)
+        state = snapshot.state if snapshot is not None else MiaState(thread_id=thread_id)
+        history = snapshot.history if snapshot is not None else []
+        trace_offset = len(state.trace)
+        if not state.user_goal:
+            state.user_goal = request.message
+        return await self._execute(request.message, state, history, trace_offset=trace_offset)
 
     async def review(self, request: AgentReviewRequest) -> AgentResponse:
-        """Resume a mapping-review interrupt with trusted API decisions."""
+        """Apply trusted mapping decisions and resume the deferred agent call."""
 
-        return await self._run_background(
-            lambda: self._resume(request.thread_id, request.model_dump(mode="json"))
+        return await self._resume(
+            request.thread_id,
+            HumanRequestKind.MAPPING_REVIEW,
+            request.model_dump(mode="json"),
         )
 
     async def provide_value(self, request: AgentValueRequest) -> AgentResponse:
-        """Resume a missing-value interrupt without exposing human authority to the model."""
+        """Apply trusted human evidence and resume the deferred agent call."""
 
-        return await self._run_background(
-            lambda: self._resume(request.thread_id, request.model_dump(mode="json"))
+        return await self._resume(
+            request.thread_id,
+            HumanRequestKind.REQUIREMENT_VALUE,
+            request.model_dump(mode="json"),
         )
 
-    @staticmethod
-    async def _run_background(operation: Callable[[], AgentResponse]) -> AgentResponse:
-        """Keep the API loop responsive while the synchronous checkpoint graph runs."""
+    async def _resume(
+        self,
+        thread_id: str,
+        expected_kind: HumanRequestKind,
+        payload: dict[str, Any],
+    ) -> AgentResponse:
+        snapshot = self._store.load(thread_id)
+        if snapshot is None:
+            raise ValueError("unknown session")
+        matching = [
+            call for call in self._store.pending(thread_id) if call.request.kind is expected_kind
+        ]
+        if len(matching) != 1:
+            raise ValueError("exactly one matching human action must be pending")
+        call = matching[0]
+        state = snapshot.state
+        trace_offset = len(state.trace)
+        if expected_kind is HumanRequestKind.MAPPING_REVIEW:
+            self._apply_reviews(state, payload)
+        else:
+            self._apply_human_value(state, payload)
+        self._store.consume(
+            thread_id,
+            call.call_id,
+            expected_kind=expected_kind,
+            result=payload,
+        )
+        state.pending_human_request = None
+        state.add_event(
+            "human.input_received",
+            "Trusted human input was applied to the paused workflow.",
+            product_id=call.request.product_id,
+        )
+        deferred_results = DeferredToolResults(
+            calls={
+                call.call_id: {
+                    "outcome": "human_input_applied",
+                    "summary": "The trusted human action was validated and applied.",
+                }
+            }
+        )
+        return await self._execute(
+            "Continue after the trusted human action.",
+            state,
+            snapshot.history,
+            trace_offset=trace_offset,
+            deferred_results=deferred_results,
+        )
 
-        results: SimpleQueue[AgentResponse | BaseException] = SimpleQueue()
-
-        def execute() -> None:
-            try:
-                results.put(operation())
-            except BaseException as error:
-                results.put(error)
-
-        worker = Thread(target=execute, name="mia-langgraph", daemon=True)
-        worker.start()
-        while worker.is_alive():
-            await asyncio.sleep(0.025)
-        result = results.get()
-        if isinstance(result, BaseException):
-            raise result
-        return result
-
-    def _resume(self, thread_id: str, payload: dict[str, Any]) -> AgentResponse:
-        values = self._graph.invoke(Command(resume=payload), self._config(thread_id))
-        return self._response_from_values(thread_id, values)
-
-    def _agent_node(self, values: LifecycleState) -> LifecycleState:
-        state = MiaState.model_validate(values["job"])
-        message = values.get("user_message", "Continue the current MIA task.")
-        if not state.user_goal:
-            state.user_goal = message
-        history = ModelMessagesTypeAdapter.validate_json(values.get("model_history_json", "[]"))
-        output, messages, trace_offset = asyncio.run(self._run_agent(message, state, history))
-        self._persist_snapshot(state, output.decision_summary)
-        return {
-            "job": state.model_dump(mode="json"),
-            "model_history_json": ModelMessagesTypeAdapter.dump_json(messages).decode(),
-            "reply": output.reply,
-            "decision_summary": output.decision_summary,
-            "trace_offset": trace_offset,
-            "user_message": "Continue after the trusted human action.",
-        }
+    async def _execute(
+        self,
+        message: str,
+        state: MiaState,
+        history: Sequence[ModelMessage],
+        *,
+        trace_offset: int,
+        deferred_results: DeferredToolResults | None = None,
+    ) -> AgentResponse:
+        output, messages = await self._run_agent(
+            message,
+            state,
+            history,
+            deferred_results=deferred_results,
+        )
+        if isinstance(output, DeferredToolRequests):
+            request = state.pending_human_request
+            if request is None or not output.calls:
+                raise ValueError("agent deferred without a trusted human request")
+            reply = request.summary
+            decision = "A trusted human action is required."
+        else:
+            reply = output.reply
+            decision = output.decision_summary
+        snapshot = SessionSnapshot(
+            state=state,
+            history=messages,
+            reply=reply,
+            decision_summary=decision,
+            trace_offset=trace_offset,
+        )
+        self._store.save(snapshot)
+        if isinstance(output, DeferredToolRequests):
+            request = state.pending_human_request
+            if request is None:
+                raise ValueError("deferred human request disappeared before persistence")
+            self._store.remember_deferred(
+                state.thread_id,
+                [(call.tool_call_id, request) for call in output.calls],
+            )
+        self._persist_snapshot(state, decision)
+        return self._response(
+            state,
+            reply=reply,
+            decision_summary=decision,
+            trace_offset=trace_offset,
+        )
 
     async def _run_agent(
         self,
         message: str,
         state: MiaState,
         history: Sequence[ModelMessage],
-    ) -> tuple[AgentRunOutput, list[ModelMessage], int]:
+        *,
+        deferred_results: DeferredToolResults | None = None,
+    ) -> tuple[AgentRunOutput | DeferredToolRequests, list[ModelMessage]]:
         """Give trusted state and reusable tools to one autonomous model turn."""
 
-        trace_offset = len(state.trace)
         dependencies = MiaDependencies(
             state=state,
             company_tool=self._company_tool,
@@ -283,7 +298,6 @@ class Mia:
                     ),
                 ),
                 list(history),
-                trace_offset,
             )
 
         dependencies.add_event(
@@ -297,20 +311,25 @@ class Mia:
             deps=dependencies,
             message_history=history,
             conversation_id=state.thread_id,
+            deferred_tool_results=deferred_results,
         )
         output = result.output
-        if state.status is AgentStatus.RUNNING:
+        if isinstance(output, AgentRunOutput) and state.status is AgentStatus.RUNNING:
             state.status = output.status
         dependencies.add_event(
-            "run.completed",
-            output.decision_summary,
+            "run.deferred" if isinstance(output, DeferredToolRequests) else "run.completed",
+            (
+                "MIA is waiting for trusted external input."
+                if isinstance(output, DeferredToolRequests)
+                else output.decision_summary
+            ),
             metadata={
                 "requestCount": result.usage.requests,
                 "inputTokens": result.usage.input_tokens,
                 "outputTokens": result.usage.output_tokens,
             },
         )
-        return output, result.all_messages(), trace_offset
+        return output, result.all_messages()
 
     @staticmethod
     def _prompt_with_state(message: str, state: MiaState) -> str:
@@ -356,31 +375,6 @@ class Mia:
             + "\n\nTrusted current MIA job state (server supplied):\n"
             + json.dumps(compact, ensure_ascii=False)
         )
-
-    def _human_interrupt(self, values: LifecycleState) -> LifecycleState:
-        state = MiaState.model_validate(values["job"])
-        request = state.pending_human_request
-        if request is None:
-            return values
-        payload = interrupt(request.model_dump(mode="json"))
-        if request.kind is HumanRequestKind.MAPPING_REVIEW:
-            self._apply_reviews(state, payload)
-        else:
-            self._apply_human_value(state, payload)
-        state.pending_human_request = None
-        state.add_event(
-            "human.input_received",
-            "Trusted human input was applied to the paused workflow.",
-            product_id=request.product_id,
-        )
-        self._persist_trace(state, len(state.trace) - 1)
-        self._persist_snapshot(state, "Trusted human input applied.")
-        return {
-            **values,
-            "job": state.model_dump(mode="json"),
-            "reply": "Human input saved. MIA can continue on the next message.",
-            "decision_summary": "Trusted human input was deterministically applied.",
-        }
 
     def _apply_reviews(self, state: MiaState, payload: object) -> None:
         request = AgentReviewRequest.model_validate(payload)
@@ -449,22 +443,6 @@ class Mia:
         state.products[request.product_id] = work
         state.status = AgentStatus.RUNNING
 
-    @staticmethod
-    def _after_agent(values: LifecycleState) -> Literal["human", "done"]:
-        state = MiaState.model_validate(values["job"])
-        return "human" if state.pending_human_request is not None else "done"
-
-    def _response_from_values(self, thread_id: str, values: dict[str, Any]) -> AgentResponse:
-        state = MiaState.model_validate(values["job"])
-        if state.thread_id != thread_id:
-            raise ValueError("checkpoint thread mismatch")
-        return self._response(
-            state,
-            reply=values.get("reply", "MIA is ready."),
-            decision_summary=values.get("decision_summary", "The workflow state was restored."),
-            trace_offset=int(values.get("trace_offset", len(state.trace))),
-        )
-
     def _response(
         self,
         state: MiaState,
@@ -517,17 +495,6 @@ class Mia:
             "\n\nPlease approve, correct, or reject the pending mapping review."
         )
 
-    def _persist_trace(self, state: MiaState, offset: int) -> None:
-        for event in state.trace[offset:]:
-            self.workspace.write_json(
-                state.thread_id,
-                ArtifactKind.TRACE,
-                "event.json",
-                event.model_dump(mode="json"),
-                created_by="langgraph",
-                product_id=event.product_id,
-            )
-
     def _persist_snapshot(self, state: MiaState, decision: str) -> None:
         current = state.products.get(state.current_product_id) if state.current_product_id else None
         resolution = current.resolution if current is not None else None
@@ -552,19 +519,6 @@ class Mia:
                 "pendingReviews": len(current.pending_reviews) if current else 0,
                 "artifactCount": len(self.workspace.list_artifacts(state.thread_id)),
             },
-            created_by="langgraph",
+            created_by="mia",
             product_id=state.current_product_id,
         )
-
-    @staticmethod
-    def _initial_state(thread_id: str, message: str) -> LifecycleState:
-        state = MiaState(thread_id=thread_id, user_goal=message)
-        return {
-            "job": state.model_dump(mode="json"),
-            "model_history_json": "[]",
-            "user_message": message,
-        }
-
-    @staticmethod
-    def _config(thread_id: str) -> RunnableConfig:
-        return {"configurable": {"thread_id": thread_id}}

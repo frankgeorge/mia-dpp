@@ -1,4 +1,4 @@
-"""Combined LangGraph lifecycle and autonomous PydanticAI behavior tests."""
+"""Persisted autonomous PydanticAI behavior tests."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def build_mia(
     return mia, mia.workspace
 
 
-def test_langgraph_runs_pydanticai_and_checkpoints_state(tmp_path: Path) -> None:
+def test_pydanticai_session_store_preserves_state_between_turns(tmp_path: Path) -> None:
     model = TestModel(
         call_tools=["search_companies"],
         custom_output_args={
@@ -308,7 +308,7 @@ def test_model_visible_tools_cannot_claim_human_authority() -> None:
     assert {"request_human_review", "request_human_value"} <= names
 
 
-def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> None:
+def test_human_review_resumes_the_same_persisted_session(tmp_path: Path) -> None:
     url = "https://manufacturer.example/products/pg-16"
     model = ScriptedTestModel(
         arguments={
