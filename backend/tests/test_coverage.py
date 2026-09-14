@@ -16,7 +16,7 @@ from mia_dpp.domain.mappings import (
     RequirementCoverage,
 )
 from mia_dpp.domain.targets import Requirement
-from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
+from mia_dpp.tools.mapping.coverage import coverage
 
 
 def evidence(identifier: str, label: str, value: str, unit: str | None = None) -> EvidenceRecord:
@@ -48,7 +48,7 @@ def analyze(
         product_name="Test product",
         evidence=records,
     )
-    return CoverageAnalyzer().analyze(package, inventory)
+    return coverage(package, inventory)
 
 
 def coverage_for(

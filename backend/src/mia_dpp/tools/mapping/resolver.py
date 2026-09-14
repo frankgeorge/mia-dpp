@@ -7,7 +7,7 @@ from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.domain.mappings import GraphEntry
 from mia_dpp.tools.mapping.catalog import nameplate_catalog
-from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
+from mia_dpp.tools.mapping.coverage import coverage
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
 from mia_dpp.tools.web.models import WebExtractionResult
@@ -34,7 +34,7 @@ async def resolve_product(
         package.evidence, history=history
     )
     # Evaluate once here so invalid accounting fails before the result is returned.
-    CoverageAnalyzer().analyze(package, index, mapping_result=mapping)
+    coverage(package, index, mapping_result=mapping)
     return WebsiteIngestResponse(
         reply=(
             f"MIA retained {len(package.evidence)} facts from "

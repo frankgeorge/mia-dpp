@@ -19,7 +19,7 @@ from mia_dpp.domain.mappings import (
     NameplateElement,
 )
 from mia_dpp.domain.targets import Requirement, TemplateIndex
-from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
+from mia_dpp.tools.mapping.coverage import coverage
 
 
 class WebsiteIngestRequest(WireModel):
@@ -71,7 +71,7 @@ class WebsiteIngestResponse(WireModel):
     def coverage_report(self) -> CoverageReport:
         """Derive coverage from official targets and current mappings."""
 
-        return CoverageAnalyzer().analyze(
+        return coverage(
             self.knowledge_package,
             self.template_index,
             mapping_result=self.mapping_result,
