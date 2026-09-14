@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { CompletionSummary, CoverageReport, EvidenceRecord, MappingResult, Requirement, RequirementCoverage } from "@/lib/types";
+import type { CoverageReport, EvidenceRecord, MappingResult, Requirement, RequirementCoverage } from "@/lib/types";
 
 type FactFilter = "attention" | "unresolved" | "review" | "resolved" | "all";
 type RequirementFilter = "missing" | "candidate" | "satisfied" | "all";
 
-export function CoveragePanel({ report, evidence, completion, mappingResult }: { report: CoverageReport | null; evidence: EvidenceRecord[]; completion: CompletionSummary | null; mappingResult: MappingResult | null }) {
+export function CoveragePanel({ report, evidence, mappingResult }: { report: CoverageReport | null; evidence: EvidenceRecord[]; mappingResult: MappingResult | null }) {
   const [factFilter, setFactFilter] = useState<FactFilter>("attention");
   const [requirementFilter, setRequirementFilter] = useState<RequirementFilter>("missing");
   if (!report) return <p className="mx-auto max-w-sm pt-20 text-center text-[13px] leading-relaxed text-muted">Import a product website to inspect source facts and target coverage.</p>;
@@ -18,12 +18,13 @@ export function CoveragePanel({ report, evidence, completion, mappingResult }: {
     return mapping.status === "review" || mappingResult?.ambiguous.some((item) => item.evidenceId === id) ? "review" : "resolved";
   };
   const visibleFacts = evidence.filter((item) => { const status = statusOf(item.id); return factFilter === "all" || factFilter === status || (factFilter === "attention" && status !== "resolved"); });
+  const factCounts = evidence.reduce((counts, item) => ({ ...counts, [statusOf(item.id)]: counts[statusOf(item.id)] + 1 }), { unresolved: 0, review: 0, resolved: 0 });
   const coverageByRequirement = new Map(report.coverage.map((item) => [item.requirementId, item]));
   const evidenceById = new Map(evidence.map((item) => [item.id, item]));
   return <div className="space-y-7">
     <section>
       <div className="flex items-baseline justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Source Facts</p><h2 className="mt-1 text-xl font-semibold text-ink">What MIA found</h2></div><span className="font-mono text-sm text-muted">{evidence.length}</span></div>
-      {completion && <p className="mt-2 text-[12px] text-muted">{completion.source.automaticallyResolved + completion.source.acceptedAfterReview} resolved · {completion.source.pendingReview} review · {completion.source.unresolved} unresolved</p>}
+      <p className="mt-2 text-[12px] text-muted">{factCounts.resolved} resolved · {factCounts.review} review · {factCounts.unresolved} unresolved</p>
       <FilterBar values={["attention", "unresolved", "review", "resolved", "all"]} active={factFilter} onChange={(value) => setFactFilter(value as FactFilter)} />
       <div className="mt-3 space-y-2">
         {visibleFacts.map((fact) => { const status = statusOf(fact.id); const mapping = mappingByEvidence.get(fact.id); return <article key={fact.id} className="rounded-xl border border-hairline bg-paper p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-[13px] font-semibold text-ink">{fact.sourceLabel ?? fact.predicate}</p><p className="mt-1 text-[13px] text-muted">{displayValue(fact.value)}{fact.unit ? ` ${fact.unit}` : ""}</p></div><StatusPill value={status} /></div><p className="mt-2 truncate font-mono text-[10px] text-muted">{fact.sourceUri}</p>{mapping && <p className="mt-2 text-[11px] text-muted">Current mapping: <span className="font-mono text-signal">{mapping.targetElement}</span></p>}</article>; })}

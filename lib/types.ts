@@ -187,32 +187,6 @@ export interface CoverageReport {
   statistics: CoverageStatistics;
 }
 
-export interface CompletionSummary {
-  source: {
-    totalDiscovered: number;
-    automaticallyResolved: number;
-    acceptedAfterReview: number;
-    pendingReview: number;
-    unresolved: number;
-    rejectedProposals: number;
-  };
-  fixedTemplates: Array<{
-    templateKey: string;
-    templateName: string;
-    mandatoryTotal: number;
-    mandatoryFilled: number;
-    mandatoryMissing: number;
-    optionalTotal: number;
-    optionalFilled: number;
-    optionalMissing: number;
-  }>;
-  technicalData: {
-    discovered: number;
-    resolved: number;
-    unresolved: number;
-  };
-}
-
 export interface MappingResult {
   mapped: ProposedFieldMapping[];
   ambiguous: ProposedFieldMapping[];
@@ -386,7 +360,6 @@ export interface AgentProductWork {
   mappingResult: MappingResult | null;
   templateIndex: RequirementInventory | null;
   coverageReport: CoverageReport | null;
-  completionSummary: CompletionSummary | null;
   nameplateElements: NameplateElement[];
   pendingReviews: SemanticReviewItem[];
   reviewComplete: boolean;

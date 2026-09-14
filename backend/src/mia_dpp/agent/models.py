@@ -8,7 +8,6 @@ from typing import Literal
 from pydantic import AwareDatetime, Field, computed_field
 
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.completion import CompletionSummary, build_completion_summary
 from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate, ProductSourceCandidate
 from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
 from mia_dpp.domain.mappings import (
@@ -131,19 +130,6 @@ class ProductWork(WireModel):
         if package is None or self.mapping_result is None or self.template_index is None:
             return None
         return coverage(package, self.template_index, mapping_result=self.mapping_result)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def completion_summary(self) -> CompletionSummary | None:
-        """Derive the human completion view from current authoritative data."""
-
-        if self.mapping_result is None or self.coverage_report is None:
-            return None
-        return build_completion_summary(
-            self.coverage_report,
-            self.mapping_result,
-            self.evidence,
-        )
 
 
 class MiaState(WireModel):

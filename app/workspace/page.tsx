@@ -9,7 +9,6 @@ import type {
   CompanyCandidate,
   ChatMessage,
   CoverageReport,
-  CompletionSummary,
   DppPackage,
   EvidenceRecord,
   FieldMapping,
@@ -66,7 +65,6 @@ export default function Workspace() {
   const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
   const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
-  const [completionSummary, setCompletionSummary] = useState<CompletionSummary | null>(null);
   const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
   const [nameplateElements, setNameplateElements] = useState<
     NameplateElement[]
@@ -244,7 +242,7 @@ export default function Workspace() {
     void refreshArtifacts(data.threadId);
     void refreshMappingKnowledge();
     const product = data.currentProduct;
-    if (product?.mappingResult && product.coverageReport && product.completionSummary) {
+    if (product?.mappingResult && product.coverageReport) {
       applyWebsiteResult(
         product,
         product.pendingReviews,
@@ -341,7 +339,6 @@ export default function Workspace() {
     setEvidence(product.evidence);
     setMappingResult(product.mappingResult);
     setCoverageReport(product.coverageReport);
-    setCompletionSummary(product.completionSummary);
     setNameplateElements(product.nameplateElements);
     setDpp(null);
     setTab("mappings");
@@ -812,11 +809,9 @@ export default function Workspace() {
                   )}
                   {t === "coverage" && coverageReport && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
-                      {completionSummary?.fixedTemplates.reduce(
-                        (total, item) =>
-                          total + item.mandatoryTotal + item.optionalTotal,
-                        0
-                      ) ?? coverageReport.statistics.requirements}
+                      {coverageReport.inventory.requirements.filter(
+                        (item) => item.kind === "value" && !item.wildcard
+                      ).length}
                     </span>
                   )}
                   {t === "graph" && mappingKnowledge.length > 0 && (
@@ -943,7 +938,7 @@ export default function Workspace() {
                 mappingResult={mappingResult}
               />
             ) : tab === "coverage" ? (
-              <CoveragePanel report={coverageReport} evidence={evidence} completion={completionSummary} mappingResult={mappingResult} />
+              <CoveragePanel report={coverageReport} evidence={evidence} mappingResult={mappingResult} />
             ) : tab === "process" ? (
               <AgentActivity events={agentActivity} />
             ) : tab === "data" ? (
