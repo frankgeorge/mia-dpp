@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from pydantic import Field
 from pydantic_ai import CallDeferred, RunContext, Tool
 
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.models import (
     AgentStatus,
@@ -21,7 +22,9 @@ from mia_dpp.agent.models import (
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.store import ArtifactKind
-from mia_dpp.tools.mapping.resolver import resolve_product
+from mia_dpp.tools.mapping.catalog import nameplate_catalog
+from mia_dpp.tools.mapping.coverage import coverage
+from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.search import (
     SearchUnavailableError,
     find_companies,
@@ -60,7 +63,7 @@ async def search_companies(
     """
 
     extracted_products = [
-        product_id for product_id, work in ctx.deps.state.products.items() if work.extractions
+        product_id for product_id, work in ctx.deps.state.products.items() if work.evidence
     ]
     if extracted_products:
         ctx.deps.add_event(
@@ -265,14 +268,13 @@ async def extract_product_page(
     normalized_url = url.rstrip("/")
     for existing_product_id, existing_work in ctx.deps.state.products.items():
         if any(
-            extraction.source_url.rstrip("/") == normalized_url
-            for extraction in existing_work.extractions
+            source_url.rstrip("/") == normalized_url for source_url in existing_work.source_urls
         ):
             ctx.deps.state.current_product_id = existing_product_id
             ctx.deps.state.status = AgentStatus.RUNNING
             next_action = (
                 "Inspect the existing mapping and coverage next."
-                if existing_work.resolution is not None
+                if existing_work.mapping_result is not None
                 else "Run deterministic mapping for this product next."
             )
             ctx.deps.add_event(
@@ -285,13 +287,7 @@ async def extract_product_page(
             return ToolObservation(
                 outcome="already_extracted",
                 summary=next_action,
-                count=len(
-                    {
-                        record.id
-                        for extraction in existing_work.extractions
-                        for record in extraction.knowledge_package.evidence
-                    }
-                ),
+                count=len(existing_work.evidence),
                 identifiers=(existing_product_id,),
             )
 
@@ -316,8 +312,17 @@ async def extract_product_page(
         product_id=resolved_id,
         candidate=candidate,
     )
-    if extraction.source_url not in {item.source_url for item in work.extractions}:
-        work.extractions = (*work.extractions, extraction)
+    if extraction.source_url not in work.source_urls:
+        work.source_urls = (*work.source_urls, extraction.source_url)
+    work.product_name = work.product_name or extraction.product_name
+    work.source_artifact_ids = tuple(
+        dict.fromkeys(
+            (*work.source_artifact_ids, *extraction.knowledge_package.source_artifact_ids)
+        )
+    )
+    evidence_by_id = {item.id: item for item in work.evidence}
+    evidence_by_id.update({item.id: item for item in extraction.knowledge_package.evidence})
+    work.evidence = tuple(evidence_by_id.values())
     work.status = ProductStatus.IN_PROGRESS
     source_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
@@ -379,18 +384,24 @@ async def map_product_evidence(
     """
 
     work = ctx.deps.state.products.get(product_id)
-    extraction = work.combined_extraction() if work is not None else None
-    if work is None or extraction is None:
+    package = work.knowledge_package() if work is not None else None
+    if work is None or package is None:
         return ToolObservation(
             outcome="evidence_required",
             summary="Extract product evidence before mapping it.",
             count=0,
         )
-    if work.resolution is not None:
-        current_evidence_ids = {item.id for item in extraction.knowledge_package.evidence}
-        mapped_evidence_ids = {item.id for item in work.resolution.knowledge_package.evidence}
+    if work.mapping_result is not None:
+        current_evidence_ids = {item.id for item in package.evidence}
+        mapped_evidence_ids = {
+            item.evidence_id
+            for item in (
+                *work.mapping_result.mapped,
+                *work.mapping_result.ambiguous,
+                *work.mapping_result.rejected,
+            )
+        } | set(work.mapping_result.unmatched_evidence_ids)
         if current_evidence_ids == mapped_evidence_ids:
-            resolution = work.resolution
             ctx.deps.add_event(
                 "mapping.reused",
                 "Reused the current deterministic mapping because no new evidence was added.",
@@ -404,23 +415,27 @@ async def map_product_evidence(
                     "Do not map this evidence again. Inspect unresolved mappings, request review, "
                     "research a genuinely new source, or continue completion."
                 ),
-                count=len(resolution.mapping_result.mapped),
+                count=len(work.mapping_result.mapped),
                 identifiers=(product_id,),
             )
     started = time.monotonic()
-    resolution = await resolve_product(
-        extraction.knowledge_package,
-        ctx.deps.templates,
-        template_keys=ctx.deps.state.target_submodels,
+    templates = tuple(ctx.deps.templates.load(key) for key in ctx.deps.state.target_submodels)
+    index = build_template_index(templates)
+    mapping_result = await DeterministicWebsiteMapper(ctx.deps.templates).propose(package.evidence)
+    report = coverage(package, index, mapping_result=mapping_result)
+    work.mapping_result = mapping_result
+    work.template_index = index
+    work.nameplate_elements = nameplate_catalog(ctx.deps.templates)
+    work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(
+        mapping_result,
+        index,
     )
-    work.resolution = resolution
-    work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(resolution)
     ctx.deps.state.products[product_id] = work
     mapping_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.MAPPING,
         "mapping.json",
-        resolution.mapping_result.model_dump(mode="json"),
+        mapping_result.model_dump(mode="json"),
         created_by="map_product_evidence",
         product_id=product_id,
         derived_from=work.artifact_ids,
@@ -429,13 +444,13 @@ async def map_product_evidence(
         ctx.deps.state.thread_id,
         ArtifactKind.COVERAGE,
         "coverage.json",
-        resolution.coverage_report.model_dump(mode="json"),
+        report.model_dump(mode="json"),
         created_by="map_product_evidence",
         product_id=product_id,
         derived_from=(mapping_artifact.id,),
     )
     work.artifact_ids = (*work.artifact_ids, mapping_artifact.id, coverage_artifact.id)
-    stats = resolution.coverage_report.statistics
+    stats = report.statistics
     ctx.deps.state.status = (
         AgentStatus.AWAITING_REVIEW if work.pending_reviews else AgentStatus.AWAITING_INPUT
     )
@@ -446,19 +461,19 @@ async def map_product_evidence(
     ctx.deps.add_event(
         "mapping.completed",
         (
-            f"Mapped {len(resolution.mapping_result.mapped)}, found "
-            f"{len(resolution.mapping_result.ambiguous)} ambiguous, and retained "
-            f"{len(resolution.mapping_result.unmatched_evidence_ids)} unmatched facts."
+            f"Mapped {len(mapping_result.mapped)}, found "
+            f"{len(mapping_result.ambiguous)} ambiguous, and retained "
+            f"{len(mapping_result.unmatched_evidence_ids)} unmatched facts."
         ),
         tool_name="map_product_evidence",
         product_id=product_id,
-        input_summary=f"{len(resolution.knowledge_package.evidence)} evidence records",
+        input_summary=f"{len(package.evidence)} evidence records",
         output_summary=f"{stats.required_satisfied} required requirements satisfied",
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={
-            "mapped": len(resolution.mapping_result.mapped),
-            "ambiguous": len(resolution.mapping_result.ambiguous),
-            "unmatched": len(resolution.mapping_result.unmatched_evidence_ids),
+            "mapped": len(mapping_result.mapped),
+            "ambiguous": len(mapping_result.ambiguous),
+            "unmatched": len(mapping_result.unmatched_evidence_ids),
             "requiredMissing": stats.required_missing,
         },
     )
@@ -468,7 +483,7 @@ async def map_product_evidence(
             f"Required satisfied: {stats.required_satisfied}; required missing: "
             f"{stats.required_missing}; unmatched evidence: {stats.unmatched_evidence}."
         ),
-        count=len(resolution.mapping_result.mapped),
+        count=len(mapping_result.mapped),
         identifiers=(product_id,),
     )
 
@@ -501,18 +516,18 @@ async def research_product_sources(
             count=len(work.pending_reviews),
             identifiers=tuple(item.id for item in work.pending_reviews),
         )
-    extraction = work.combined_extraction()
+    package = work.knowledge_package()
     product_name = (
         work.candidate.name
         if work.candidate is not None
-        else extraction.product_name
-        if extraction is not None
+        else package.product_name
+        if package is not None
         else product_id
     )
     company = ctx.deps.state.selected_company
     domain = company.domain if company is not None and company.identity_verified else None
-    if domain is None and extraction is not None:
-        domain = (urlsplit(extraction.source_url).hostname or "").removeprefix("www.").casefold()
+    if domain is None and work.source_urls:
+        domain = (urlsplit(work.source_urls[0]).hostname or "").removeprefix("www.").casefold()
     started = time.monotonic()
     try:
         candidates = await find_product_sources(
@@ -532,7 +547,7 @@ async def research_product_sources(
             input_summary=query,
         )
         return ToolObservation(outcome="unavailable", summary=str(error), count=0)
-    existing_urls = {item.source_url for item in work.extractions}
+    existing_urls = set(work.source_urls)
     work.source_candidates = tuple(item for item in candidates if item.url not in existing_urls)
     ctx.deps.state.products[product_id] = work
     ctx.deps.add_event(
@@ -571,7 +586,7 @@ async def inspect_unresolved_mappings(
     """
 
     work = ctx.deps.state.products.get(product_id)
-    if work is None or work.resolution is None:
+    if work is None or work.mapping_result is None or work.template_index is None:
         return SemanticContextObservation(
             outcome="mapping_required",
             product_id=product_id,
@@ -579,7 +594,20 @@ async def inspect_unresolved_mappings(
             requirements=(),
             reviewed_knowledge=(),
         )
-    context = ctx.deps.mapping_review.semantic_context(work.resolution)
+    package = work.knowledge_package()
+    if package is None:
+        return SemanticContextObservation(
+            outcome="mapping_required",
+            product_id=product_id,
+            evidence=(),
+            requirements=(),
+            reviewed_knowledge=(),
+        )
+    context = ctx.deps.mapping_review.semantic_context(
+        package,
+        work.mapping_result,
+        work.template_index,
+    )
     evidence = tuple(
         {
             "id": item.id,
@@ -654,7 +682,7 @@ async def propose_semantic_mapping(
     """
 
     work = ctx.deps.state.products.get(product_id)
-    if work is None or work.resolution is None:
+    if work is None or work.mapping_result is None or work.template_index is None:
         return ToolObservation(
             outcome="mapping_required",
             summary="Run deterministic mapping before semantic proposals.",
@@ -670,8 +698,13 @@ async def propose_semantic_mapping(
             count=0,
         )
     try:
+        package = work.knowledge_package()
+        if package is None:
+            raise ValueError("product evidence is unavailable")
         review = ctx.deps.mapping_review.propose(
-            work.resolution,
+            package,
+            work.mapping_result,
+            work.template_index,
             evidence_id=evidence_id,
             requirement_id=requirement_id,
             reason_summary=reason_summary,
@@ -720,7 +753,7 @@ async def request_human_review(
     """
 
     work = ctx.deps.state.products.get(product_id)
-    if work is None or work.resolution is None:
+    if work is None or work.mapping_result is None:
         return ToolObservation(
             outcome="mapping_required",
             summary="No mapped product exists for this review.",
@@ -763,7 +796,7 @@ async def request_human_value(
     """
 
     work = ctx.deps.state.products.get(product_id)
-    if work is None or work.resolution is None:
+    if work is None or work.mapping_result is None or work.template_index is None:
         return ToolObservation(
             outcome="mapping_required",
             summary="No product coverage exists for this answer.",
@@ -786,11 +819,10 @@ async def request_human_value(
             count=1,
             identifiers=(ctx.deps.state.pending_human_request.product_id,),
         )
-    missing = {
-        item.requirement_id
-        for item in work.resolution.coverage_report.coverage
-        if item.status.value == "missing"
-    }
+    report = work.coverage_report()
+    if report is None:
+        return ToolObservation(outcome="mapping_required", summary="No coverage exists.", count=0)
+    missing = {item.requirement_id for item in report.coverage if item.status.value == "missing"}
     if requirement_id not in missing:
         return ToolObservation(
             outcome="invalid",
@@ -825,13 +857,17 @@ async def build_product_aas(
     """
 
     work = ctx.deps.state.products.get(product_id)
-    if work is None or work.resolution is None:
+    if work is None or work.mapping_result is None:
         return ToolObservation(
             outcome="mapping_required",
             summary="Map the product evidence before building an AAS.",
             count=0,
         )
-    stats = work.resolution.coverage_report.statistics
+    report = work.coverage_report()
+    package_input = work.knowledge_package()
+    if report is None or package_input is None:
+        return ToolObservation(outcome="mapping_required", summary="No coverage exists.", count=0)
+    stats = report.statistics
     if stats.required_missing or stats.required_candidate or stats.required_ambiguous:
         return ToolObservation(
             outcome="incomplete",
@@ -848,13 +884,13 @@ async def build_product_aas(
                 f"{mapping.evidence_id}\0{mapping.target.instance_path}".encode()
             ).hexdigest()[:24],
         )
-        for mapping in work.resolution.mapping_result.mapped
+        for mapping in work.mapping_result.mapped
         if mapping.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
     ]
     package = ctx.deps.dpp_pipeline.build(
-        work.resolution.knowledge_package.product_name,
+        package_input.product_name,
         accepted,
-        evidence=work.resolution.knowledge_package.evidence,
+        evidence=package_input.evidence,
     )
     work.aas_artifact_sha256 = package.artifact_sha256
     aas_artifact = ctx.deps.store.write_json(

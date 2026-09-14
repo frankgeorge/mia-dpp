@@ -13,6 +13,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 
 from mia_dpp.aas.build import DeterministicDppPipeline
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.models import (
@@ -28,7 +29,7 @@ from mia_dpp.config import Settings
 from mia_dpp.domain.discovery import ProductSourceCandidate
 from mia_dpp.mia import Mia
 from mia_dpp.store import ArtifactKind, Store
-from mia_dpp.tools.mapping.resolver import resolve_product
+from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchHit
 from mia_dpp.tools.web.models import RenderedPage
@@ -239,7 +240,10 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
         products={
             "product-direct": ProductWork(
                 product_id="product-direct",
-                extractions=(initial,),
+                product_name=initial.product_name,
+                source_urls=(initial.source_url,),
+                source_artifact_ids=initial.knowledge_package.source_artifact_ids,
+                evidence=initial.knowledge_package.evidence,
                 source_candidates=(source_candidate,),
             )
         },
@@ -263,7 +267,7 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
     assert observation.identifiers == ("product-direct",)
     assert state.current_product_id == "product-direct"
     assert tuple(state.products) == ("product-direct",)
-    assert len(state.products["product-direct"].extractions) == 2
+    assert len(state.products["product-direct"].source_urls) == 2
 
 
 def test_trace_is_observable_before_agent_run_completes(tmp_path: Path) -> None:
@@ -377,17 +381,18 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
             url_policy=ProductUrlPolicy(public_resolver),
         ).extract("https://manufacturer.example/products/pg-16")
     )
-    result = asyncio.run(
-        resolve_product(
-            extraction.knowledge_package,
-            repository,
-            template_keys=("digital_nameplate", "technical_data"),
-        )
+    index = build_template_index(
+        (repository.load("digital_nameplate"), repository.load("technical_data"))
+    )
+    mapping_result = asyncio.run(
+        DeterministicWebsiteMapper(repository).propose(extraction.knowledge_package.evidence)
     )
     service = MappingReviewService(repository)
-    context = service.semantic_context(result)
+    context = service.semantic_context(extraction.knowledge_package, mapping_result, index)
     proposal = service.propose(
-        result,
+        extraction.knowledge_package,
+        mapping_result,
+        index,
         evidence_id=context.evidence[0].id,
         requirement_id=context.requirements[0].id,
         reason_summary="The label and expected meaning are compatible.",
@@ -414,8 +419,10 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
         template_keys=(proposal.mapping.target.template_key,),
     )
 
-    _, reviewed = service.decide(
-        result,
+    _, _, reviewed = service.decide(
+        extraction.knowledge_package,
+        mapping_result,
+        index,
         proposal,
         decision="approve",
         thread_id="thread-knowledge-test",

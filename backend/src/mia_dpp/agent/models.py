@@ -7,14 +7,20 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, computed_field
 
 from mia_dpp.domain.base import WireModel
+from mia_dpp.domain.completion import CompletionSummary, build_completion_summary
 from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate, ProductSourceCandidate
-from mia_dpp.domain.evidence import ProductKnowledgePackage
-from mia_dpp.domain.mappings import SemanticReviewItem
-from mia_dpp.tools.mapping.models import ProductResolution
-from mia_dpp.tools.web.models import WebExtractionResult
+from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
+from mia_dpp.domain.mappings import (
+    CoverageReport,
+    MappingResult,
+    NameplateElement,
+    SemanticReviewItem,
+)
+from mia_dpp.domain.targets import TemplateIndex
+from mia_dpp.tools.mapping.coverage import coverage
 
 
 class AgentStatus(StrEnum):
@@ -82,6 +88,17 @@ class AgentTraceEvent(WireModel):
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
+class ProductResolutionView(WireModel):
+    """Temporary API projection over authoritative product evidence and mappings."""
+
+    knowledge_package: ProductKnowledgePackage
+    mapping_result: MappingResult
+    template_index: TemplateIndex
+    coverage_report: CoverageReport
+    completion_summary: CompletionSummary
+    nameplate_elements: tuple[NameplateElement, ...]
+
+
 class ProductWork(WireModel):
     """All trusted working data accumulated for one selected product.
 
@@ -93,44 +110,59 @@ class ProductWork(WireModel):
     status: ProductStatus = ProductStatus.QUEUED
     candidate: ProductCandidate | None = None
     source_candidates: tuple[ProductSourceCandidate, ...] = ()
-    extractions: tuple[WebExtractionResult, ...] = ()
-    resolution: ProductResolution | None = None
+    product_name: str | None = None
+    source_urls: tuple[str, ...] = ()
+    source_artifact_ids: tuple[str, ...] = ()
+    evidence: tuple[EvidenceRecord, ...] = ()
+    mapping_result: MappingResult | None = None
+    template_index: TemplateIndex | None = None
+    nameplate_elements: tuple[NameplateElement, ...] = ()
     pending_reviews: tuple[SemanticReviewItem, ...] = ()
     review_complete: bool = False
     aas_artifact_sha256: str | None = None
     artifact_ids: tuple[str, ...] = ()
 
-    def combined_extraction(self) -> WebExtractionResult | None:
-        """Combine repeated source acquisitions before deterministic mapping.
+    def knowledge_package(self) -> ProductKnowledgePackage | None:
+        """Build the source-neutral mapping input from canonical product evidence."""
 
-        ``map_product_evidence`` calls this after one or more page extractions.
-        It preserves source identities while deduplicating evidence by ID.
-        """
-
-        if not self.extractions:
+        if not self.evidence:
             return None
-        primary = self.extractions[0]
-        evidence = []
-        evidence_ids: set[str] = set()
-        artifact_ids: list[str] = []
-        for extraction in self.extractions:
-            for artifact_id in extraction.knowledge_package.source_artifact_ids:
-                if artifact_id not in artifact_ids:
-                    artifact_ids.append(artifact_id)
-            for record in extraction.knowledge_package.evidence:
-                if record.id not in evidence_ids:
-                    evidence_ids.add(record.id)
-                    evidence.append(record)
-        package = ProductKnowledgePackage(
+        return ProductKnowledgePackage(
             product_id=self.product_id,
-            product_name=primary.product_name,
-            source_artifact_ids=tuple(artifact_ids),
-            evidence=tuple(evidence),
+            product_name=self.product_name
+            or (self.candidate.name if self.candidate else self.product_id),
+            source_artifact_ids=self.source_artifact_ids,
+            evidence=self.evidence,
         )
-        return WebExtractionResult(
-            source_url=primary.source_url,
-            product_name=primary.product_name,
+
+    def coverage_report(self) -> CoverageReport | None:
+        """Derive coverage from the current evidence, mappings, and template index."""
+
+        package = self.knowledge_package()
+        if package is None or self.mapping_result is None or self.template_index is None:
+            return None
+        return coverage(package, self.template_index, mapping_result=self.mapping_result)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolution(self) -> ProductResolutionView | None:
+        """Project the legacy frontend shape without storing duplicate product data."""
+
+        package = self.knowledge_package()
+        report = self.coverage_report()
+        if package is None or self.mapping_result is None or report is None:
+            return None
+        return ProductResolutionView(
             knowledge_package=package,
+            mapping_result=self.mapping_result,
+            template_index=self.template_index,
+            coverage_report=report,
+            completion_summary=build_completion_summary(
+                report,
+                self.mapping_result,
+                self.evidence,
+            ),
+            nameplate_elements=self.nameplate_elements,
         )
 
 

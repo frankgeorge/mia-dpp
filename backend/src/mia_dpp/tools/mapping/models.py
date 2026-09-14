@@ -5,47 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import computed_field
-
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.completion import CompletionSummary, build_completion_summary
-from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
-from mia_dpp.domain.mappings import (
-    CoverageReport,
-    MappingResult,
-    NameplateElement,
-)
-from mia_dpp.domain.targets import Requirement, TemplateIndex
-from mia_dpp.tools.mapping.coverage import coverage
-
-
-class ProductResolution(WireModel):
-    knowledge_package: ProductKnowledgePackage
-    mapping_result: MappingResult
-    template_index: TemplateIndex
-    nameplate_elements: tuple[NameplateElement, ...]
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def coverage_report(self) -> CoverageReport:
-        """Derive coverage from official targets and current mappings."""
-
-        return coverage(
-            self.knowledge_package,
-            self.template_index,
-            mapping_result=self.mapping_result,
-        )
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def completion_summary(self) -> CompletionSummary:
-        """Derive the human completion view from current authoritative data."""
-
-        return build_completion_summary(
-            self.coverage_report,
-            self.mapping_result,
-            self.knowledge_package.evidence,
-        )
+from mia_dpp.domain.evidence import EvidenceRecord
+from mia_dpp.domain.targets import Requirement
 
 
 class SemanticMappingContext(WireModel):

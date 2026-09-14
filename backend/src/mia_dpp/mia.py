@@ -360,7 +360,7 @@ class Mia:
             "selectedProductIds": list(state.selected_product_ids),
             "products": {
                 key: {
-                    "sourceCount": len(value.extractions),
+                    "sourceCount": len(value.source_urls),
                     "sourceCandidates": [
                         {
                             "id": item.id,
@@ -369,8 +369,8 @@ class Mia:
                         }
                         for item in value.source_candidates
                     ],
-                    "hasEvidence": bool(value.extractions),
-                    "hasMapping": value.resolution is not None,
+                    "hasEvidence": bool(value.evidence),
+                    "hasMapping": value.mapping_result is not None,
                     "pendingReviews": len(value.pending_reviews),
                     "hasArtifact": value.aas_artifact_sha256 is not None,
                 }
@@ -387,15 +387,20 @@ class Mia:
     def _apply_reviews(self, state: MiaState, payload: object) -> None:
         request = AgentReviewRequest.model_validate(payload)
         work = state.products.get(request.product_id)
-        if work is None or work.resolution is None:
+        if work is None or work.mapping_result is None or work.template_index is None:
             raise ValueError("unknown or unresolved product")
+        package = work.knowledge_package()
+        if package is None:
+            raise ValueError("product evidence is unavailable")
         pending = {item.id: item for item in work.pending_reviews}
         for decision in request.decisions:
             item = pending.get(decision.review_id)
             if item is None:
                 raise ValueError(f"review is not pending: {decision.review_id}")
-            work.resolution, reviewed = self._mapping_review.decide(
-                work.resolution,
+            package, work.mapping_result, reviewed = self._mapping_review.decide(
+                package,
+                work.mapping_result,
+                work.template_index,
                 item,
                 decision=decision.decision,
                 thread_id=state.thread_id,
@@ -403,6 +408,9 @@ class Mia:
                 corrected_value=decision.corrected_value,
                 comment=decision.comment,
             )
+            work.product_name = package.product_name
+            work.source_artifact_ids = package.source_artifact_ids
+            work.evidence = package.evidence
             company = state.selected_company
             self.store.remember_mapping_review(
                 reviewed.mapping,
@@ -431,14 +439,22 @@ class Mia:
     def _apply_human_value(self, state: MiaState, payload: object) -> None:
         request = AgentValueRequest.model_validate(payload)
         work = state.products.get(request.product_id)
-        if work is None or work.resolution is None:
+        if work is None or work.mapping_result is None or work.template_index is None:
             raise ValueError("unknown or unresolved product")
-        work.resolution = self._mapping_review.record_human_value(
-            work.resolution,
+        package = work.knowledge_package()
+        if package is None:
+            raise ValueError("product evidence is unavailable")
+        package, work.mapping_result = self._mapping_review.record_human_value(
+            package,
+            work.mapping_result,
+            work.template_index,
             requirement_id=request.requirement_id,
             value=request.value,
             thread_id=state.thread_id,
         )
+        work.product_name = package.product_name
+        work.source_artifact_ids = package.source_artifact_ids
+        work.evidence = package.evidence
         artifact = self.store.write_json(
             state.thread_id,
             ArtifactKind.REVIEW,
@@ -485,16 +501,16 @@ class Mia:
             return None
         if request.kind is HumanRequestKind.REQUIREMENT_VALUE:
             return request.summary
-        if current is None or current.resolution is None:
+        if current is None or current.mapping_result is None:
             return "Mapping proposals need review. Please approve, correct, or reject them."
 
-        resolution = current.resolution
-        mapping_count = len(resolution.mapping_result.mapped)
+        mapping = current.mapping_result
+        mapping_count = len(mapping.mapped)
         review_count = len(current.pending_reviews)
-        unmatched_count = len(resolution.mapping_result.unmatched_evidence_ids)
+        unmatched_count = len(mapping.unmatched_evidence_ids)
         return (
             "I finished processing the currently available source evidence.\n\n"
-            f"- {len(resolution.knowledge_package.evidence)} source facts retained\n"
+            f"- {len(current.evidence)} source facts retained\n"
             f"- {mapping_count} mapping{'s' if mapping_count != 1 else ''} accepted "
             "deterministically\n"
             f"- {review_count} mapping proposal{'s' if review_count != 1 else ''} "
@@ -505,8 +521,8 @@ class Mia:
 
     def _persist_snapshot(self, state: MiaState, decision: str) -> None:
         current = state.products.get(state.current_product_id) if state.current_product_id else None
-        resolution = current.resolution if current is not None else None
-        statistics = resolution.coverage_report.statistics if resolution is not None else None
+        report = current.coverage_report() if current is not None else None
+        statistics = report.statistics if report is not None else None
         self.store.write_json(
             state.thread_id,
             ArtifactKind.TRACE,
@@ -517,11 +533,15 @@ class Mia:
                 "selectedCompany": state.selected_company.name if state.selected_company else None,
                 "currentProductId": state.current_product_id,
                 "queuedProducts": list(state.product_queue),
-                "sourceCount": len(current.extractions) if current else 0,
-                "evidenceCount": len(resolution.knowledge_package.evidence) if resolution else 0,
-                "mappedCount": len(resolution.mapping_result.mapped) if resolution else 0,
+                "sourceCount": len(current.source_urls) if current else 0,
+                "evidenceCount": len(current.evidence) if current else 0,
+                "mappedCount": (
+                    len(current.mapping_result.mapped) if current and current.mapping_result else 0
+                ),
                 "unmatchedCount": (
-                    len(resolution.mapping_result.unmatched_evidence_ids) if resolution else 0
+                    len(current.mapping_result.unmatched_evidence_ids)
+                    if current and current.mapping_result
+                    else 0
                 ),
                 "missingMandatory": statistics.required_missing if statistics else 0,
                 "pendingReviews": len(current.pending_reviews) if current else 0,

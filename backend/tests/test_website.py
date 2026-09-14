@@ -10,11 +10,13 @@ from pathlib import Path
 import pytest
 
 from mia_dpp.aas.build import build_dpp
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.agent.models import ProductResolutionView, ProductWork
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus, ProposedFieldMapping
 from mia_dpp.errors import MappingError
-from mia_dpp.tools.mapping.models import ProductResolution
-from mia_dpp.tools.mapping.resolver import resolve_product
+from mia_dpp.tools.mapping.catalog import nameplate_catalog
+from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.web.artifacts import raw_website_artifact
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
 from mia_dpp.tools.web.models import ProductUrlRejectedError, RenderedPage
@@ -56,21 +58,32 @@ async def ingest(
     loader: FixtureLoader | None = None,
     *,
     template_keys: tuple[str, ...] = ("digital_nameplate", "technical_data"),
-) -> ProductResolution:
+) -> ProductResolutionView:
     repository = OfficialTemplateRepository()
     web_tool = WebExtractionTool(
         loader=loader or FixtureLoader(),
         url_policy=ProductUrlPolicy(public_resolver),
     )
     extraction = await web_tool.extract(url)
-    return await resolve_product(
-        extraction.knowledge_package,
-        repository,
-        template_keys=template_keys,
+    index = build_template_index(tuple(repository.load(key) for key in template_keys))
+    mapping = await DeterministicWebsiteMapper(repository).propose(
+        extraction.knowledge_package.evidence
     )
+    work = ProductWork(
+        product_id=extraction.knowledge_package.product_id,
+        product_name=extraction.product_name,
+        source_urls=(extraction.source_url,),
+        source_artifact_ids=extraction.knowledge_package.source_artifact_ids,
+        evidence=extraction.knowledge_package.evidence,
+        mapping_result=mapping,
+        template_index=index,
+        nameplate_elements=nameplate_catalog(repository),
+    )
+    assert work.resolution is not None
+    return work.resolution
 
 
-def resolved_mappings(response: ProductResolution) -> tuple[ProposedFieldMapping, ...]:
+def resolved_mappings(response: ProductResolutionView) -> tuple[ProposedFieldMapping, ...]:
     result = response.mapping_result
     return (*result.mapped, *result.ambiguous, *result.rejected)
 
