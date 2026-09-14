@@ -5,12 +5,10 @@ from typing import Any
 
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.agent.models import AgentTraceEvent, MiaState
-from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
-from mia_dpp.tools.products.research import ProductResearchTool
-from mia_dpp.tools.products.tool import ProductDiscoveryTool
+from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.workspace.models import ArtifactKind
 from mia_dpp.workspace.store import WorkspaceStore
@@ -26,9 +24,7 @@ class MiaDependencies:
     """
 
     state: MiaState
-    company_tool: CompanyDiscoveryTool
-    product_tool: ProductDiscoveryTool
-    product_research_tool: ProductResearchTool
+    search: SearchProvider
     web_tool: WebExtractionTool
     mapping_tool: ProductResolver
     mapping_review: MappingReviewService

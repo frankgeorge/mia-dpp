@@ -27,12 +27,9 @@ from mia_dpp.agent.tools import AGENT_TOOLS, extract_product_page
 from mia_dpp.config import Settings
 from mia_dpp.domain.discovery import ProductSourceCandidate
 from mia_dpp.mia import Mia
-from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
 from mia_dpp.tools.mapping.review import MappingReviewService
-from mia_dpp.tools.products.research import ProductResearchTool
-from mia_dpp.tools.products.tool import ProductDiscoveryTool
 from mia_dpp.tools.search import SearchHit
 from mia_dpp.tools.web.models import RenderedPage
 from mia_dpp.tools.web.tool import WebExtractionTool
@@ -253,9 +250,7 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
     review = MappingReviewService(repository)
     dependencies = MiaDependencies(
         state=state,
-        company_tool=CompanyDiscoveryTool(search),
-        product_tool=ProductDiscoveryTool(search),
-        product_research_tool=ProductResearchTool(search),
+        search=search,
         web_tool=web_tool,
         mapping_tool=ProductResolver(repository),
         mapping_review=review,

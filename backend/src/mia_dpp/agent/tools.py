@@ -20,7 +20,12 @@ from mia_dpp.agent.models import (
 )
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
-from mia_dpp.tools.search import SearchUnavailableError
+from mia_dpp.tools.search import (
+    SearchUnavailableError,
+    find_companies,
+    find_product_sources,
+    find_products,
+)
 from mia_dpp.workspace.models import ArtifactKind
 
 
@@ -76,7 +81,7 @@ async def search_companies(
 
     started = time.monotonic()
     try:
-        candidates = await ctx.deps.company_tool.search(company_name)
+        candidates = await find_companies(ctx.deps.search, company_name)
     except SearchUnavailableError as error:
         ctx.deps.add_event(
             "company.search",
@@ -167,7 +172,7 @@ async def discover_products(
         )
     started = time.monotonic()
     try:
-        candidates = await ctx.deps.product_tool.discover(company, query=query)
+        candidates = await find_products(ctx.deps.search, company, query=query)
     except SearchUnavailableError as error:
         ctx.deps.add_event(
             "product.search",
@@ -510,7 +515,8 @@ async def research_product_sources(
         domain = (urlsplit(extraction.source_url).hostname or "").removeprefix("www.").casefold()
     started = time.monotonic()
     try:
-        candidates = await ctx.deps.product_research_tool.search(
+        candidates = await find_product_sources(
+            ctx.deps.search,
             product_id=product_id,
             product_name=product_name,
             query=query,

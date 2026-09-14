@@ -36,12 +36,9 @@ from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
 from mia_dpp.store import SessionSnapshot, Store
-from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.mapping.review import MappingReviewService
-from mia_dpp.tools.products.research import ProductResearchTool
-from mia_dpp.tools.products.tool import ProductDiscoveryTool
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.workspace.models import ArtifactKind
@@ -85,9 +82,7 @@ class Mia:
             )
         )
 
-        self._company_tool = CompanyDiscoveryTool(search)
-        self._product_tool = ProductDiscoveryTool(search)
-        self._product_research_tool = ProductResearchTool(search)
+        self._search = search
         self._mapping_review = MappingReviewService(self.templates)
         self._dpp_pipeline = DeterministicDppPipeline(self.templates)
 
@@ -273,9 +268,7 @@ class Mia:
 
         dependencies = MiaDependencies(
             state=state,
-            company_tool=self._company_tool,
-            product_tool=self._product_tool,
-            product_research_tool=self._product_research_tool,
+            search=self._search,
             web_tool=self.web_tool,
             mapping_tool=self.resolver,
             mapping_review=self._mapping_review,
