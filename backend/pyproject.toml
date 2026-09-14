@@ -12,7 +12,6 @@ dependencies = [
   "crawl4ai==0.9.3",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
-  "lxml>=5,<7",
   "pydantic>=2.11,<3",
   "pydantic-settings>=2.8,<3",
   "python-dotenv>=1,<2",

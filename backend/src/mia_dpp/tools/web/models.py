@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import StrEnum
 from hashlib import sha256
 from typing import Protocol
 
@@ -23,19 +22,8 @@ class ProductUrlRejectedError(ExtractionError):
     """A URL violates the configured admission policy."""
 
 
-class RequiredEvidenceMissingError(ExtractionError):
-    """A required adapter rule did not produce a value."""
-
-
 class PageLoadError(ExtractionError):
     """The page loader could not return usable HTML."""
-
-
-class ExtractionSource(StrEnum):
-    CSS = "css"
-    XPATH = "xpath"
-    JSON_LD = "json_ld"
-    META = "meta"
 
 
 class RawSourceArtifact(WireModel):
@@ -69,33 +57,6 @@ class CandidateFact(WireModel):
     def fact_has_a_value(self) -> CandidateFact:
         if self.value is None:
             raise ValueError("candidate fact must contain a value")
-        return self
-
-
-class ExtractionRule(WireModel):
-    predicate: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    source: ExtractionSource
-    selector: str = Field(min_length=1)
-    attribute: str | None = None
-    many: bool = False
-    required: bool = False
-    unit: str | None = None
-
-
-class SiteAdapterSpec(WireModel):
-    id: str = Field(min_length=1)
-    version: str = Field(min_length=1)
-    site_origin: str = Field(pattern=r"^https?://")
-    allowed_hosts: tuple[str, ...] = Field(min_length=1)
-    product_url_patterns: tuple[str, ...] = Field(min_length=1)
-    field_rules: tuple[ExtractionRule, ...] = Field(min_length=1)
-    approved: bool = False
-
-    @model_validator(mode="after")
-    def rules_are_unique(self) -> SiteAdapterSpec:
-        predicates = [rule.predicate for rule in self.field_rules]
-        if len(predicates) != len(set(predicates)):
-            raise ValueError("site adapter predicates must be unique")
         return self
 
 

@@ -4,15 +4,20 @@ MIA separates autonomous decisions from deterministic product-data processing. R
 in this order:
 
 1. `mia_dpp/main.py` — the production ASGI entrypoint.
-2. `mia_dpp/mia.py` — concrete composition, PydanticAI autonomy, and LangGraph lifecycle.
+2. `mia_dpp/mia.py` — concrete composition, PydanticAI autonomy, and trusted defer/resume.
 3. `mia_dpp/agent/models.py` — trusted typed job state and safe activity events.
 4. `mia_dpp/agent/dependencies.py` — capabilities injected into model-visible tools.
 5. `mia_dpp/agent/prompts.py` — model guidance and authority boundaries.
 6. `mia_dpp/agent/tools.py` — the small model-visible action surface.
-7. `mia_dpp/workspace/` — manifest, lineage, artifact viewing, and export.
+7. `mia_dpp/store.py` — sessions, deferred calls, reviewed knowledge, and artifact storage.
 8. `mia_dpp/tools/mapping/` — deterministic evidence-to-target mapping and coverage.
 9. `mia_dpp/aas/` — official templates, requirement inventory, compilation, and validation.
 10. `mia_dpp/integrations/` — vendor-specific Crawl4AI, DDGS, PDF, and BaSyx code.
+
+Site-specific extraction knowledge belongs in reviewed Crawl4AI CSS/XPath schemas,
+not in another MIA extraction framework. A generated schema is only a runtime
+candidate: it becomes trusted after fixture/source comparison and human review.
+Committed schema JSON is the trust boundary and can then be reused deterministically.
 
 The architectural vocabulary is deliberately narrow:
 
