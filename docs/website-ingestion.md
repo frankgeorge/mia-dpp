@@ -14,7 +14,7 @@ direct product URL
   -> deterministic mapping attempt
   -> mapped, ambiguous, and unmatched outcomes
   -> selected official IDTA templates
-  -> stable RequirementInventory
+  -> stable TemplateIndex
   -> deterministic CoverageReport
 ```
 
@@ -49,9 +49,9 @@ unmatched instead of hiding them.
 
 ## Requirement coverage
 
-Website analysis selects Digital Nameplate 3.0.1 and Technical Data 2.0.1 by
-default. API clients can instead submit a non-empty `templateKeys` list using
-any template registered by `OfficialTemplateRepository`.
+Agent jobs select Digital Nameplate 3.0.1 and Technical Data 2.0.1 by default.
+The selected keys are stored in trusted job state and resolved by
+`OfficialTemplateRepository`.
 
 Requirements are generated recursively from normalized official
 `TemplateElement` metadata. Their IDs are deterministic hashes of template key,
@@ -76,8 +76,8 @@ concrete deterministic mapping is required.
 
 ## Known limitations
 
-- The submitted URL must be a direct product page. Site-wide crawling, catalogue
-  discovery, product selection, and recursive research are not implemented.
+- `WebExtractionTool` accepts one direct product page at a time. The autonomous
+  agent can discover products and call extraction repeatedly for selected sources.
 - Extraction is limited to the structured HTML patterns listed above. Facts
   present only in prose, images, downloads, client-side API calls, or PDFs may be
   missed.
@@ -93,11 +93,10 @@ concrete deterministic mapping is required.
   but does not invent an official target or semantic identifier for it.
 - Conditional requirements are reported but are not dynamically activated when
   an optional repeated structure is partially populated yet.
-- MIA retains source facts but does not persist the full acquired HTML after the
-  request. The content hash provides identity; durable source-archive storage is
-  a future concern.
+- MIA persists structured source metadata, evidence, mappings, and their content
+  identities as workspace artifacts; it does not retain enormous HTML blobs by default.
 - Website content and anti-bot controls can change, so a public page that works
-  today may later require a reviewed site adapter.
+  today may later require a reviewed Crawl4AI CSS/XPath schema.
 
 ## Suitable manual check
 
@@ -112,10 +111,7 @@ This URL is useful for a smoke test, not a permanent fixture. Automated tests
 use the local HTML fixture in `backend/tests/fixtures/web/website-product.html`
 so test results do not depend on the internet or a third-party website.
 
-## Deferred architecture
-
-Future semantic matchers, human-review strategies, and LangGraph orchestration
-can consume `ProductKnowledgePackage`, `MappingResult`, `CoverageReport`, and
-`WorkflowEvent` without changing website extraction. A future coverage resolver
-accepts unresolved coverage and referenced evidence without rereading HTML. No
-framework-specific message or graph state is part of these domain contracts.
+Generated extraction schemas are candidates, not trusted production rules. The
+minimal promotion path is: generate, run against saved fixtures, compare with
+the source, review, then commit the schema JSON. No runtime schema-management
+framework is currently implemented.

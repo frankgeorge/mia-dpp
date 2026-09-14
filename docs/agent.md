@@ -1,31 +1,30 @@
 # MIA autonomous runtime
 
-MIA has one autonomous decision-maker and one workflow-lifetime owner:
+MIA has one autonomous decision-maker:
 
 ```text
-user → FastAPI → LangGraph lifecycle → PydanticAI brain
-                                      ↓
-                     search / extract / map / build tools
-                                      ↓
-                     deterministic evidence and AAS core
+user → FastAPI → Mia → PydanticAI agent
+                            ↓
+           search / extract / map / build tools
+                            ↓
+           deterministic evidence and AAS core
 ```
 
-LangGraph stores checkpoints, thread state, PydanticAI message history, human interrupts,
-and reusable memory. Its graph has only an autonomous-agent node and a human-interrupt node;
-it does not choose a business sequence. PydanticAI chooses and repeats tools inside the
-autonomous node.
+`Mia` loads trusted server-side state and message history, invokes PydanticAI,
+and saves the resulting turn. PydanticAI chooses and repeats tools; there is no
+second workflow graph choosing a business sequence.
 
 ## Authority and state
 
 - PydanticAI decides what action to attempt.
-- Deterministic Python decides what evidence, mapping, coverage, confidence, and AAS output is
+- Deterministic Python decides what evidence, mapping, coverage, and AAS output is
   valid.
 - Model tools may request human input. Only `/api/agent/review` and `/api/agent/value` can apply
   trusted human decisions or create human evidence.
-- Conversation history and `MiaState` are distinct values in the same LangGraph checkpoint.
-- Reusable memory uses LangGraph's SQLite Store and is separate from both thread history and
-  generated files.
-- Generated data lives under `MIA_WORKSPACE_ROOT/<thread_id>` and is registered in one manifest.
+- Conversation history and `MiaState` are separate values saved under one thread ID.
+- Reviewed mapping knowledge is separate from both thread history and generated files.
+- SQLite stores artifact metadata; generated files live under
+  `MIA_WORKSPACE_ROOT/<thread_id>` and are resolved only through artifact IDs.
 
 ## Model-visible capabilities
 
@@ -41,13 +40,13 @@ build_product_aas
 
 The tools expose meaningful actions, while Crawl4AI, DDGS, and PydanticAI's OpenRouter provider
 remain vendor integrations. Semantic proposals are bounded to retained evidence and official
-targets. The model cannot approve them or assign authoritative confidence.
+targets. The model cannot approve them or assign authoritative mapping status.
 
 ## Observability and artifacts
 
 Every run and tool action emits a safe `AgentTraceEvent`. These are decision/action summaries,
 not private chain-of-thought. Search results, source metadata, evidence, mappings, coverage,
-reviews, validation, and AAS output are written as manifest artifacts with hashes and lineage.
+reviews, validation, and AAS output are written as artifacts with hashes and lineage.
 The workspace UI can view individual files or download the complete ZIP.
 
 Current limits: event delivery is request/response rather than SSE; local SQLite/filesystem

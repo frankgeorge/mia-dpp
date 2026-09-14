@@ -2,7 +2,7 @@
 
 MIA turns traceable product evidence into a validated Asset Administration
 Shell (AAS) environment. The backend is Python. AI can propose unfamiliar
-semantic mappings, but Python owns extraction rules, confidence arithmetic,
+semantic mappings, but Python owns extraction rules, mapping acceptance,
 template resolution, AAS compilation, validation, and deployment gates.
 
 The current end-to-end path targets IDTA Digital Nameplate 3.0.1. The same
@@ -41,7 +41,7 @@ conversation ↔ autonomous agent ↔ discovery/extraction/mapping/AAS tools
 ```
 
 The chat accepts a company name, product choice, or direct URL. Website acquisition,
-fact extraction, confidence, coverage, compilation, and validation remain deterministic.
+fact extraction, mapping assessment, coverage, compilation, and validation remain deterministic.
 Semantic proposals are constrained to retained evidence and official requirement IDs.
 Trusted PydanticAI message history and typed workflow state are stored server-side in
 SQLite for local development.
@@ -59,7 +59,7 @@ make smoke      # build, start, probe, and stop the Docker stack
 ```text
 source data
   -> EvidenceRecord with provenance
-  -> proposed mapping plus explainable confidence factors
+  -> proposed mapping plus an explainable basis and review policy
   -> human-approved MappingSpecification
   -> pinned official IDTA template
   -> aas-core3.0 Environment
@@ -67,18 +67,18 @@ source data
   -> deployable artifact or explicit GapReport
 ```
 
-Every confidence number is a reproducible evidence score, not a probability.
-The interface shows the awarded points and the specific uncertainty behind the
-missing points. Previous human decisions can reduce target ambiguity; they do
-not prove that a value on a new product is correct.
+Mappings state whether their basis is an exact deterministic rule, semantic
+reasoning, or trusted human input. Ambiguity and weak signals require review;
+MIA does not present handcrafted scores as statistical confidence.
 
 ## Repository map
 
 ```text
 app/, components/                 Next.js structured-agent interface
-backend/src/mia_dpp/agent/       LangGraph lifecycle and PydanticAI autonomous brain
-backend/src/mia_dpp/workspace/   artifact manifest, lineage, viewing, and export
-backend/src/mia_dpp/tools/web/    generic and adapter-based evidence extraction
+backend/src/mia_dpp/mia.py       PydanticAI autonomy and trusted defer/resume
+backend/src/mia_dpp/agent/       model-visible tools, state, prompts, dependencies
+backend/src/mia_dpp/store.py     sessions, deferrals, reviewed knowledge, artifacts
+backend/src/mia_dpp/tools/web/    provenance-aware generic evidence extraction
 backend/src/mia_dpp/tools/mapping/
                                   mapping, confidence, coverage, review
 backend/src/mia_dpp/aas/          official templates, compiler, validator
@@ -90,10 +90,10 @@ standards/idta-submodel-templates/
 ```
 
 MIA does not copy upstream application source into its own package. `aas-core`
-and Crawl4AI are locked Python dependencies behind MIA-owned adapters. BaSyx
-PDF-to-AAS remains optional, and BaSyx is an external runtime. AASbyLLM remains
-reference material. LangGraph owns checkpoints and human interrupts; PydanticAI is
-the single autonomous decision-maker.
+and Crawl4AI are locked Python dependencies behind small MIA boundaries. BaSyx
+PDF-to-AAS remains optional, and BaSyx is an external runtime. PydanticAI owns
+tool selection and deferred human calls; MIA validates and persists trusted
+resume results server-side.
 
 See `docs/agent.md` for the autonomous architecture and
 `docs/deterministic-backend.md` for the validation layers.
@@ -110,8 +110,9 @@ The frontend runs on port 3000 and the Python API on port 8000 by default.
 Override them with `FRONTEND_PORT`, `BACKEND_PORT`, and `API_URL` when needed.
 
 Current limits are explicit: generic website ingestion recognizes common
-schema.org Product data and labelled specification tables; unusual sites still
-need an approved `SiteAdapterSpec`. Automatic PDF fact mapping is not yet
-implemented, browser mapping memory is local, and Digital Nameplate's external
+schema.org Product data and labelled specification tables. A generated
+Crawl4AI site schema must be reviewed and fixture-tested before it is committed
+as trusted extraction data. Automatic PDF fact mapping is not yet implemented,
+and Digital Nameplate's external
 Address Information drop-in is structurally present but reported as not deeply
 validated. No OPC-UA, MQTT, PLC, telemetry, or time-series path is included.

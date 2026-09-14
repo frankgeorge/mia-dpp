@@ -28,23 +28,20 @@ submodule with `make refs` after a normal clone.
 
 | Concern | Code | Deterministic guarantee |
 |---|---|---|
-| API/domain contracts | `backend/src/mia_dpp/models.py` | Pydantic rejects unknown or inconsistent data. |
-| Template ingestion | `templates.py` | Exact commit, path and content digest are checked. |
-| Website extraction | `extraction.py` | An approved `SiteAdapterSpec` drives CSS, XPath, metadata and JSON-LD rules. |
-| Website ingestion | `website.py` | Crawl4AI renders the page; MIA converts common structured fields into evidence and reuses the existing mapper. |
-| PDF preprocessing | `documents.py` | BaSyx PDF-to-AAS is isolated behind a text-preprocessor interface. |
-| Confidence | `confidence.py` | Five visible factors add up to the displayed score. |
-| Demo evidence | `idta.py` | Regex rules produce provenance-rich evidence and official mapping targets. |
-| Compilation | `aas.py` | Approved values are projected onto official template nodes and serialized by `aas-core`. |
-| Pipeline | `pipeline.py` | Evidence, mapping, compilation, gaps and validation run in one order. |
-| BaSyx deployment | `basyx.py` | Invalid, stale or modified artifacts are rejected before HTTP calls. |
+| Domain contracts | `domain/` | Pydantic rejects unknown or inconsistent data. |
+| Template ingestion/index | `aas/templates.py`, `aas/requirements.py` | Exact commit, content digest, and one shared `TemplateIndex` are checked. |
+| Website extraction | `tools/web/` | Crawl4AI renders; MIA retains common structured facts with provenance. |
+| PDF preprocessing | `tools/documents/`, `integrations/pdf2aas.py` | Optional PDFium/pdf2aas code stays behind a text-preprocessor boundary. |
+| Mapping policy | `tools/mapping/` | Exact rules, semantic proposals, and human decisions remain distinguishable. |
+| Compilation | `aas/compiler.py` | Accepted values are projected onto official template nodes and serialized by `aas-core`. |
+| Validation | `aas/validator.py` | Metamodel and IDTA-specific path/cardinality checks gate output. |
+| BaSyx deployment | `integrations/basyx.py` | Invalid, stale, or modified artifacts are rejected before HTTP calls. |
 
-## Confidence is a score, not a probability
+## Mapping assessment is not a probability
 
-Each mapping receives points for its source label, value format, semantic match,
-destination ambiguity and independent corroboration. Every incomplete factor
-adds a plain-language uncertainty. Previous human approvals can reduce target
-ambiguity, but they never count as evidence that the current value is correct.
+Each mapping records an explicit basis (`exact`, `semantic`, or `human`), a
+review decision, and plain-language uncertainties. No model-provided or
+handcrafted numeric confidence is authoritative.
 
 ## Validation layers
 
@@ -64,6 +61,6 @@ validation occurred.
 
 Without `OPENROUTER_API_KEY`, the complete local path is deterministic. With a
 key, OpenRouter may propose source-to-target candidates. Python still resolves
-targets from the pinned template, computes confidence, creates the AAS and
-performs validation. An LLM-supplied semantic ID or confidence number is never
+targets from the pinned template, applies review policy, creates the AAS and
+performs validation. An LLM-supplied semantic ID or confidence value is never
 authoritative.
