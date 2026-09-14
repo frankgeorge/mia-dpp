@@ -53,6 +53,27 @@ async def search_companies(
     It stores structured candidates and pauses the job for selection.
     """
 
+    extracted_products = [
+        product_id for product_id, work in ctx.deps.state.products.items() if work.extractions
+    ]
+    if extracted_products:
+        ctx.deps.add_event(
+            "company.search_skipped",
+            "Skipped company discovery because a direct product source is already selected.",
+            tool_name="search_companies",
+            input_summary=company_name,
+            metadata={"extractedProducts": len(extracted_products)},
+        )
+        return ToolObservation(
+            outcome="source_already_selected",
+            summary=(
+                "Do not ask for company confirmation. Continue resolving the already extracted "
+                "product source."
+            ),
+            count=len(extracted_products),
+            identifiers=tuple(extracted_products),
+        )
+
     started = time.monotonic()
     try:
         candidates = await ctx.deps.company_tool.search(company_name)
@@ -235,9 +256,52 @@ async def extract_product_page(
     appended to that product's ``ProductWork`` so further sources can be added.
     """
 
+    normalized_url = url.rstrip("/")
+    for existing_product_id, existing_work in ctx.deps.state.products.items():
+        if any(
+            extraction.source_url.rstrip("/") == normalized_url
+            for extraction in existing_work.extractions
+        ):
+            ctx.deps.state.current_product_id = existing_product_id
+            ctx.deps.state.status = AgentStatus.RUNNING
+            next_action = (
+                "Inspect the existing mapping and coverage next."
+                if existing_work.resolution is not None
+                else "Run deterministic mapping for this product next."
+            )
+            ctx.deps.add_event(
+                "web.extraction_reused",
+                "Reused the product source already stored in this thread.",
+                tool_name="extract_product_page",
+                product_id=existing_product_id,
+                input_summary=url,
+            )
+            return ToolObservation(
+                outcome="already_extracted",
+                summary=next_action,
+                count=len(
+                    {
+                        record.id
+                        for extraction in existing_work.extractions
+                        for record in extraction.knowledge_package.evidence
+                    }
+                ),
+                identifiers=(existing_product_id,),
+            )
+
     started = time.monotonic()
     extraction = await ctx.deps.web_tool.extract(url)
-    resolved_id = product_id or extraction.knowledge_package.product_id
+    source_candidate_owner = next(
+        (
+            existing_product_id
+            for existing_product_id, existing_work in ctx.deps.state.products.items()
+            if any(
+                item.url.rstrip("/") == normalized_url for item in existing_work.source_candidates
+            )
+        ),
+        None,
+    )
+    resolved_id = product_id or source_candidate_owner or extraction.knowledge_package.product_id
     candidate = next(
         (item for item in ctx.deps.state.product_candidates if item.id == resolved_id),
         None,
@@ -316,6 +380,27 @@ async def map_product_evidence(
             summary="Extract product evidence before mapping it.",
             count=0,
         )
+    if work.resolution is not None:
+        current_evidence_ids = {item.id for item in extraction.knowledge_package.evidence}
+        mapped_evidence_ids = {item.id for item in work.resolution.evidence}
+        if current_evidence_ids == mapped_evidence_ids:
+            resolution = work.resolution
+            ctx.deps.add_event(
+                "mapping.reused",
+                "Reused the current deterministic mapping because no new evidence was added.",
+                tool_name="map_product_evidence",
+                product_id=product_id,
+                metadata={"evidenceCount": len(current_evidence_ids)},
+            )
+            return ToolObservation(
+                outcome="already_mapped",
+                summary=(
+                    "Do not map this evidence again. Inspect unresolved mappings, request review, "
+                    "research a genuinely new source, or continue completion."
+                ),
+                count=len(resolution.mapping_result.mapped),
+                identifiers=(product_id,),
+            )
     started = time.monotonic()
     resolution = await ctx.deps.mapping_tool.resolve_package(
         extraction.knowledge_package,
@@ -400,6 +485,16 @@ async def research_product_sources(
             outcome="product_required",
             summary="Select or extract a product before researching additional sources.",
             count=0,
+        )
+    if work.pending_reviews:
+        return ToolObservation(
+            outcome="source_review_required",
+            summary=(
+                "Request human review for the existing semantic proposals before researching "
+                "additional sources."
+            ),
+            count=len(work.pending_reviews),
+            identifiers=tuple(item.id for item in work.pending_reviews),
         )
     extraction = work.combined_extraction()
     product_name = (
@@ -669,6 +764,23 @@ async def request_human_value(
             outcome="mapping_required",
             summary="No product coverage exists for this answer.",
             count=0,
+        )
+    if work.pending_reviews:
+        return ToolObservation(
+            outcome="source_review_required",
+            summary=(
+                "Resolve the pending source-derived mapping reviews before asking for missing "
+                "requirement values."
+            ),
+            count=len(work.pending_reviews),
+            identifiers=tuple(item.id for item in work.pending_reviews),
+        )
+    if ctx.deps.state.pending_human_request is not None:
+        return ToolObservation(
+            outcome="human_input_already_requested",
+            summary="Wait for the existing trusted human request instead of creating another one.",
+            count=1,
+            identifiers=(ctx.deps.state.pending_human_request.product_id,),
         )
     missing = {
         item.requirement_id

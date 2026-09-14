@@ -6,6 +6,7 @@ import asyncio
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic_ai.models.test import TestModel
@@ -14,14 +15,18 @@ from pydantic_ai.tools import ToolDefinition
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.brain import AutonomousAgent
+from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.graph import MiaAgent
 from mia_dpp.agent.models import (
     AgentRequest,
     AgentReviewDecision,
     AgentReviewRequest,
     AgentStatus,
+    MiaState,
+    ProductWork,
 )
-from mia_dpp.agent.tools import AGENT_TOOLS
+from mia_dpp.agent.tools import AGENT_TOOLS, extract_product_page
+from mia_dpp.domain.discovery import ProductSourceCandidate
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
@@ -53,7 +58,11 @@ class FakeSearch:
 
 
 class FixtureLoader:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     async def load(self, url: str) -> RenderedPage:
+        self.calls.append(url)
         return RenderedPage(
             url=url,
             html="""
@@ -179,6 +188,107 @@ def test_one_pydanticai_run_can_call_multiple_tools_and_create_lineage(tmp_path:
     assert mapping.derived_from
 
 
+def test_direct_url_does_not_trigger_company_confirmation_or_repeat_work(
+    tmp_path: Path,
+) -> None:
+    url = "https://manufacturer.example/products/pg-16"
+    loader = FixtureLoader()
+    model = ScriptedTestModel(
+        arguments={
+            "extract_product_page": {"url": url, "product_id": "product-direct"},
+            "search_companies": {"company_name": "Example Instruments"},
+            "map_product_evidence": {"product_id": "product-direct"},
+        },
+        call_tools=[
+            "extract_product_page",
+            "extract_product_page",
+            "search_companies",
+            "map_product_evidence",
+            "map_product_evidence",
+        ],
+        custom_output_args={
+            "reply": "The direct product source was extracted and mapped.",
+            "status": "awaiting_input",
+            "decision_summary": "Reused completed work instead of requesting confirmation.",
+        },
+    )
+    agent, workspace = build_agent(tmp_path, model, loader=loader)
+
+    result = asyncio.run(agent.message(AgentRequest(message=f"Create a DPP from {url}")))
+
+    assert loader.calls == [url]
+    assert result.company_candidates == ()
+    assert result.current_product is not None
+    assert result.current_product.resolution is not None
+    event_types = {event.event_type for event in result.trace_events}
+    assert "web.extraction_reused" in event_types
+    assert "company.search_skipped" in event_types
+    assert "mapping.reused" in event_types
+    artifacts = workspace.list_artifacts(result.thread_id)
+    assert sum(item.kind is ArtifactKind.EVIDENCE for item in artifacts) == 1
+    assert sum(item.kind is ArtifactKind.MAPPING for item in artifacts) == 1
+
+
+def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path) -> None:
+    product_url = "https://manufacturer.example/products/pg-16"
+    additional_url = "https://www.siemens.com/global/en.html"
+    repository = OfficialTemplateRepository()
+    search = FakeSearch()
+
+    async def public_resolver(host: str, port: int) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    web_tool = WebExtractionTool(
+        loader=FixtureLoader(),
+        url_policy=ProductUrlPolicy(public_resolver),
+    )
+    initial = asyncio.run(web_tool.extract(product_url))
+    source_candidate = ProductSourceCandidate(
+        id="source-additional",
+        product_id="product-direct",
+        title="Manufacturer details",
+        url=additional_url,
+        description="Official company page",
+        authoritative_domain=True,
+        source_uri=additional_url,
+    )
+    state = MiaState(
+        thread_id="thread-additional-source",
+        selected_product_ids=("product-direct",),
+        current_product_id="product-direct",
+        products={
+            "product-direct": ProductWork(
+                product_id="product-direct",
+                extractions=(initial,),
+                source_candidates=(source_candidate,),
+            )
+        },
+    )
+    workspace = FileWorkspaceStore(tmp_path / "workspaces")
+    review = MappingReviewService(repository)
+    dependencies = MiaDependencies(
+        state=state,
+        company_tool=CompanyDiscoveryTool(search),
+        product_tool=ProductDiscoveryTool(search),
+        product_research_tool=ProductResearchTool(search),
+        web_tool=web_tool,
+        mapping_tool=ProductResolver(repository),
+        mapping_review=review,
+        mapping_knowledge=MappingKnowledgeStore(tmp_path / "knowledge.sqlite3"),
+        dpp_pipeline=DeterministicDppPipeline(repository),
+        workspace=workspace,
+    )
+
+    observation = asyncio.run(
+        extract_product_page(SimpleNamespace(deps=dependencies), additional_url)  # type: ignore[arg-type]
+    )
+
+    assert observation.identifiers == ("product-direct",)
+    assert state.current_product_id == "product-direct"
+    assert tuple(state.products) == ("product-direct",)
+    assert len(state.products["product-direct"].extractions) == 2
+
+
 def test_trace_is_observable_before_agent_run_completes(tmp_path: Path) -> None:
     url = "https://manufacturer.example/products/pg-16"
     model = ScriptedTestModel(
@@ -219,11 +329,17 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
         arguments={
             "extract_product_page": {"url": url, "product_id": "product-review"},
             "map_product_evidence": {"product_id": "product-review"},
+            "request_human_value": {
+                "product_id": "product-review",
+                "requirement_id": "ignored-while-review-pending",
+                "question": "What is the manufacturer name?",
+            },
             "request_human_review": {"product_id": "product-review"},
         },
         call_tools=[
             "extract_product_page",
             "map_product_evidence",
+            "request_human_value",
             "request_human_review",
         ],
         custom_output_args={
@@ -236,7 +352,9 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
     pending = asyncio.run(agent.message(AgentRequest(message=f"DPP from {url}")))
 
     assert pending.pending_human_request is not None
+    assert pending.pending_human_request.kind.value == "mapping_review"
     assert pending.current_product is not None
+    assert not any(event.tool_name == "request_human_value" for event in pending.trace_events)
     reviews = pending.current_product.pending_reviews
     assert reviews
     resumed = asyncio.run(
