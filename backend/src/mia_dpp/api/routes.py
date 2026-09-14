@@ -25,9 +25,9 @@ from mia_dpp.api.schemas import (
     DppBuildRequest,
     HealthResponse,
 )
-from mia_dpp.bootstrap import Application
 from mia_dpp.domain.targets import TemplateSummary
 from mia_dpp.errors import ExtractionError, MiaError
+from mia_dpp.mia import Mia
 from mia_dpp.tools.mapping.models import (
     MappingKnowledgeEntry,
     WebsiteIngestRequest,
@@ -44,7 +44,7 @@ from mia_dpp.workspace.models import WorkspaceArtifact
 router = APIRouter()
 
 
-def _application(request: Request) -> Application:
+def _application(request: Request) -> Mia:
     app: FastAPI = request.app
     return app.state.mia  # type: ignore[no-any-return]
 
@@ -89,7 +89,7 @@ async def agent_message(
     """Run one checkpointed autonomous turn for a trusted thread."""
 
     try:
-        return await _application(http_request).agent.message(payload)
+        return await _application(http_request).message(payload)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:
@@ -110,7 +110,7 @@ async def agent_review(
     """Resume an interrupt with trusted mapping-review decisions."""
 
     try:
-        return await _application(http_request).agent.review(payload)
+        return await _application(http_request).review(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(
             status_code=422,
@@ -122,7 +122,7 @@ async def agent_review(
 async def agent_value(payload: AgentValueRequest, http_request: Request) -> AgentResponse:
     """Resume an interrupt with a trusted human-supplied requirement value."""
     try:
-        return await _application(http_request).agent.provide_value(payload)
+        return await _application(http_request).provide_value(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(
             status_code=422,

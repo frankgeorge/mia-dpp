@@ -5,17 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mia_dpp import __version__
 from mia_dpp.api.routes import router
-from mia_dpp.bootstrap import build_application
+from mia_dpp.mia import Mia
 
 
-def create_app() -> FastAPI:
+def create_app(mia: Mia | None = None) -> FastAPI:
     """Create the production FastAPI application.
 
-    The ASGI server calls this entrypoint, which asks ``bootstrap`` to assemble
-    MIA's concrete dependencies and then exposes them through the API routes.
+    The ASGI server calls this entrypoint. ``Mia`` assembles and orchestrates
+    the application; this function only exposes it through FastAPI routes.
     """
 
-    application = build_application()
+    application = mia or Mia()
     app = FastAPI(
         title="MIA Digital Product Passport",
         version=__version__,

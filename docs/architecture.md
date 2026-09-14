@@ -4,10 +4,10 @@ MIA separates autonomous decisions from deterministic product-data processing. R
 in this order:
 
 1. `mia_dpp/main.py` — the production ASGI entrypoint.
-2. `mia_dpp/bootstrap.py` — explicit construction of concrete dependencies.
-3. `mia_dpp/agent/graph.py` — the small LangGraph checkpoint/interrupt lifecycle.
-4. `mia_dpp/agent/brain.py` — the single PydanticAI autonomous decision loop.
-5. `mia_dpp/agent/models.py` — trusted typed job state and safe activity events.
+2. `mia_dpp/mia.py` — concrete composition, PydanticAI autonomy, and LangGraph lifecycle.
+3. `mia_dpp/agent/models.py` — trusted typed job state and safe activity events.
+4. `mia_dpp/agent/dependencies.py` — capabilities injected into model-visible tools.
+5. `mia_dpp/agent/prompts.py` — model guidance and authority boundaries.
 6. `mia_dpp/agent/tools.py` — the small model-visible action surface.
 7. `mia_dpp/workspace/` — manifest, lineage, artifact viewing, and export.
 8. `mia_dpp/tools/mapping/` — deterministic evidence-to-target mapping and coverage.

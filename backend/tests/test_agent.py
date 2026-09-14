@@ -14,9 +14,7 @@ from pydantic_ai.tools import ToolDefinition
 
 from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.agent.brain import AutonomousAgent
 from mia_dpp.agent.dependencies import MiaDependencies
-from mia_dpp.agent.graph import MiaAgent
 from mia_dpp.agent.models import (
     AgentRequest,
     AgentReviewDecision,
@@ -26,7 +24,9 @@ from mia_dpp.agent.models import (
     ProductWork,
 )
 from mia_dpp.agent.tools import AGENT_TOOLS, extract_product_page
+from mia_dpp.config import Settings
 from mia_dpp.domain.discovery import ProductSourceCandidate
+from mia_dpp.mia import Mia
 from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
 from mia_dpp.tools.mapping.resolver import ProductResolver
@@ -91,46 +91,31 @@ class ScriptedTestModel(TestModel):
         return self._arguments.get(tool_def.name, super().gen_tool_args(tool_def))
 
 
-def build_agent(
+def build_mia(
     tmp_path: Path,
     model: TestModel,
     *,
     loader: FixtureLoader | None = None,
-) -> tuple[MiaAgent, FileWorkspaceStore]:
-    repository = OfficialTemplateRepository()
+) -> tuple[Mia, FileWorkspaceStore]:
     search = FakeSearch()
 
     async def public_resolver(host: str, port: int) -> tuple[str, ...]:
         return ("93.184.216.34",)
 
-    workspace = FileWorkspaceStore(tmp_path / "workspaces")
-    review = MappingReviewService(repository)
-    knowledge = MappingKnowledgeStore(tmp_path / "mapping-knowledge.sqlite3")
-    brain = AutonomousAgent(
+    mia = Mia(
+        settings=Settings(
+            openrouter_api_key=None,
+            MIA_THREAD_STORE_PATH=tmp_path / "threads.sqlite3",
+            MIA_WORKSPACE_ROOT=tmp_path / "workspaces",
+        ),
         model=model,
-        company_tool=CompanyDiscoveryTool(search),
-        product_tool=ProductDiscoveryTool(search),
-        product_research_tool=ProductResearchTool(search),
+        search_provider=search,
         web_tool=WebExtractionTool(
             loader=loader or FixtureLoader(),
             url_policy=ProductUrlPolicy(public_resolver),
         ),
-        mapping_tool=ProductResolver(repository),
-        mapping_review=review,
-        mapping_knowledge=knowledge,
-        dpp_pipeline=DeterministicDppPipeline(repository),
-        workspace=workspace,
     )
-    return (
-        MiaAgent(
-            brain=brain,
-            mapping_review=review,
-            mapping_knowledge=knowledge,
-            workspace=workspace,
-            database_path=tmp_path / "threads.sqlite3",
-        ),
-        workspace,
-    )
+    return mia, mia.workspace
 
 
 def test_langgraph_runs_pydanticai_and_checkpoints_state(tmp_path: Path) -> None:
@@ -142,7 +127,7 @@ def test_langgraph_runs_pydanticai_and_checkpoints_state(tmp_path: Path) -> None
             "decision_summary": "The company identity is ambiguous.",
         },
     )
-    agent, _ = build_agent(tmp_path, model)
+    agent, _ = build_mia(tmp_path, model)
 
     first = asyncio.run(agent.message(AgentRequest(message="Create a DPP for Siemens")))
     second = asyncio.run(
@@ -169,7 +154,7 @@ def test_one_pydanticai_run_can_call_multiple_tools_and_create_lineage(tmp_path:
             "decision_summary": "Extraction and deterministic mapping completed.",
         },
     )
-    agent, workspace = build_agent(tmp_path, model)
+    agent, workspace = build_mia(tmp_path, model)
 
     result = asyncio.run(agent.message(AgentRequest(message=f"Create a DPP from {url}")))
 
@@ -212,7 +197,7 @@ def test_direct_url_does_not_trigger_company_confirmation_or_repeat_work(
             "decision_summary": "Reused completed work instead of requesting confirmation.",
         },
     )
-    agent, workspace = build_agent(tmp_path, model, loader=loader)
+    agent, workspace = build_mia(tmp_path, model, loader=loader)
 
     result = asyncio.run(agent.message(AgentRequest(message=f"Create a DPP from {url}")))
 
@@ -300,7 +285,7 @@ def test_trace_is_observable_before_agent_run_completes(tmp_path: Path) -> None:
             "decision_summary": "The page was extracted.",
         },
     )
-    agent, workspace = build_agent(tmp_path, model, loader=SlowFixtureLoader())
+    agent, workspace = build_mia(tmp_path, model, loader=SlowFixtureLoader())
 
     async def observe() -> None:
         task = asyncio.create_task(agent.message(AgentRequest(message=f"DPP from {url}")))
@@ -348,7 +333,7 @@ def test_human_review_resumes_the_same_langgraph_checkpoint(tmp_path: Path) -> N
             "decision_summary": "A human decision is required.",
         },
     )
-    agent, workspace = build_agent(tmp_path, model)
+    agent, workspace = build_mia(tmp_path, model)
     pending = asyncio.run(agent.message(AgentRequest(message=f"DPP from {url}")))
 
     assert pending.pending_human_request is not None

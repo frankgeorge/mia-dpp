@@ -21,7 +21,7 @@ class MiaDependencies:
     """Capabilities injected into every PydanticAI tool call.
 
     Tools use this object to read or update the current ``MiaState`` and to
-    invoke MIA services assembled by ``bootstrap``. The model never constructs
+    invoke MIA services assembled by ``Mia``. The model never constructs
     these trusted dependencies itself.
     """
 

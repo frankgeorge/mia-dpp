@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -70,7 +69,7 @@ def test_agent_message_endpoint_returns_a_resumable_thread(
                 decision_summary="More information is required.",
             )
 
-    monkeypatch.setattr(app.state, "mia", replace(app.state.mia, agent=Agent()))
+    monkeypatch.setattr(app.state.mia, "message", Agent().message)
     response = request(
         "POST",
         "/api/agent/messages",
@@ -94,7 +93,7 @@ def test_agent_endpoint_accepts_only_a_thread_and_new_message(
                 decision_summary="Company discovery is required.",
             )
 
-    monkeypatch.setattr(app.state, "mia", replace(app.state.mia, agent=Agent()))
+    monkeypatch.setattr(app.state.mia, "message", Agent().message)
     response = request(
         "POST",
         "/api/agent/messages",
@@ -249,7 +248,7 @@ def test_website_endpoint_feeds_provenance_into_dpp(
         ),
         ProductResolver(repository),
     )
-    monkeypatch.setattr(app.state, "mia", replace(app.state.mia, website_workflow=workflow))
+    monkeypatch.setattr(app.state.mia, "website_workflow", workflow)
 
     imported = request("POST", "/api/website", {"url": url, "graph": []})
 

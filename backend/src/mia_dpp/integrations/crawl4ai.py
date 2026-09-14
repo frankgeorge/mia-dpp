@@ -8,7 +8,7 @@ from mia_dpp.tools.web.models import ExtractionDependencyError, PageLoadError, R
 class Crawl4AIPageLoader:
     """Render public pages through Crawl4AI for ``WebExtractionTool``.
 
-    ``bootstrap`` injects this concrete integration through the provider-neutral
+    ``Mia`` injects this concrete integration through the provider-neutral
     ``PageLoader`` boundary; it returns HTML and the final redirected URL.
     """
 

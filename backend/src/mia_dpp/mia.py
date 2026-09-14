@@ -1,12 +1,12 @@
-"""Small LangGraph lifecycle around MIA's autonomous PydanticAI brain."""
+"""MIA's composition root and complete autonomous application behavior."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import uuid
-from collections.abc import Callable
-from pathlib import Path
+from collections.abc import Callable, Sequence
 from queue import SimpleQueue
 from threading import Thread
 from typing import Any, Literal, TypedDict
@@ -16,23 +16,43 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.store.sqlite import SqliteStore
 from langgraph.types import Command, interrupt
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai import Agent
+from pydantic_ai.capabilities import Capability
+from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
+from pydantic_ai.models import Model
+from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from mia_dpp.agent.brain import AutonomousAgent
+from mia_dpp.aas.build import DeterministicDppPipeline
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.models import (
     AgentRequest,
     AgentResponse,
     AgentReviewRequest,
+    AgentRunOutput,
     AgentStatus,
     AgentValueRequest,
     HumanRequestKind,
     MiaState,
     ProductStatus,
+    TraceStatus,
 )
+from mia_dpp.agent.prompts import AGENT_INSTRUCTIONS, DPP_CREATION_SKILL
+from mia_dpp.agent.tools import AGENT_TOOLS
+from mia_dpp.config import Settings
+from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
+from mia_dpp.integrations.ddgs import DdgsSearchProvider
+from mia_dpp.tools.company.tool import CompanyDiscoveryTool
 from mia_dpp.tools.mapping.knowledge import MappingKnowledgeStore
+from mia_dpp.tools.mapping.resolver import ProductResolver, WebsiteWorkflow
 from mia_dpp.tools.mapping.review import MappingReviewService
+from mia_dpp.tools.products.research import ProductResearchTool
+from mia_dpp.tools.products.tool import ProductDiscoveryTool
+from mia_dpp.tools.search import SearchProvider
+from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.workspace.models import ArtifactKind
-from mia_dpp.workspace.store import WorkspaceStore
+from mia_dpp.workspace.store import FileWorkspaceStore
 
 
 class LifecycleState(TypedDict, total=False):
@@ -46,27 +66,78 @@ class LifecycleState(TypedDict, total=False):
     trace_offset: int
 
 
-class MiaAgent:
-    """Own thread lifetime while delegating every autonomous choice to PydanticAI.
+class Mia:
+    """Compose MIA and own its autonomous, checkpointed application behavior.
 
-    LangGraph checkpoints job state and model history, interrupts for human
-    authority, and resumes the same thread. PydanticAI alone selects tools.
+    FastAPI calls the small public message/review/value surface. LangGraph owns
+    thread lifetime and trusted interrupts, while PydanticAI alone selects and
+    repeats reusable tools. Deterministic capabilities remain separate modules.
     """
 
     def __init__(
         self,
         *,
-        brain: AutonomousAgent,
-        mapping_review: MappingReviewService,
-        mapping_knowledge: MappingKnowledgeStore,
-        workspace: WorkspaceStore,
-        database_path: Path,
+        settings: Settings | None = None,
+        model: Model | None = None,
+        search_provider: SearchProvider | None = None,
+        web_tool: WebExtractionTool | None = None,
     ) -> None:
-        self._brain = brain
-        self._mapping_review = mapping_review
-        self._mapping_knowledge = mapping_knowledge
-        self._workspace = workspace
-        self._database_path = database_path
+        """Connect concrete capabilities, PydanticAI, and the LangGraph lifecycle.
+
+        Production uses configured OpenRouter, DDGS, and Crawl4AI implementations.
+        Tests may inject a model, search provider, or web capability while running
+        the exact same application behavior.
+        """
+
+        self.settings = settings or Settings()
+        self.templates = OfficialTemplateRepository(self.settings.standards_root)
+
+        search = search_provider or DdgsSearchProvider()
+        self.web_tool = web_tool or WebExtractionTool(loader=Crawl4AIPageLoader())
+        self.resolver = ProductResolver(self.templates)
+        self.website_workflow = WebsiteWorkflow(self.web_tool, self.resolver)
+        self.workspace = FileWorkspaceStore(self.settings.workspace_root)
+        self.mapping_knowledge = MappingKnowledgeStore(
+            self.settings.thread_store_path.with_name(
+                self.settings.thread_store_path.stem + "-mapping-knowledge.sqlite3"
+            )
+        )
+
+        self._company_tool = CompanyDiscoveryTool(search)
+        self._product_tool = ProductDiscoveryTool(search)
+        self._product_research_tool = ProductResearchTool(search)
+        self._mapping_review = MappingReviewService(self.templates)
+        self._dpp_pipeline = DeterministicDppPipeline(self.templates)
+
+        agent_model = model
+        if agent_model is None and self.settings.openrouter_api_key is not None:
+            agent_model = OpenRouterModel(
+                self.settings.agent_model,
+                provider=OpenRouterProvider(
+                    api_key=self.settings.openrouter_api_key.get_secret_value(),
+                    app_url="https://mia-dpp.vercel.app",
+                    app_title="MIA Digital Product Passport",
+                ),
+            )
+        self._agent: Agent[MiaDependencies, AgentRunOutput] | None = None
+        if agent_model is not None:
+            skill = Capability[MiaDependencies](
+                id="dpp-creation",
+                description="How MIA approaches evidence-backed DPP and AAS creation.",
+                instructions=DPP_CREATION_SKILL,
+            )
+            self._agent = Agent[MiaDependencies, AgentRunOutput](
+                agent_model,
+                name="mia-agent",
+                deps_type=MiaDependencies,
+                output_type=AgentRunOutput,
+                instructions=AGENT_INSTRUCTIONS,
+                tools=AGENT_TOOLS,
+                capabilities=[skill],
+                retries=2,
+            )
+
+        database_path = self.settings.thread_store_path
         database_path.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_connection = sqlite3.connect(database_path, check_same_thread=False)
         memory_path = database_path.with_name(database_path.stem + "-memory.sqlite3")
@@ -85,8 +156,13 @@ class MiaAgent:
             {"human": "human_interrupt", "done": END},
         )
         builder.add_edge("human_interrupt", END)
-        self._builder = builder
         self._graph = builder.compile(checkpointer=self._checkpointer, store=self._memory)
+
+    @property
+    def configured(self) -> bool:
+        """Return whether an autonomous model is available for agent turns."""
+
+        return self._agent is not None
 
     async def message(self, request: AgentRequest) -> AgentResponse:
         """Run one checkpointed user turn through the autonomous PydanticAI loop."""
@@ -109,7 +185,7 @@ class MiaAgent:
         graph_input = (
             {"user_message": request.message}
             if snapshot.values
-            else self.initial_input(thread_id, request.message)
+            else self._initial_state(thread_id, request.message)
         )
         values = self._graph.invoke(graph_input, self._config(thread_id))
         return self._response_from_values(thread_id, values)
@@ -159,7 +235,7 @@ class MiaAgent:
         if not state.user_goal:
             state.user_goal = message
         history = ModelMessagesTypeAdapter.validate_json(values.get("model_history_json", "[]"))
-        output, messages, trace_offset = asyncio.run(self._brain.run(message, state, history))
+        output, messages, trace_offset = asyncio.run(self._run_agent(message, state, history))
         self._persist_snapshot(state, output.decision_summary)
         return {
             "job": state.model_dump(mode="json"),
@@ -169,6 +245,116 @@ class MiaAgent:
             "trace_offset": trace_offset,
             "user_message": "Continue after the trusted human action.",
         }
+
+    async def _run_agent(
+        self,
+        message: str,
+        state: MiaState,
+        history: Sequence[ModelMessage],
+    ) -> tuple[AgentRunOutput, list[ModelMessage], int]:
+        """Give trusted state and reusable tools to one autonomous model turn."""
+
+        trace_offset = len(state.trace)
+        dependencies = MiaDependencies(
+            state=state,
+            company_tool=self._company_tool,
+            product_tool=self._product_tool,
+            product_research_tool=self._product_research_tool,
+            web_tool=self.web_tool,
+            mapping_tool=self.resolver,
+            mapping_review=self._mapping_review,
+            mapping_knowledge=self.mapping_knowledge,
+            dpp_pipeline=self._dpp_pipeline,
+            workspace=self.workspace,
+        )
+        if self._agent is None:
+            state.status = AgentStatus.AWAITING_INPUT
+            dependencies.add_event(
+                "run.configuration_required",
+                "MIA agent requires OPENROUTER_API_KEY.",
+            )
+            return (
+                AgentRunOutput(
+                    reply="Configure OPENROUTER_API_KEY to use the autonomous MIA agent.",
+                    status=AgentStatus.AWAITING_INPUT,
+                    decision_summary=(
+                        "No model call was attempted because the server is unconfigured."
+                    ),
+                ),
+                list(history),
+                trace_offset,
+            )
+
+        dependencies.add_event(
+            "run.started",
+            "MIA started an autonomous decision loop.",
+            status=TraceStatus.STARTED,
+            input_summary=message[:200],
+        )
+        result = await self._agent.run(
+            self._prompt_with_state(message, state),
+            deps=dependencies,
+            message_history=history,
+            conversation_id=state.thread_id,
+        )
+        output = result.output
+        if state.status is AgentStatus.RUNNING:
+            state.status = output.status
+        dependencies.add_event(
+            "run.completed",
+            output.decision_summary,
+            metadata={
+                "requestCount": result.usage.requests,
+                "inputTokens": result.usage.input_tokens,
+                "outputTokens": result.usage.output_tokens,
+            },
+        )
+        return output, result.all_messages(), trace_offset
+
+    @staticmethod
+    def _prompt_with_state(message: str, state: MiaState) -> str:
+        """Attach compact trusted job state without copying evidence into chat history."""
+
+        compact = {
+            "threadId": state.thread_id,
+            "goal": state.user_goal,
+            "selectedCompany": (
+                state.selected_company.model_dump(mode="json") if state.selected_company else None
+            ),
+            "companyCandidates": [
+                {"id": item.id, "name": item.name, "domain": item.domain}
+                for item in state.company_candidates
+            ],
+            "productCandidates": [
+                {"id": item.id, "name": item.name, "url": item.official_url}
+                for item in state.product_candidates
+            ],
+            "selectedProductIds": list(state.selected_product_ids),
+            "products": {
+                key: {
+                    "sourceCount": len(value.extractions),
+                    "sourceCandidates": [
+                        {
+                            "id": item.id,
+                            "url": item.url,
+                            "authoritative": item.authoritative_domain,
+                        }
+                        for item in value.source_candidates
+                    ],
+                    "hasEvidence": bool(value.extractions),
+                    "hasMapping": value.resolution is not None,
+                    "pendingReviews": len(value.pending_reviews),
+                    "hasArtifact": value.aas_artifact_sha256 is not None,
+                }
+                for key, value in state.products.items()
+            },
+            "status": state.status,
+        }
+        return (
+            message
+            + "\n\nTrusted current MIA job state (server supplied):\n"
+            + json.dumps(compact, ensure_ascii=False)
+        )
 
     def _human_interrupt(self, values: LifecycleState) -> LifecycleState:
         state = MiaState.model_validate(values["job"])
@@ -215,7 +401,7 @@ class MiaAgent:
                 comment=decision.comment,
             )
             company = state.selected_company
-            self._mapping_knowledge.remember_review(
+            self.mapping_knowledge.remember_review(
                 reviewed.mapping,
                 decision=decision.decision,
                 manufacturer=company.name if company else None,
@@ -223,7 +409,7 @@ class MiaAgent:
                 product_family=work.candidate.family if work.candidate else None,
                 comment=decision.comment,
             )
-            artifact = self._workspace.write_json(
+            artifact = self.workspace.write_json(
                 state.thread_id,
                 ArtifactKind.REVIEW,
                 "mapping-review.json",
@@ -250,7 +436,7 @@ class MiaAgent:
             value=request.value,
             thread_id=state.thread_id,
         )
-        artifact = self._workspace.write_json(
+        artifact = self.workspace.write_json(
             state.thread_id,
             ArtifactKind.REVIEW,
             "human-evidence.json",
@@ -299,12 +485,12 @@ class MiaAgent:
             current_product=current,
             pending_human_request=state.pending_human_request,
             trace_events=state.trace[trace_offset:],
-            artifact_count=len(self._workspace.list_artifacts(state.thread_id)),
+            artifact_count=len(self.workspace.list_artifacts(state.thread_id)),
         )
 
     def _persist_trace(self, state: MiaState, offset: int) -> None:
         for event in state.trace[offset:]:
-            self._workspace.write_json(
+            self.workspace.write_json(
                 state.thread_id,
                 ArtifactKind.TRACE,
                 "event.json",
@@ -317,7 +503,7 @@ class MiaAgent:
         current = state.products.get(state.current_product_id) if state.current_product_id else None
         resolution = current.resolution if current is not None else None
         statistics = resolution.coverage_report.statistics if resolution is not None else None
-        self._workspace.write_json(
+        self.workspace.write_json(
             state.thread_id,
             ArtifactKind.TRACE,
             "state-snapshot.json",
@@ -335,14 +521,14 @@ class MiaAgent:
                 ),
                 "missingMandatory": statistics.required_missing if statistics else 0,
                 "pendingReviews": len(current.pending_reviews) if current else 0,
-                "artifactCount": len(self._workspace.list_artifacts(state.thread_id)),
+                "artifactCount": len(self.workspace.list_artifacts(state.thread_id)),
             },
             created_by="langgraph",
             product_id=state.current_product_id,
         )
 
     @staticmethod
-    def initial_input(thread_id: str, message: str) -> LifecycleState:
+    def _initial_state(thread_id: str, message: str) -> LifecycleState:
         state = MiaState(thread_id=thread_id, user_goal=message)
         return {
             "job": state.model_dump(mode="json"),
