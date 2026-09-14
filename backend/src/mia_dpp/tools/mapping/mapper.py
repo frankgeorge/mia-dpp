@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import ClassVar
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
@@ -15,8 +15,6 @@ from mia_dpp.tools.mapping.confidence import (
 )
 from mia_dpp.tools.mapping.targets import mapping_target
 from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
-
-MappingHistory = Mapping[tuple[str, str], int]
 
 
 class DeterministicWebsiteMapper:
@@ -48,8 +46,6 @@ class DeterministicWebsiteMapper:
     async def propose(
         self,
         evidence: Sequence[EvidenceRecord],
-        *,
-        history: MappingHistory,
     ) -> MappingResult:
         """Map each evidence record once and return mapped, ambiguous, and unmatched sets."""
 
@@ -94,7 +90,6 @@ class DeterministicWebsiteMapper:
             draft = propose_text_mappings(
                 f"{mapping_label}: {value}" if mapping_label else value,
                 self._repository,
-                history=dict(history),
                 allow_unlabelled_year=False,
             )
             candidates = [

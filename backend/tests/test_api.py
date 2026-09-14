@@ -15,9 +15,6 @@ from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.main import app
 from mia_dpp.store import ArtifactKind
 from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
-from mia_dpp.tools.web.models import RenderedPage
-from mia_dpp.tools.web.tool import WebExtractionTool
-from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 
 def request(
@@ -217,60 +214,3 @@ def test_trace_endpoint_returns_normalized_events_without_state_snapshots() -> N
 
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [event.id]
-
-
-def test_website_endpoint_feeds_provenance_into_dpp(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    url = "https://manufacturer.example/products/pg-16"
-    html = """
-    <html><head><script type="application/ld+json">
-    {"@context":"https://schema.org","@type":"Product","name":"Gauge PG-16",
-     "model":"PG-16","manufacturer":{"name":"Example Instruments GmbH"},
-     "serialNumber":"SN-2048","sku":"63820","productionDate":"2024"}
-    </script></head><body><h1>Gauge PG-16</h1></body></html>
-    """
-
-    class Loader:
-        async def load(self, requested_url: str) -> RenderedPage:
-            assert requested_url == url
-            return RenderedPage(url=url, html=html)
-
-    async def resolver(host: str, port: int) -> tuple[str, ...]:
-        return ("93.184.216.34",)
-
-    web_tool = WebExtractionTool(
-        loader=Loader(),
-        url_policy=ProductUrlPolicy(resolver),
-    )
-    monkeypatch.setattr(app.state.mia, "web_tool", web_tool)
-
-    imported = request("POST", "/api/website", {"url": url, "graph": []})
-
-    assert imported.status_code == 200
-    body = imported.json()
-    assert body["mode"] == "website"
-    assert body["sourceUrl"] == url
-    assert [item["key"] for item in body["coverageReport"]["inventory"]["selectedTemplates"]] == [
-        "digital_nameplate",
-        "technical_data",
-    ]
-    assert body["coverageReport"]["statistics"]["requirements"] == 79
-    mappings = body["proposal"]["mappings"]
-    for index, mapping in enumerate(mappings):
-        mapping["id"] = f"website-{index}"
-        mapping["status"] = "approved"
-    generated = request(
-        "POST",
-        "/api/dpp",
-        {
-            "productName": body["proposal"]["productName"],
-            "mappings": mappings,
-            "evidence": body["evidence"],
-        },
-    )
-
-    assert generated.status_code == 200
-    package = generated.json()
-    assert package["deployable"] is True
-    assert {item["sourceUri"] for item in package["evidence"]} == {url}

@@ -717,7 +717,7 @@ async def request_human_review(
     """Pause for trusted human decisions on the product's pending proposals.
 
     This tool can only request input. Approval, correction, and rejection are
-    applied by the LangGraph resume path after an authenticated API action.
+    applied by MIA's trusted deferred-call resume path after an API action.
     """
 
     work = ctx.deps.state.products.get(product_id)

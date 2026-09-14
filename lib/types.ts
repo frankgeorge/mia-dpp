@@ -54,7 +54,7 @@ export interface SemanticReference {
   keys: ReferenceKey[];
 }
 
-export type MappingBasis = "exact" | "known" | "semantic" | "human";
+export type MappingBasis = "exact" | "semantic" | "human";
 
 export interface MappingAssessment {
   basis: MappingBasis;
@@ -116,8 +116,6 @@ export interface FieldMapping {
     uncertainties: string[];
   } | null;
   humanComment?: string | null;
-  /** True when earlier human review helped resolve the target. */
-  fromGraph?: boolean;
 }
 
 export type ProposedFieldMapping = Omit<FieldMapping, "id">;
@@ -231,14 +229,6 @@ export interface NameplateElement {
   modelType: string;
   valueType: string | null;
   target: MappingTarget;
-}
-
-export interface GraphEntry {
-  sourceField: string;
-  targetElement: string;
-  semanticId: string;
-  verifiedAt: string;
-  corrections: number;
 }
 
 export interface MappingKnowledgeEntry {

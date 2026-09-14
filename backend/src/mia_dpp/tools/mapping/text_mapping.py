@@ -186,14 +186,12 @@ def _draft(
     value_format: ValueFormatQuality,
     semantic_match: MatchQuality,
     destination_candidates: int,
-    history_confirmations: int,
 ) -> MappingDraft:
     assessment = assess_mapping(
         source_label=source_label,
         value_format=value_format,
         semantic_match=semantic_match,
         destination_candidates=destination_candidates,
-        history_confirmations=history_confirmations,
     )
     return MappingDraft(
         evidence_id=evidence.id,
@@ -204,7 +202,6 @@ def _draft(
         target=target,
         assessment=assessment,
         reasoning=reasoning,
-        from_graph=history_confirmations > 0,
     )
 
 
@@ -212,13 +209,11 @@ def propose_text_mappings(
     text: str,
     repository: OfficialTemplateRepository,
     *,
-    history: dict[tuple[str, str], int] | None = None,
     allow_unlabelled_year: bool = True,
 ) -> TextMappingProposal:
     """Extract manual evidence and propose official-template mappings deterministically."""
 
     template = repository.load("digital_nameplate")
-    history = history or {}
     evidence_records: list[EvidenceRecord] = []
     mappings: list[MappingDraft] = []
     seen_instance_paths: set[tuple[str, ...]] = set()
@@ -238,7 +233,6 @@ def propose_text_mappings(
             return
         seen_instance_paths.add(target.instance_path)
         evidence_records.append(evidence)
-        confirmations = history.get((source_field.casefold(), target.id_short), 0)
         mappings.append(
             _draft(
                 evidence=evidence,
@@ -249,7 +243,6 @@ def propose_text_mappings(
                 value_format=value_format,
                 semantic_match=semantic_match,
                 destination_candidates=destination_candidates,
-                history_confirmations=confirmations,
             )
         )
 

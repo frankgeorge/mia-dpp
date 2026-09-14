@@ -26,13 +26,11 @@ from mia_dpp.api.schemas import (
     HealthResponse,
 )
 from mia_dpp.domain.targets import TemplateSummary
-from mia_dpp.errors import ExtractionError, MiaError
+from mia_dpp.errors import MiaError
 from mia_dpp.mia import Mia
 from mia_dpp.store import WorkspaceArtifact
 from mia_dpp.tools.mapping.models import (
     MappingKnowledgeEntry,
-    WebsiteIngestRequest,
-    WebsiteIngestResponse,
 )
 from mia_dpp.tools.search import SearchUnavailableError
 from mia_dpp.tools.web.models import (
@@ -237,23 +235,3 @@ async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPack
         raise HTTPException(status_code=503, detail=str(error)) from error
     except MiaError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-
-
-@router.post("/api/website", response_model=WebsiteIngestResponse)
-async def ingest_website(
-    payload: WebsiteIngestRequest, http_request: Request
-) -> WebsiteIngestResponse:
-    """Fetch a public product page with Crawl4AI and propose reviewed mappings."""
-
-    try:
-        return await _application(http_request).ingest_website(payload)
-    except ProductUrlRejectedError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except ExtractionDependencyError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except PageLoadError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except ExtractionError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except TemplateRepositoryError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error

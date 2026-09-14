@@ -31,13 +31,11 @@ def assess_mapping(
     value_format: ValueFormatQuality,
     semantic_match: MatchQuality,
     destination_candidates: int,
-    history_confirmations: int = 0,
 ) -> MappingAssessment:
     """Return a reproducible mapping basis and explicit review decision.
 
-    Prior human confirmations establish a known relationship but never validate
-    the current value. Ambiguity or weak/incompatible signals always require a
-    person; no pseudo-probability is calculated.
+    Ambiguity or weak/incompatible signals always require a person; no
+    pseudo-probability is calculated.
     """
 
     if destination_candidates < 1:
@@ -52,18 +50,9 @@ def assess_mapping(
     if semantic_match in {MatchQuality.NONE, MatchQuality.WEAK}:
         uncertainties.append("The semantic relationship is not strong enough to accept.")
 
-    if history_confirmations:
-        basis = MappingBasis.KNOWN
-        reason = (
-            f"This source-to-target relationship has {history_confirmations} prior human "
-            "confirmation(s); the current value is still validated independently."
-        )
-    else:
-        basis = MappingBasis.EXACT
-        reason = "A deterministic rule matched one official target with compatible evidence."
     return MappingAssessment(
-        basis=basis,
+        basis=MappingBasis.EXACT,
         review_required=bool(uncertainties),
-        reason=reason,
+        reason="A deterministic rule matched one official target with compatible evidence.",
         uncertainties=tuple(uncertainties),
     )

@@ -91,12 +91,6 @@ export function MappingRow({
         </div>
       </details>
 
-      {m.fromGraph && (
-        <p className="mt-1.5 inline-block rounded-full bg-signalDim px-2 py-0.5 font-mono text-[10px] text-signal">
-          From Integration Graph
-        </p>
-      )}
-
       {/* Approval gate */}
       {m.status === "review" && !editing && (
         <div className="mt-3 space-y-2">

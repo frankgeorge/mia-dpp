@@ -26,8 +26,8 @@ make dev
 Open `http://127.0.0.1:3000`. `Ctrl-C` stops both processes started by
 `make dev`.
 
-The deterministic `/api/website` and `/api/dpp` capabilities do not need an API
-key. The autonomous workspace does: copy `.env.example` to `.env.local` and set
+The deterministic `/api/dpp` capability does not need an API key. The autonomous
+workspace does: copy `.env.example` to `.env.local` and set
 `OPENROUTER_API_KEY`. Crawl4AI uses locally installed Chromium to render pages.
 The model can choose actions and propose bounded mappings, but it cannot invent
 authoritative semantic IDs, set confidence, compile AAS JSON, or bypass validation.

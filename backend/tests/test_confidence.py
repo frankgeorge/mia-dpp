@@ -19,19 +19,17 @@ def test_exact_unambiguous_mapping_does_not_require_review() -> None:
     assert assessment.uncertainties == ()
 
 
-def test_history_changes_basis_but_does_not_clear_ambiguity() -> None:
+def test_destination_ambiguity_requires_review() -> None:
     assessment = assess_mapping(
         source_label=MatchQuality.STRONG,
         value_format=ValueFormatQuality.PLAUSIBLE,
         semantic_match=MatchQuality.STRONG,
         destination_candidates=3,
-        history_confirmations=100,
     )
 
-    assert assessment.basis is MappingBasis.KNOWN
+    assert assessment.basis is MappingBasis.EXACT
     assert assessment.review_required
     assert assessment.uncertainties == ("3 compatible target destinations remain.",)
-    assert "current value" in assessment.reason
 
 
 def test_weak_or_unvalidated_signals_require_review() -> None:

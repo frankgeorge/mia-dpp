@@ -45,7 +45,6 @@ class MappingBasis(StrEnum):
     """Auditable reason a mapping exists; deliberately not a probability."""
 
     EXACT = "exact"
-    KNOWN = "known"
     SEMANTIC = "semantic"
     HUMAN = "human"
 
@@ -194,7 +193,6 @@ class MappingDraft(WireModel):
     target: MappingTarget
     assessment: MappingAssessment
     reasoning: str
-    from_graph: bool = False
     mapping_origin: MappingOrigin = MappingOrigin.DETERMINISTIC
     human_reviewed: bool = False
     llm_review: LlmReview | None = None
@@ -271,14 +269,6 @@ class TextMappingProposal(WireModel):
 class MappingProposal(WireModel):
     product_name: str
     mappings: tuple[ProposedFieldMapping, ...]
-
-
-class GraphEntry(WireModel):
-    source_field: str
-    target_element: str
-    semantic_id: str
-    verified_at: str
-    corrections: int
 
 
 class NameplateElement(WireModel):

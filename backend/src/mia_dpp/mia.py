@@ -36,8 +36,6 @@ from mia_dpp.config import Settings
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 from mia_dpp.integrations.ddgs import DdgsSearchProvider
 from mia_dpp.store import ArtifactKind, SessionSnapshot, Store
-from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
-from mia_dpp.tools.mapping.resolver import ingest_website
 from mia_dpp.tools.mapping.review import MappingReviewService
 from mia_dpp.tools.search import SearchProvider
 from mia_dpp.tools.web.tool import WebExtractionTool
@@ -150,11 +148,6 @@ class Mia:
             HumanRequestKind.REQUIREMENT_VALUE,
             request.model_dump(mode="json"),
         )
-
-    async def ingest_website(self, request: WebsiteIngestRequest) -> WebsiteIngestResponse:
-        """Run the direct extraction-and-resolution compatibility endpoint."""
-
-        return await ingest_website(request, self.web_tool, self.templates)
 
     async def _resume(
         self,

@@ -13,8 +13,8 @@ from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.errors import MappingError
-from mia_dpp.tools.mapping.models import WebsiteIngestRequest, WebsiteIngestResponse
-from mia_dpp.tools.mapping.resolver import ingest_website
+from mia_dpp.tools.mapping.models import WebsiteIngestResponse
+from mia_dpp.tools.mapping.resolver import resolve_product
 from mia_dpp.tools.web.artifacts import raw_website_artifact
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
 from mia_dpp.tools.web.models import ProductUrlRejectedError, RenderedPage
@@ -52,15 +52,23 @@ class FixtureLoader:
 
 
 async def ingest(
-    request: WebsiteIngestRequest,
+    url: str = PRODUCT_URL,
     loader: FixtureLoader | None = None,
+    *,
+    template_keys: tuple[str, ...] = ("digital_nameplate", "technical_data"),
 ) -> WebsiteIngestResponse:
     repository = OfficialTemplateRepository()
     web_tool = WebExtractionTool(
         loader=loader or FixtureLoader(),
         url_policy=ProductUrlPolicy(public_resolver),
     )
-    return await ingest_website(request, web_tool, repository)
+    extraction = await web_tool.extract(url)
+    return await resolve_product(
+        extraction.knowledge_package,
+        repository,
+        template_keys=template_keys,
+        source_url=extraction.source_url,
+    )
 
 
 def test_generic_fact_extraction_retains_heterogeneous_source_facts() -> None:
@@ -106,7 +114,7 @@ def test_normalization_keeps_source_labels_separate_from_semantics() -> None:
 
 def test_website_service_maps_downstream_without_discarding_unmatched_evidence() -> None:
     loader = FixtureLoader()
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), loader))
+    response = asyncio.run(ingest(loader=loader))
 
     assert loader.calls == [PRODUCT_URL]
     assert response.mode == "website"
@@ -179,7 +187,7 @@ def test_website_service_maps_downstream_without_discarding_unmatched_evidence()
 
 
 def test_completion_never_counts_structure_or_wildcards_as_missing_fields() -> None:
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL)))
+    response = asyncio.run(ingest())
     inventory = response.coverage_report.inventory.requirements
     fixed_count = sum(item.kind.value == "value" and not item.wildcard for item in inventory)
 
@@ -197,14 +205,7 @@ def test_completion_never_counts_structure_or_wildcards_as_missing_fields() -> N
 
 
 def test_website_coverage_accepts_an_explicit_template_selection() -> None:
-    response = asyncio.run(
-        ingest(
-            WebsiteIngestRequest(
-                url=PRODUCT_URL,
-                template_keys=("technical_data",),
-            )
-        )
-    )
+    response = asyncio.run(ingest(template_keys=("technical_data",)))
 
     assert [item.key for item in response.coverage_report.inventory.selected_templates] == [
         "technical_data"
@@ -231,7 +232,7 @@ def test_same_value_is_not_attached_to_the_wrong_json_ld_field() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), RepeatedValueLoader()))
+    response = asyncio.run(ingest(loader=RepeatedValueLoader()))
 
     order_code = next(item for item in response.evidence if item.source_label == "Article number")
     assert order_code.source_location.selector == "dt:nth-of-type(1)"
@@ -261,7 +262,7 @@ def test_mapping_failure_never_deletes_or_collapses_evidence() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), UnmappedLoader()))
+    response = asyncio.run(ingest(loader=UnmappedLoader()))
 
     technical = [
         item
@@ -317,7 +318,7 @@ def test_website_does_not_treat_footer_year_as_construction_year() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), FooterLoader()))
+    response = asyncio.run(ingest(loader=FooterLoader()))
 
     assert "YearOfConstruction" not in {item.target_element for item in response.proposal.mappings}
 
@@ -339,13 +340,13 @@ def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
         async def load(self, url: str) -> RenderedPage:
             return page
 
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL), FactorySettingLoader()))
+    response = asyncio.run(ingest(loader=FactorySettingLoader()))
 
     assert "ManufacturingSite" not in {item.target_element for item in response.proposal.mappings}
 
 
 def test_website_evidence_survives_review_and_aas_compilation() -> None:
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL)))
+    response = asyncio.run(ingest())
     accepted = [
         FieldMapping(
             **mapping.model_dump(exclude={"status"}),
@@ -370,7 +371,7 @@ def test_website_evidence_survives_review_and_aas_compilation() -> None:
 
 
 def test_compiler_rejects_a_website_mapping_without_its_evidence() -> None:
-    response = asyncio.run(ingest(WebsiteIngestRequest(url=PRODUCT_URL)))
+    response = asyncio.run(ingest())
     mapping = response.proposal.mappings[0]
     accepted = FieldMapping(
         **mapping.model_dump(exclude={"status"}),
@@ -417,10 +418,4 @@ def test_service_checks_the_final_crawl4ai_url() -> None:
         url_policy=ProductUrlPolicy(resolver),
     )
     with pytest.raises(ProductUrlRejectedError, match="private"):
-        asyncio.run(
-            ingest_website(
-                WebsiteIngestRequest(url=PRODUCT_URL),
-                web_tool,
-                OfficialTemplateRepository(),
-            )
-        )
+        asyncio.run(web_tool.extract(PRODUCT_URL))
