@@ -16,7 +16,7 @@ from mia_dpp.domain.mappings import (
     MappingStatus,
     RequirementCoverage,
 )
-from mia_dpp.domain.targets import Requirement, RequirementInventory, RequirementKind
+from mia_dpp.domain.targets import Requirement, RequirementKind, TemplateIndex
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -68,7 +68,7 @@ class CoverageAnalyzer:
     def analyze(
         self,
         package: ProductKnowledgePackage,
-        inventory: RequirementInventory,
+        inventory: TemplateIndex,
         *,
         mapping_result: MappingResult | None = None,
     ) -> CoverageReport:
@@ -120,7 +120,7 @@ class CoverageAnalyzer:
 
     @staticmethod
     def _add_mapping_matches(
-        inventory: RequirementInventory,
+        inventory: TemplateIndex,
         evidence_by_id: dict[str, EvidenceRecord],
         mapping_result: MappingResult | None,
         matches: dict[tuple[str, str], _Match],
@@ -326,7 +326,7 @@ class CoverageAnalyzer:
 
     @staticmethod
     def _statistics(
-        inventory: RequirementInventory,
+        inventory: TemplateIndex,
         coverage: Sequence[RequirementCoverage],
         evidence_records: int,
         evidence_used: int,

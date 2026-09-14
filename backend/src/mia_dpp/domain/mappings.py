@@ -8,7 +8,7 @@ from pydantic import AwareDatetime, Field, model_validator
 
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import EvidenceRecord
-from mia_dpp.domain.targets import RequirementInventory, SemanticReference, TargetProfile
+from mia_dpp.domain.targets import SemanticReference, TargetProfile, TemplateIndex
 
 
 class MappingStatus(StrEnum):
@@ -159,7 +159,7 @@ class CoverageStatistics(WireModel):
 class CoverageReport(WireModel):
     """Bidirectional accounting between retained evidence and target requirements."""
 
-    inventory: RequirementInventory
+    inventory: TemplateIndex
     coverage: tuple[RequirementCoverage, ...]
     analyzed_evidence_ids: tuple[str, ...]
     unmatched_evidence_ids: tuple[str, ...]

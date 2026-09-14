@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mia_dpp.aas.requirements import build_requirement_inventory
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import (
     EvidenceRecord,
@@ -42,7 +42,7 @@ def analyze(
     templates: tuple[str, ...] = ("digital_nameplate",),
 ) -> CoverageReport:
     repository = OfficialTemplateRepository()
-    inventory = build_requirement_inventory([repository.load(key) for key in templates])
+    inventory = build_template_index([repository.load(key) for key in templates])
     package = ProductKnowledgePackage(
         product_id="product-test",
         product_name="Test product",

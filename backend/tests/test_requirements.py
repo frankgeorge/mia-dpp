@@ -1,10 +1,10 @@
-from mia_dpp.aas.requirements import build_requirement_inventory
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
-from mia_dpp.domain.targets import Cardinality, Requirement, RequirementInventory, RequirementKind
+from mia_dpp.domain.targets import Cardinality, Requirement, RequirementKind, TemplateIndex
 
 
 def requirement_by_path(
-    inventory: RequirementInventory,
+    inventory: TemplateIndex,
     path: tuple[str, ...],
 ) -> Requirement:
     return next(item for item in inventory.requirements if item.template_path == path)
@@ -12,7 +12,7 @@ def requirement_by_path(
 
 def test_builds_nameplate_requirements_from_normalized_official_elements() -> None:
     repository = OfficialTemplateRepository()
-    inventory = build_requirement_inventory([repository.load("digital_nameplate")])
+    inventory = build_template_index([repository.load("digital_nameplate")])
 
     manufacturer = requirement_by_path(inventory, ("Nameplate", "ManufacturerName"))
     family = requirement_by_path(inventory, ("Nameplate", "ManufacturerProductFamily"))
@@ -33,7 +33,7 @@ def test_builds_nameplate_requirements_from_normalized_official_elements() -> No
 
 def test_same_builder_handles_technical_data_and_conditional_children() -> None:
     repository = OfficialTemplateRepository()
-    inventory = build_requirement_inventory([repository.load("technical_data")])
+    inventory = build_template_index([repository.load("technical_data")])
 
     manufacturer = requirement_by_path(
         inventory,
@@ -65,7 +65,7 @@ def test_combined_inventory_preserves_template_identity_and_unique_paths() -> No
         repository.load("digital_nameplate"),
         repository.load("technical_data"),
     ]
-    inventory = build_requirement_inventory(templates)
+    inventory = build_template_index(templates)
 
     assert [item.key for item in inventory.selected_templates] == [
         "digital_nameplate",
@@ -92,7 +92,7 @@ def test_requirement_ids_are_stable_across_runs() -> None:
     repository = OfficialTemplateRepository()
     template = repository.load("technical_data")
 
-    first = build_requirement_inventory([template])
-    second = build_requirement_inventory([template])
+    first = build_template_index([template])
+    second = build_template_index([template])
 
     assert [item.id for item in first.requirements] == [item.id for item in second.requirements]

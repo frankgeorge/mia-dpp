@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mia_dpp.aas.requirements import build_requirement_inventory
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.completion import build_completion_summary
 from mia_dpp.domain.evidence import ProductKnowledgePackage
@@ -88,7 +88,7 @@ class ProductResolver:
         )
 
         requirements_started = datetime.now(UTC)
-        inventory = build_requirement_inventory(templates)
+        inventory = build_template_index(templates)
         events.append(
             completed_event(
                 stage="requirements.build",

@@ -8,10 +8,10 @@ from collections.abc import Sequence
 from mia_dpp.domain.targets import (
     Cardinality,
     Requirement,
-    RequirementInventory,
     RequirementKind,
     SubmodelTemplate,
     TemplateElement,
+    TemplateIndex,
 )
 
 _VALUE_MODEL_TYPES = frozenset(
@@ -28,10 +28,10 @@ _VALUE_MODEL_TYPES = frozenset(
 )
 
 
-def build_requirement_inventory(
+def build_template_index(
     templates: Sequence[SubmodelTemplate],
-) -> RequirementInventory:
-    """Build requirements for any selected normalized template collection.
+) -> TemplateIndex:
+    """Build the shared target index for selected official templates.
 
     Containers with normalized children provide hierarchy rather than pretending
     to need scalar evidence. Opaque leaf structures remain visible requirements.
@@ -52,7 +52,7 @@ def build_requirement_inventory(
                 parent_is_unconditionally_present=True,
                 output=requirements,
             )
-    return RequirementInventory(
+    return TemplateIndex(
         selected_templates=tuple(template.release for template in templates),
         requirements=tuple(requirements),
     )

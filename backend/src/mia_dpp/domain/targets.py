@@ -117,14 +117,19 @@ class Requirement(WireModel):
         return self
 
 
-class RequirementInventory(WireModel):
-    """Stable requirements derived from one or more selected template releases."""
+class TemplateIndex(WireModel):
+    """The single application-level index of official template targets.
+
+    Template loading builds this once. Mapping, coverage, completion, and AAS
+    projection consume the same normalized requirements instead of interpreting
+    official IDTA files independently.
+    """
 
     selected_templates: tuple[TemplateRelease, ...] = Field(min_length=1)
     requirements: tuple[Requirement, ...]
 
     @model_validator(mode="after")
-    def identities_are_unique_and_selected(self) -> RequirementInventory:
+    def identities_are_unique_and_selected(self) -> TemplateIndex:
         template_keys = [item.key for item in self.selected_templates]
         if len(template_keys) != len(set(template_keys)):
             raise ValueError("selected template keys must be unique")
