@@ -11,11 +11,11 @@ from mia_dpp.domain.evidence import (
     ProductKnowledgePackage,
     SourceLocation,
 )
-from mia_dpp.domain.mappings import ConfidenceAssessment
+from mia_dpp.domain.mappings import MappingAssessment, MappingBasis
 from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
-    assess_mapping_confidence,
+    assess_mapping,
 )
 
 
@@ -54,16 +54,13 @@ def test_product_knowledge_rejects_duplicate_evidence_ids() -> None:
         )
 
 
-def test_confidence_score_cannot_disagree_with_its_factor_arithmetic() -> None:
-    valid = assess_mapping_confidence(
+def test_mapping_assessment_requires_an_explanation() -> None:
+    valid = assess_mapping(
         source_label=MatchQuality.EXACT,
         value_format=ValueFormatQuality.VALID,
         semantic_match=MatchQuality.EXACT,
         destination_candidates=1,
     )
-    with pytest.raises(ValidationError, match="must equal awarded"):
-        ConfidenceAssessment(
-            score=0.99,
-            factors=valid.factors,
-            remaining_uncertainty=valid.remaining_uncertainty,
-        )
+    assert valid.basis is MappingBasis.EXACT
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        MappingAssessment(basis=MappingBasis.EXACT, review_required=False, reason="")

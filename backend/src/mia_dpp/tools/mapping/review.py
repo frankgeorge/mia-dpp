@@ -12,6 +12,8 @@ from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocati
 from mia_dpp.domain.mappings import (
     CoverageStatus,
     LlmReview,
+    MappingAssessment,
+    MappingBasis,
     MappingOrigin,
     MappingResult,
     MappingStatus,
@@ -19,11 +21,6 @@ from mia_dpp.domain.mappings import (
     SemanticReviewItem,
 )
 from mia_dpp.domain.targets import RequirementKind
-from mia_dpp.tools.mapping.confidence import (
-    MatchQuality,
-    ValueFormatQuality,
-    assess_mapping_confidence,
-)
 from mia_dpp.tools.mapping.coverage import CoverageAnalyzer
 from mia_dpp.tools.mapping.models import SemanticMappingContext, WebsiteIngestResponse
 from mia_dpp.tools.mapping.targets import mapping_target
@@ -123,11 +120,11 @@ class MappingReviewService:
             self._repository.load(requirement.template_key),
             requirement.template_path,
         )
-        assessment = assess_mapping_confidence(
-            source_label=MatchQuality.WEAK,
-            value_format=ValueFormatQuality.PLAUSIBLE,
-            semantic_match=MatchQuality.STRONG,
-            destination_candidates=1,
+        assessment = MappingAssessment(
+            basis=MappingBasis.SEMANTIC,
+            review_required=True,
+            reason="The semantic model proposed one allowed official target.",
+            uncertainties=("Semantic proposals require human review.",),
         )
         identity = f"{requirement_id}\0{evidence_id}"
         return SemanticReviewItem(
@@ -140,8 +137,7 @@ class MappingReviewService:
                 target_element=target.id_short,
                 semantic_id=target.semantic_id.primary_value,
                 target=target,
-                confidence=assessment.score,
-                confidence_assessment=assessment,
+                assessment=assessment,
                 reasoning=(
                     "Semantic proposal constrained to retained evidence and an official target. "
                     + reason_summary
@@ -155,7 +151,7 @@ class MappingReviewService:
                     ),
                     rationale=reason_summary,
                     evidence_ids=(record.id,),
-                    uncertainties=assessment.remaining_uncertainty,
+                    uncertainties=assessment.uncertainties,
                 ),
             ),
         )
@@ -280,11 +276,10 @@ class MappingReviewService:
             value=cleaned,
             thread_id=thread_id,
         )
-        assessment = assess_mapping_confidence(
-            source_label=MatchQuality.EXACT,
-            value_format=ValueFormatQuality.PLAUSIBLE,
-            semantic_match=MatchQuality.EXACT,
-            destination_candidates=1,
+        assessment = MappingAssessment(
+            basis=MappingBasis.HUMAN,
+            review_required=False,
+            reason="A trusted human supplied this value for the selected official target.",
         )
         mapping = ProposedFieldMapping(
             evidence_id=evidence.id,
@@ -293,8 +288,7 @@ class MappingReviewService:
             target_element=target.id_short,
             semantic_id=target.semantic_id.primary_value,
             target=target,
-            confidence=assessment.score,
-            confidence_assessment=assessment,
+            assessment=assessment,
             reasoning="Human supplied this value for the identified official requirement.",
             status=MappingStatus.APPROVED,
             mapping_origin=MappingOrigin.HUMAN,

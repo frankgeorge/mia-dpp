@@ -41,46 +41,22 @@ class CoverageStatus(StrEnum):
     MISSING = "missing"
 
 
-class ConfidenceFactor(WireModel):
-    """One visible contribution to a deterministic confidence score."""
+class MappingBasis(StrEnum):
+    """Auditable reason a mapping exists; deliberately not a probability."""
 
-    code: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    label: str = Field(min_length=1)
-    awarded: float = Field(ge=0.0, le=1.0)
-    maximum: float = Field(gt=0.0, le=1.0)
-    explanation: str = Field(min_length=1)
-    uncertainty: str | None = None
-
-    @model_validator(mode="after")
-    def awarded_does_not_exceed_maximum(self) -> ConfidenceFactor:
-        if self.awarded > self.maximum:
-            raise ValueError("awarded confidence points cannot exceed maximum")
-        return self
+    EXACT = "exact"
+    KNOWN = "known"
+    SEMANTIC = "semantic"
+    HUMAN = "human"
 
 
-class ConfidenceAssessment(WireModel):
-    """Explainable score whose arithmetic can be reproduced by the user."""
+class MappingAssessment(WireModel):
+    """Explain why a mapping is safe or why a person must review it."""
 
-    score: float = Field(ge=0.0, le=1.0)
-    factors: tuple[ConfidenceFactor, ...] = Field(min_length=1)
-    remaining_uncertainty: tuple[str, ...] = ()
-
-    @model_validator(mode="after")
-    def score_matches_factors(self) -> ConfidenceAssessment:
-        expected = round(sum(factor.awarded for factor in self.factors), 4)
-        if abs(self.score - expected) > 0.0001:
-            raise ValueError("confidence score must equal awarded factor points")
-        maximum = round(sum(factor.maximum for factor in self.factors), 4)
-        if abs(maximum - 1.0) > 0.0001:
-            raise ValueError("confidence factor maxima must add up to 1.0")
-        expected_uncertainty = tuple(
-            factor.uncertainty
-            for factor in self.factors
-            if factor.awarded < factor.maximum and factor.uncertainty
-        )
-        if self.remaining_uncertainty != expected_uncertainty:
-            raise ValueError("remaining uncertainty must be derived from incomplete factors")
-        return self
+    basis: MappingBasis
+    review_required: bool
+    reason: str = Field(min_length=1)
+    uncertainties: tuple[str, ...] = ()
 
 
 class RequirementCoverage(WireModel):
@@ -216,8 +192,7 @@ class MappingDraft(WireModel):
     target_element: str
     semantic_id: str
     target: MappingTarget
-    confidence: float = Field(ge=0.0, le=1.0)
-    confidence_assessment: ConfidenceAssessment
+    assessment: MappingAssessment
     reasoning: str
     from_graph: bool = False
     mapping_origin: MappingOrigin = MappingOrigin.DETERMINISTIC
@@ -231,8 +206,6 @@ class MappingDraft(WireModel):
             raise ValueError("targetElement must match target.idShort")
         if self.semantic_id != self.target.semantic_id.primary_value:
             raise ValueError("semanticId must match the authoritative target")
-        if abs(self.confidence - self.confidence_assessment.score) > 0.0001:
-            raise ValueError("confidence must match confidenceAssessment.score")
         return self
 
 
@@ -264,7 +237,7 @@ class MappingResult(WireModel):
 class ApprovedMapping(WireModel):
     evidence_id: str
     target: MappingTarget
-    confidence_assessment: ConfidenceAssessment
+    assessment: MappingAssessment
 
 
 class MappingSpecification(WireModel):

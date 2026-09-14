@@ -696,7 +696,8 @@ async def propose_semantic_mapping(
         source_ids=(evidence_id,),
         metadata={
             "reviewId": review.id,
-            "confidence": review.mapping.confidence,
+            "basis": review.mapping.assessment.basis.value,
+            "reviewRequired": review.mapping.assessment.review_required,
             "authoritative": False,
         },
     )

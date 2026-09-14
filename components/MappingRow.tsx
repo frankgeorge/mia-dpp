@@ -25,9 +25,7 @@ export function MappingRow({
   );
   const [correctedValue, setCorrectedValue] = useState(m.sourceValue);
   const [comment, setComment] = useState("");
-  const pct = Math.round(m.confidence * 100);
-  const missingPct = Math.max(0, 100 - pct);
-  const strong = m.confidence >= 0.85;
+  const basis = m.assessment.basis[0].toUpperCase() + m.assessment.basis.slice(1);
 
   const tone =
     m.status === "rejected"
@@ -47,22 +45,9 @@ export function MappingRow({
           </p>
           <p className="mt-1 truncate text-[14px]">{m.sourceValue}</p>
         </div>
-        <span
-          className="shrink-0 font-mono text-[12px] tabular-nums"
-          style={{ color: strong ? "#1B8A5A" : "#B8760B" }}
-        >
-          {pct}%
+        <span className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] ${m.assessment.reviewRequired ? "bg-warn/10 text-warn" : "bg-signal/10 text-signal"}`}>
+          {basis}
         </span>
-      </div>
-
-      <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-mist">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{
-            width: `${pct}%`,
-            background: strong ? "#1B8A5A" : "#B8760B",
-          }}
-        />
       </div>
 
       <p className="mt-2 text-[12px] leading-relaxed text-muted">
@@ -89,42 +74,20 @@ export function MappingRow({
 
       <details className="mt-2.5 rounded-lg border border-hairline bg-mist/60 px-3 py-2">
         <summary className="cursor-pointer text-[12px] font-medium text-ink">
-          Why {pct}%? {missingPct > 0 && `What is the missing ${missingPct}%?`}
+          Why this mapping?
         </summary>
-        <div className="mt-2.5 space-y-2.5">
-          {m.confidenceAssessment.factors.map((factor) => (
-            <div key={factor.code}>
-              <div className="flex items-baseline justify-between gap-3">
-                <p className="text-[12px] font-medium">{factor.label}</p>
-                <p className="shrink-0 font-mono text-[10px] text-muted">
-                  +{Math.round(factor.awarded * 100)} / {Math.round(factor.maximum * 100)}
-                </p>
-              </div>
-              <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
-                {factor.explanation}
-              </p>
-            </div>
-          ))}
-
-          <div className="border-t border-hairline pt-2">
-            <p className="text-[11px] font-medium text-ink">
-              Remaining uncertainty
-            </p>
-            {m.confidenceAssessment.remainingUncertainty.length > 0 ? (
+        <div className="mt-2 space-y-2">
+          <p className="text-[11px] leading-relaxed text-muted">{m.assessment.reason}</p>
+          {m.assessment.uncertainties.length > 0 && (
+            <div className="border-t border-hairline pt-2">
+              <p className="text-[11px] font-medium text-ink">Requires review because</p>
               <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-muted">
-                {m.confidenceAssessment.remainingUncertainty.map((item) => (
+                {m.assessment.uncertainties.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
-            ) : (
-              <p className="mt-1 text-[11px] text-muted">
-                No missing points under the current deterministic rules.
-              </p>
-            )}
-            <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
-              This score explains available evidence; it is not a probability.
-            </p>
-          </div>
+            </div>
+          )}
         </div>
       </details>
 

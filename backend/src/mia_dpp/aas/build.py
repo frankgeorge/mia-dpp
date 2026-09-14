@@ -83,7 +83,7 @@ class DeterministicDppPipeline:
                 ApprovedMapping(
                     evidence_id=mapping.evidence_id,
                     target=mapping.target,
-                    confidence_assessment=mapping.confidence_assessment,
+                    assessment=mapping.assessment,
                 )
                 for mapping in accepted
             ),

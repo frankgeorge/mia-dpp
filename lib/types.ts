@@ -54,19 +54,13 @@ export interface SemanticReference {
   keys: ReferenceKey[];
 }
 
-export interface ConfidenceFactor {
-  code: string;
-  label: string;
-  awarded: number;
-  maximum: number;
-  explanation: string;
-  uncertainty: string | null;
-}
+export type MappingBasis = "exact" | "known" | "semantic" | "human";
 
-export interface ConfidenceAssessment {
-  score: number;
-  factors: ConfidenceFactor[];
-  remainingUncertainty: string[];
+export interface MappingAssessment {
+  basis: MappingBasis;
+  reviewRequired: boolean;
+  reason: string;
+  uncertainties: string[];
 }
 
 export interface TemplateRelease {
@@ -109,9 +103,7 @@ export interface FieldMapping {
   targetElement: string;
   semanticId: string;
   target: MappingTarget;
-  /** Reproducible score from confidenceAssessment, not a probability. */
-  confidence: number;
-  confidenceAssessment: ConfidenceAssessment;
+  assessment: MappingAssessment;
   reasoning: string;
   status: MappingStatus;
   mappingOrigin: MappingOrigin;

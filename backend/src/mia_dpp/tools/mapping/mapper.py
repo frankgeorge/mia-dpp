@@ -9,10 +9,9 @@ from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord
 from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
 from mia_dpp.tools.mapping.confidence import (
-    AUTO_APPROVAL_THRESHOLD,
     MatchQuality,
     ValueFormatQuality,
-    assess_mapping_confidence,
+    assess_mapping,
 )
 from mia_dpp.tools.mapping.targets import mapping_target
 from mia_dpp.tools.mapping.text_mapping import propose_text_mappings
@@ -77,7 +76,7 @@ class DeterministicWebsiteMapper:
                     self._repository.load("digital_nameplate"),
                     ("Nameplate", "URIOfTheProduct"),
                 )
-                assessment = assess_mapping_confidence(
+                assessment = assess_mapping(
                     source_label=MatchQuality.EXACT,
                     value_format=ValueFormatQuality.VALID,
                     semantic_match=MatchQuality.EXACT,
@@ -91,8 +90,7 @@ class DeterministicWebsiteMapper:
                         target_element=target.id_short,
                         semantic_id=target.semantic_id.primary_value,
                         target=target,
-                        confidence=assessment.score,
-                        confidence_assessment=assessment,
+                        assessment=assessment,
                         reasoning=(
                             "The acquired public product-page URL supplies the official product "
                             "URI field directly."
@@ -123,8 +121,8 @@ class DeterministicWebsiteMapper:
             candidate = candidates[0]
             claimed_targets.add(candidate.target.instance_path)
             has_competing_destination = any(
-                factor.code == "destination_ambiguity" and factor.awarded < factor.maximum
-                for factor in candidate.confidence_assessment.factors
+                "target destinations remain" in item
+                for item in candidate.assessment.uncertainties
             )
             proposal = ProposedFieldMapping(
                 **candidate.model_copy(
@@ -138,9 +136,9 @@ class DeterministicWebsiteMapper:
                     MappingStatus.REVIEW
                     if has_competing_destination
                     else (
-                        MappingStatus.AUTO
-                        if candidate.confidence >= AUTO_APPROVAL_THRESHOLD
-                        else MappingStatus.REVIEW
+                        MappingStatus.REVIEW
+                        if candidate.assessment.review_required
+                        else MappingStatus.AUTO
                     )
                 ),
             )

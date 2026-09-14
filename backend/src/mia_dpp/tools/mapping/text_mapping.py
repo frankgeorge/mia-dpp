@@ -18,7 +18,7 @@ from mia_dpp.domain.mappings import MappingDraft, MappingTarget, TextMappingProp
 from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
-    assess_mapping_confidence,
+    assess_mapping,
 )
 from mia_dpp.tools.mapping.targets import ARBITRARY_PROPERTY_PATH, NAMEPLATE_ROOT, mapping_target
 
@@ -188,7 +188,7 @@ def _draft(
     destination_candidates: int,
     history_confirmations: int,
 ) -> MappingDraft:
-    assessment = assess_mapping_confidence(
+    assessment = assess_mapping(
         source_label=source_label,
         value_format=value_format,
         semantic_match=semantic_match,
@@ -202,8 +202,7 @@ def _draft(
         target_element=target.id_short,
         semantic_id=target.semantic_id.primary_value,
         target=target,
-        confidence=assessment.score,
-        confidence_assessment=assessment,
+        assessment=assessment,
         reasoning=reasoning,
         from_graph=history_confirmations > 0,
     )

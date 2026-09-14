@@ -17,7 +17,7 @@ from mia_dpp.domain.targets import TargetProfile
 from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
-    assess_mapping_confidence,
+    assess_mapping,
 )
 from mia_dpp.tools.mapping.targets import mapping_target
 
@@ -31,7 +31,7 @@ def test_compiles_nested_technical_data_from_the_second_official_template() -> N
         "ManufacturerArticleNumber": "63820",
         "ManufacturerOrderCode": "PG16-ORDER",
     }
-    confidence = assess_mapping_confidence(
+    assessment = assess_mapping(
         source_label=MatchQuality.EXACT,
         value_format=ValueFormatQuality.VALID,
         semantic_match=MatchQuality.EXACT,
@@ -71,7 +71,7 @@ def test_compiles_nested_technical_data_from_the_second_official_template() -> N
                 template,
                 ("TechnicalData", "GeneralInformation", name),
             ),
-            confidence_assessment=confidence,
+            assessment=assessment,
         )
         for record, name in zip(evidence, values, strict=True)
     )
