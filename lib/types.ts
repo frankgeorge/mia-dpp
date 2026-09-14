@@ -379,8 +379,15 @@ export interface AgentProductWork {
   status: "queued" | "in_progress" | "awaiting_review" | "ready_to_build" | "completed" | "failed";
   candidate: ProductCandidate | null;
   sourceCandidates: ProductSourceCandidate[];
-  extractions: unknown[];
-  resolution: ProductResolution | null;
+  productName: string | null;
+  sourceUrls: string[];
+  sourceArtifactIds: string[];
+  evidence: EvidenceRecord[];
+  mappingResult: MappingResult | null;
+  templateIndex: RequirementInventory | null;
+  coverageReport: CoverageReport | null;
+  completionSummary: CompletionSummary | null;
+  nameplateElements: NameplateElement[];
   pendingReviews: SemanticReviewItem[];
   reviewComplete: boolean;
   aasArtifactSha256: string | null;
@@ -424,12 +431,4 @@ export interface AgentResponse {
   pendingHumanRequest: HumanRequest | null;
   artifactCount: number;
   mode: "agent";
-}
-
-export interface ProductResolution {
-  knowledgePackage: ProductKnowledgePackage;
-  mappingResult: MappingResult;
-  coverageReport: CoverageReport;
-  completionSummary: CompletionSummary;
-  nameplateElements: NameplateElement[];
 }

@@ -155,7 +155,7 @@ def test_one_pydanticai_run_can_call_multiple_tools_and_create_lineage(tmp_path:
     result = asyncio.run(agent.message(AgentRequest(message=f"Create a DPP from {url}")))
 
     assert result.current_product is not None
-    assert result.current_product.resolution is not None
+    assert result.current_product.mapping_result is not None
     assert result.artifact_count >= 4
     artifacts = workspace.list_artifacts(result.thread_id)
     assert {item.kind.value for item in artifacts} >= {
@@ -199,7 +199,7 @@ def test_direct_url_does_not_trigger_company_confirmation_or_repeat_work(
     assert loader.calls == [url]
     assert result.company_candidates == ()
     assert result.current_product is not None
-    assert result.current_product.resolution is not None
+    assert result.current_product.mapping_result is not None
     event_types = {event.event_type for event in result.trace_events}
     assert "web.extraction_reused" in event_types
     assert "company.search_skipped" in event_types

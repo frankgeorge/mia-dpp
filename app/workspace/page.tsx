@@ -18,7 +18,6 @@ import type {
   NameplateElement,
   SemanticReviewItem,
   ProductCandidate,
-  ProductResolution,
   WorkspaceArtifact,
   MappingKnowledgeEntry,
 } from "@/lib/types";
@@ -244,11 +243,11 @@ export default function Workspace() {
     mergeActivity(data.traceEvents);
     void refreshArtifacts(data.threadId);
     void refreshMappingKnowledge();
-    const website = data.currentProduct?.resolution;
-    if (website) {
+    const product = data.currentProduct;
+    if (product?.mappingResult && product.coverageReport && product.completionSummary) {
       applyWebsiteResult(
-        website,
-        data.currentProduct?.pendingReviews ?? [],
+        product,
+        product.pendingReviews,
         data.status === "awaiting_review"
       );
     }
@@ -306,16 +305,16 @@ export default function Workspace() {
   }
 
   function applyWebsiteResult(
-    website: ProductResolution,
+    product: NonNullable<AgentResponse["currentProduct"]>,
     reviewItems: SemanticReviewItem[],
     awaitingReview: boolean
   ) {
     const mappingKey = (mapping: Omit<FieldMapping, "id">) =>
       `${mapping.evidenceId}|${mapping.target.templateKey}|${mapping.target.templatePath.join("/")}`;
     const resolvedMappings = [
-      ...website.mappingResult.mapped,
-      ...website.mappingResult.ambiguous,
-      ...website.mappingResult.rejected,
+      ...(product.mappingResult?.mapped ?? []),
+      ...(product.mappingResult?.ambiguous ?? []),
+      ...(product.mappingResult?.rejected ?? []),
     ];
     const reviewByMapping = new Map(
       reviewItems.map((item) => [mappingKey(item.mapping), item])
@@ -335,15 +334,15 @@ export default function Workspace() {
         ...item.mapping,
         id: item.id,
       }));
-    setProductName(website.knowledgePackage.productName || "Website product");
+    setProductName(product.productName || product.candidate?.name || "Website product");
     setMappings([...deterministic, ...semantic]);
     setSemanticReview(awaitingReview ? reviewItems : []);
     if (awaitingReview) setReviewDecisions({});
-    setEvidence(website.knowledgePackage.evidence);
-    setMappingResult(website.mappingResult);
-    setCoverageReport(website.coverageReport);
-    setCompletionSummary(website.completionSummary);
-    setNameplateElements(website.nameplateElements);
+    setEvidence(product.evidence);
+    setMappingResult(product.mappingResult);
+    setCoverageReport(product.coverageReport);
+    setCompletionSummary(product.completionSummary);
+    setNameplateElements(product.nameplateElements);
     setDpp(null);
     setTab("mappings");
   }

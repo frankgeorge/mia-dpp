@@ -86,17 +86,6 @@ class AgentTraceEvent(WireModel):
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
-class ProductResolutionView(WireModel):
-    """Temporary API projection over authoritative product evidence and mappings."""
-
-    knowledge_package: ProductKnowledgePackage
-    mapping_result: MappingResult
-    template_index: TemplateIndex
-    coverage_report: CoverageReport
-    completion_summary: CompletionSummary
-    nameplate_elements: tuple[NameplateElement, ...]
-
-
 class ProductWork(WireModel):
     """All trusted working data accumulated for one selected product.
 
@@ -133,6 +122,8 @@ class ProductWork(WireModel):
             evidence=self.evidence,
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def coverage_report(self) -> CoverageReport | None:
         """Derive coverage from the current evidence, mappings, and template index."""
 
@@ -143,24 +134,15 @@ class ProductWork(WireModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def resolution(self) -> ProductResolutionView | None:
-        """Project the legacy frontend shape without storing duplicate product data."""
+    def completion_summary(self) -> CompletionSummary | None:
+        """Derive the human completion view from current authoritative data."""
 
-        package = self.knowledge_package()
-        report = self.coverage_report()
-        if package is None or self.mapping_result is None or report is None:
+        if self.mapping_result is None or self.coverage_report is None:
             return None
-        return ProductResolutionView(
-            knowledge_package=package,
-            mapping_result=self.mapping_result,
-            template_index=self.template_index,
-            coverage_report=report,
-            completion_summary=build_completion_summary(
-                report,
-                self.mapping_result,
-                self.evidence,
-            ),
-            nameplate_elements=self.nameplate_elements,
+        return build_completion_summary(
+            self.coverage_report,
+            self.mapping_result,
+            self.evidence,
         )
 
 

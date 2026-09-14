@@ -819,7 +819,7 @@ async def request_human_value(
             count=1,
             identifiers=(ctx.deps.state.pending_human_request.product_id,),
         )
-    report = work.coverage_report()
+    report = work.coverage_report
     if report is None:
         return ToolObservation(outcome="mapping_required", summary="No coverage exists.", count=0)
     missing = {item.requirement_id for item in report.coverage if item.status.value == "missing"}
@@ -863,7 +863,7 @@ async def build_product_aas(
             summary="Map the product evidence before building an AAS.",
             count=0,
         )
-    report = work.coverage_report()
+    report = work.coverage_report
     package_input = work.knowledge_package()
     if report is None or package_input is None:
         return ToolObservation(outcome="mapping_required", summary="No coverage exists.", count=0)
