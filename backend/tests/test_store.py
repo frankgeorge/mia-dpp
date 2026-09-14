@@ -19,8 +19,10 @@ def _request() -> HumanRequest:
 def test_store_survives_restart_and_consumes_a_call_once(tmp_path: Path) -> None:
     path = tmp_path / "mia.sqlite3"
     session_id = "thread-store-one"
-    Store(path).save(SessionSnapshot(state=MiaState(thread_id=session_id), history=[]))
-    Store(path).remember_deferred(session_id, [("call-one", _request())])
+    Store(path).save(
+        SessionSnapshot(state=MiaState(thread_id=session_id), history=[]),
+        deferred_calls=[("call-one", _request())],
+    )
 
     restarted = Store(path)
     snapshot = restarted.load(session_id)
@@ -55,8 +57,7 @@ def test_store_survives_restart_and_consumes_a_call_once(tmp_path: Path) -> None
 def test_store_rejects_wrong_session_call_and_action_type(tmp_path: Path) -> None:
     store = Store(tmp_path / "mia.sqlite3")
     snapshot = SessionSnapshot(state=MiaState(thread_id="thread-store-two"), history=[])
-    store.save(snapshot)
-    store.remember_deferred("thread-store-two", [("call-two", _request())])
+    store.save(snapshot, deferred_calls=[("call-two", _request())])
 
     with pytest.raises(ValueError, match="unknown deferred call"):
         store.resolve(
@@ -77,10 +78,9 @@ def test_store_rejects_wrong_session_call_and_action_type(tmp_path: Path) -> Non
 def test_store_preserves_multiple_pending_calls(tmp_path: Path) -> None:
     store = Store(tmp_path / "mia.sqlite3")
     session_id = "thread-store-many"
-    store.save(SessionSnapshot(state=MiaState(thread_id=session_id), history=[]))
-    store.remember_deferred(
-        session_id,
-        [("call-first", _request()), ("call-second", _request())],
+    store.save(
+        SessionSnapshot(state=MiaState(thread_id=session_id), history=[]),
+        deferred_calls=[("call-first", _request()), ("call-second", _request())],
     )
 
     assert [call.call_id for call in store.pending(session_id)] == [

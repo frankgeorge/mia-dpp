@@ -141,15 +141,6 @@ class Store:
                 if changed != 1:
                     raise ValueError("resolved deferred call could not be completed")
 
-    def remember_deferred(
-        self,
-        session_id: str,
-        calls: list[tuple[str, HumanRequest]],
-    ) -> None:
-        self._validate_id(session_id, "session")
-        with self._connect() as connection:
-            self._insert_deferred(connection, session_id, calls)
-
     def pending(self, session_id: str) -> tuple[PendingCall, ...]:
         self._validate_id(session_id, "session")
         with self._connect() as connection:
