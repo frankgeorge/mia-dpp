@@ -10,9 +10,10 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from mia_dpp.domain.evidence import SourceLocation
-from mia_dpp.tools.web.models import CandidateFact, RawSourceArtifact
+from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation
+from mia_dpp.tools.web.models import RenderedPage
 
+EXTRACTOR_NAME = "mia-website-fact-extractor"
 EXTRACTOR_VERSION = "1"
 _YEAR = re.compile(r"\b((?:19|20)\d{2})\b")
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -31,9 +32,11 @@ _REFERENCE_JSON_KEYS = frozenset({"url", "image", "logo", "sameAs"})
 class WebsiteFactExtractor:
     """Retain useful labelled facts found in common product-page structures."""
 
-    def extract(self, source: RawSourceArtifact) -> tuple[tuple[CandidateFact, ...], str]:
-        soup = BeautifulSoup(source.content, "html.parser")
-        facts: list[CandidateFact] = []
+    def extract(self, source: RenderedPage) -> tuple[tuple[EvidenceRecord, ...], str]:
+        """Extract normalized, provenance-rich evidence directly from one page."""
+
+        soup = BeautifulSoup(source.html, "html.parser")
+        facts: list[EvidenceRecord] = []
 
         for script_index, script in enumerate(soup.select('script[type="application/ld+json"]')):
             raw = script.string if script.string is not None else script.get_text()
@@ -73,9 +76,9 @@ class WebsiteFactExtractor:
             facts,
             source,
             label="Product page URL",
-            value=source.source_uri,
+            value=source.url,
             method="source_metadata",
-            location=SourceLocation(excerpt=source.source_uri[:240]),
+            location=SourceLocation(excerpt=source.url[:240]),
         )
 
         for index, term in enumerate(soup.find_all("dt")):
@@ -116,12 +119,12 @@ class WebsiteFactExtractor:
 
         facts = self._deduplicate(facts)
         product_name = self._first_value(facts, "Product name", "Model", "Page title")
-        return tuple(facts), (product_name or source.source_uri)[:120]
+        return tuple(facts), (product_name or source.url)[:120]
 
     def _append_json_product(
         self,
-        facts: list[CandidateFact],
-        source: RawSourceArtifact,
+        facts: list[EvidenceRecord],
+        source: RenderedPage,
         entity: dict[str, Any],
         pointer: str,
         selector: str,
@@ -188,8 +191,8 @@ class WebsiteFactExtractor:
 
     def _append_html_pair(
         self,
-        facts: list[CandidateFact],
-        source: RawSourceArtifact,
+        facts: list[EvidenceRecord],
+        source: RenderedPage,
         label_node: Any,
         value_node: Any,
         location: SourceLocation,
@@ -209,8 +212,8 @@ class WebsiteFactExtractor:
 
     @staticmethod
     def _append(
-        facts: list[CandidateFact],
-        source: RawSourceArtifact,
+        facts: list[EvidenceRecord],
+        source: RenderedPage,
         *,
         label: str,
         value: str,
@@ -224,7 +227,7 @@ class WebsiteFactExtractor:
             return
         identity = "\0".join(
             (
-                source.id,
+                WebsiteFactExtractor._source_id(source),
                 label.casefold(),
                 value,
                 unit or "",
@@ -232,17 +235,22 @@ class WebsiteFactExtractor:
                 location.json_pointer or "",
             )
         )
-        fact_id = f"fact-web-{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
+        evidence_id = f"ev-web-{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
         facts.append(
-            CandidateFact(
-                id=fact_id,
-                source_artifact_id=source.id,
-                label=label,
+            EvidenceRecord(
+                id=evidence_id,
+                predicate=f"source.{WebsiteFactExtractor._slug(label)}",
+                source_label=label,
                 value=value,
                 unit=unit,
                 source_location=location,
                 extraction_method=method,
-                raw_context=location.excerpt,
+                extractor_name=EXTRACTOR_NAME,
+                extractor_version=EXTRACTOR_VERSION,
+                status=EvidenceStatus.OBSERVED,
+                source_uri=source.url,
+                source_content_sha256=source.content_sha256,
+                acquired_at=source.acquired_at,
             )
         )
 
@@ -288,22 +296,26 @@ class WebsiteFactExtractor:
                 )
 
     @staticmethod
-    def _deduplicate(facts: list[CandidateFact]) -> list[CandidateFact]:
+    def _deduplicate(facts: list[EvidenceRecord]) -> list[EvidenceRecord]:
         seen: set[tuple[str, str, str]] = set()
-        result: list[CandidateFact] = []
+        result: list[EvidenceRecord] = []
         for fact in facts:
-            key = (fact.label.casefold(), str(fact.value).casefold(), fact.unit or "")
+            key = (
+                (fact.source_label or fact.predicate).casefold(),
+                str(fact.value).casefold(),
+                fact.unit or "",
+            )
             if key not in seen:
                 seen.add(key)
                 result.append(fact)
         return result
 
     @staticmethod
-    def _first_value(facts: list[CandidateFact], *labels: str) -> str:
+    def _first_value(facts: list[EvidenceRecord], *labels: str) -> str:
         wanted = [label.casefold() for label in labels]
         for label in wanted:
             for fact in facts:
-                if fact.label.casefold() == label:
+                if (fact.source_label or fact.predicate).casefold() == label:
                     return str(fact.value)
         return ""
 
@@ -325,3 +337,11 @@ class WebsiteFactExtractor:
     @staticmethod
     def _text(value: str) -> str:
         return " ".join(value.split()).strip()
+
+    @staticmethod
+    def _source_id(source: RenderedPage) -> str:
+        return f"source-web-{source.content_sha256[:24]}"
+
+    @staticmethod
+    def _slug(label: str) -> str:
+        return re.sub(r"[^a-z0-9]+", ".", label.casefold()).strip(".") or "fact"

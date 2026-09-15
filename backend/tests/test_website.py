@@ -17,10 +17,8 @@ from mia_dpp.domain.mappings import FieldMapping, MappingStatus, ProposedFieldMa
 from mia_dpp.errors import MappingError
 from mia_dpp.tools.mapping.catalog import nameplate_catalog
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
-from mia_dpp.tools.web.artifacts import raw_website_artifact
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
 from mia_dpp.tools.web.models import ProductUrlRejectedError, RenderedPage
-from mia_dpp.tools.web.normalizer import EvidenceNormalizer
 from mia_dpp.tools.web.tool import WebExtractionTool
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
@@ -89,11 +87,10 @@ def resolved_mappings(response: ProductWork) -> tuple[ProposedFieldMapping, ...]
 
 
 def test_generic_fact_extraction_retains_heterogeneous_source_facts() -> None:
-    source = raw_website_artifact(product_page())
-    facts, product_name = WebsiteFactExtractor().extract(source)
+    facts, product_name = WebsiteFactExtractor().extract(product_page())
 
     assert product_name == "Pressure Gauge PG-16"
-    by_label = {item.label: item for item in facts}
+    by_label = {item.source_label: item for item in facts}
     assert {
         "Manufacturer",
         "Model",
@@ -117,9 +114,7 @@ def test_generic_fact_extraction_retains_heterogeneous_source_facts() -> None:
 
 
 def test_normalization_keeps_source_labels_separate_from_semantics() -> None:
-    source = raw_website_artifact(product_page())
-    facts, _ = WebsiteFactExtractor().extract(source)
-    evidence = EvidenceNormalizer().normalize(source, facts)
+    evidence, _ = WebsiteFactExtractor().extract(product_page())
 
     voltage = next(item for item in evidence if item.source_label == "Supply voltage")
     material = next(item for item in evidence if item.source_label == "Material")
@@ -310,9 +305,8 @@ def test_repeated_technical_concepts_keep_component_context() -> None:
         """,
         acquired_at=ACQUIRED_AT,
     )
-    source = raw_website_artifact(page)
-    facts, _ = WebsiteFactExtractor().extract(source)
-    protection = [item for item in facts if item.label == "Degree of protection"]
+    facts, _ = WebsiteFactExtractor().extract(page)
+    protection = [item for item in facts if item.source_label == "Degree of protection"]
 
     assert [(item.value, item.source_location.table) for item in protection] == [
         ("IP68", "Probe"),
