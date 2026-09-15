@@ -14,7 +14,6 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.models import (
@@ -76,8 +75,6 @@ class Mia:
 
         self._search = search
         self._mapping_review = MappingReviewService(self.templates)
-        self._dpp_pipeline = DeterministicDppPipeline(self.templates)
-
         agent_model = model
         if agent_model is None and self.settings.openrouter_api_key is not None:
             agent_model = OpenRouterModel(
@@ -286,7 +283,6 @@ class Mia:
             web_tool=self.web_tool,
             templates=self.templates,
             mapping_review=self._mapping_review,
-            dpp_pipeline=self._dpp_pipeline,
             store=self.store,
         )
         if self._agent is None:

@@ -12,7 +12,6 @@ import pytest
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 
-from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.dependencies import MiaDependencies
@@ -255,7 +254,6 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
         web_tool=web_tool,
         templates=repository,
         mapping_review=review,
-        dpp_pipeline=DeterministicDppPipeline(repository),
         store=store,
     )
 

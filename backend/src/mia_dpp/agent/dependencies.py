@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import Any
 
-from mia_dpp.aas.build import DeterministicDppPipeline
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import AgentTraceEvent, MiaState
 from mia_dpp.store import Store
@@ -26,7 +25,6 @@ class MiaDependencies:
     web_tool: WebExtractionTool
     templates: OfficialTemplateRepository
     mapping_review: MappingReviewService
-    dpp_pipeline: DeterministicDppPipeline
     store: Store
 
     def add_event(self, event_type: str, summary: str, **details: Any) -> AgentTraceEvent:

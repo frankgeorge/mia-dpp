@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from pydantic import Field
 from pydantic_ai import CallDeferred, RunContext, Tool
 
+from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.agent.dependencies import MiaDependencies
 from mia_dpp.agent.models import (
@@ -887,9 +888,10 @@ async def build_product_aas(
         for mapping in work.mapping_result.mapped
         if mapping.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
     ]
-    package = ctx.deps.dpp_pipeline.build(
+    package = build_dpp(
         package_input.product_name,
         accepted,
+        repository=ctx.deps.templates,
         evidence=package_input.evidence,
     )
     work.aas_artifact_sha256 = package.artifact_sha256

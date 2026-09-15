@@ -107,8 +107,8 @@ def _set_leaf_value(raw: dict[str, Any], mapping: FieldMapping, value: str) -> N
 class AasCompiler:
     """Project approved evidence onto official template nodes.
 
-    ``DeterministicDppPipeline`` calls this after review. It verifies every
-    target against the selected template and serializes the result with aas-core.
+    ``build_dpp`` calls this after review. It verifies every target against the
+    selected template and serializes the result with aas-core.
     """
 
     def __init__(self, repository: OfficialTemplateRepository) -> None:
