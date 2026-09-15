@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Protocol
 
-from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.errors import ExtractionError
 
 
@@ -43,9 +41,3 @@ class RenderedPage:
 
 class PageLoader(Protocol):
     async def load(self, url: str) -> RenderedPage: ...
-
-
-class WebExtractionResult(WireModel):
-    source_url: str
-    product_name: str
-    knowledge_package: ProductKnowledgePackage

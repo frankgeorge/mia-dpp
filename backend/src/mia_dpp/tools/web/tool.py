@@ -7,7 +7,7 @@ import hashlib
 from mia_dpp.domain.evidence import ProductKnowledgePackage
 from mia_dpp.errors import ExtractionError
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
-from mia_dpp.tools.web.models import PageLoader, RenderedPage, WebExtractionResult
+from mia_dpp.tools.web.models import PageLoader, RenderedPage
 from mia_dpp.tools.web.url_policy import ProductUrlPolicy
 
 
@@ -30,7 +30,7 @@ class WebExtractionTool:
         self._url_policy = url_policy or ProductUrlPolicy()
         self._fact_extractor = fact_extractor or WebsiteFactExtractor()
 
-    async def extract(self, url: str) -> WebExtractionResult:
+    async def extract(self, url: str) -> ProductKnowledgePackage:
         """Acquire, extract, and normalize one page into a product knowledge package."""
 
         requested_url = await self._url_policy.validate(url)
@@ -42,15 +42,10 @@ class WebExtractionTool:
         if not evidence:
             raise ExtractionError("the product page contained no useful structured facts")
         source_id = f"source-web-{page.content_sha256[:24]}"
-        package = ProductKnowledgePackage(
+        return ProductKnowledgePackage(
             product_id="product-"
             + hashlib.sha256(f"{page.url}\0{product_name}".encode()).hexdigest()[:24],
             product_name=product_name,
             source_artifact_ids=(source_id,),
             evidence=evidence,
-        )
-        return WebExtractionResult(
-            source_url=page.url,
-            product_name=product_name,
-            knowledge_package=package,
         )

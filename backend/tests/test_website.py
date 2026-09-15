@@ -63,15 +63,13 @@ async def ingest(
     )
     extraction = await web_tool.extract(url)
     index = build_template_index(tuple(repository.load(key) for key in template_keys))
-    mapping = await DeterministicWebsiteMapper(repository).propose(
-        extraction.knowledge_package.evidence
-    )
+    mapping = await DeterministicWebsiteMapper(repository).propose(extraction.evidence)
     work = ProductWork(
-        product_id=extraction.knowledge_package.product_id,
+        product_id=extraction.product_id,
         product_name=extraction.product_name,
-        source_urls=(extraction.source_url,),
-        source_artifact_ids=extraction.knowledge_package.source_artifact_ids,
-        evidence=extraction.knowledge_package.evidence,
+        source_urls=(extraction.evidence[0].source_uri,),
+        source_artifact_ids=extraction.source_artifact_ids,
+        evidence=extraction.evidence,
         mapping_result=mapping,
         template_index=index,
     )

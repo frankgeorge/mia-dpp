@@ -291,7 +291,8 @@ async def extract_product_page(
             )
 
     started = time.monotonic()
-    extraction = await ctx.deps.web_tool.extract(url)
+    package = await ctx.deps.web_tool.extract(url)
+    source_url = package.evidence[0].source_uri
     source_candidate_owner = next(
         (
             existing_product_id
@@ -302,7 +303,7 @@ async def extract_product_page(
         ),
         None,
     )
-    resolved_id = product_id or source_candidate_owner or extraction.knowledge_package.product_id
+    resolved_id = product_id or source_candidate_owner or package.product_id
     candidate = next(
         (item for item in ctx.deps.state.product_candidates if item.id == resolved_id),
         None,
@@ -311,16 +312,14 @@ async def extract_product_page(
         product_id=resolved_id,
         candidate=candidate,
     )
-    if extraction.source_url not in work.source_urls:
-        work.source_urls = (*work.source_urls, extraction.source_url)
-    work.product_name = work.product_name or extraction.product_name
+    if source_url not in work.source_urls:
+        work.source_urls = (*work.source_urls, source_url)
+    work.product_name = work.product_name or package.product_name
     work.source_artifact_ids = tuple(
-        dict.fromkeys(
-            (*work.source_artifact_ids, *extraction.knowledge_package.source_artifact_ids)
-        )
+        dict.fromkeys((*work.source_artifact_ids, *package.source_artifact_ids))
     )
     evidence_by_id = {item.id: item for item in work.evidence}
-    evidence_by_id.update({item.id: item for item in extraction.knowledge_package.evidence})
+    evidence_by_id.update({item.id: item for item in package.evidence})
     work.evidence = tuple(evidence_by_id.values())
     work.status = ProductStatus.IN_PROGRESS
     source_artifact = ctx.deps.store.write_json(
@@ -328,22 +327,22 @@ async def extract_product_page(
         ArtifactKind.SOURCE,
         "source.json",
         {
-            "url": extraction.source_url,
-            "productName": extraction.product_name,
-            "sourceArtifactIds": extraction.knowledge_package.source_artifact_ids,
+            "url": source_url,
+            "productName": package.product_name,
+            "sourceArtifactIds": package.source_artifact_ids,
         },
         created_by="extract_product_page",
         product_id=resolved_id,
-        source_url=extraction.source_url,
+        source_url=source_url,
     )
     evidence_artifact = ctx.deps.store.write_json(
         ctx.deps.state.thread_id,
         ArtifactKind.EVIDENCE,
         "evidence.json",
-        extraction.knowledge_package.model_dump(mode="json"),
+        package.model_dump(mode="json"),
         created_by="extract_product_page",
         product_id=resolved_id,
-        source_url=extraction.source_url,
+        source_url=source_url,
         derived_from=(source_artifact.id,),
     )
     work.artifact_ids = (*work.artifact_ids, source_artifact.id, evidence_artifact.id)
@@ -352,15 +351,15 @@ async def extract_product_page(
         ctx.deps.state.selected_product_ids = (*ctx.deps.state.selected_product_ids, resolved_id)
     ctx.deps.state.current_product_id = resolved_id
     ctx.deps.state.status = AgentStatus.RUNNING
-    evidence = extraction.knowledge_package.evidence
+    evidence = package.evidence
     ctx.deps.add_event(
         "web.evidence_extracted",
-        f"Retained {len(evidence)} facts from {extraction.source_url}.",
+        f"Retained {len(evidence)} facts from {source_url}.",
         tool_name="extract_product_page",
         product_id=resolved_id,
         input_summary=url,
         output_summary=f"{len(evidence)} evidence records",
-        source_ids=extraction.knowledge_package.source_artifact_ids,
+        source_ids=package.source_artifact_ids,
         duration_ms=int((time.monotonic() - started) * 1000),
         metadata={"evidenceCount": len(evidence)},
     )

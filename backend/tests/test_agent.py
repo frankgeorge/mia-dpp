@@ -239,9 +239,9 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
             "product-direct": ProductWork(
                 product_id="product-direct",
                 product_name=initial.product_name,
-                source_urls=(initial.source_url,),
-                source_artifact_ids=initial.knowledge_package.source_artifact_ids,
-                evidence=initial.knowledge_package.evidence,
+                source_urls=(initial.evidence[0].source_uri,),
+                source_artifact_ids=initial.source_artifact_ids,
+                evidence=initial.evidence,
                 source_candidates=(source_candidate,),
             )
         },
@@ -382,12 +382,12 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
         (repository.load("digital_nameplate"), repository.load("technical_data"))
     )
     mapping_result = asyncio.run(
-        DeterministicWebsiteMapper(repository).propose(extraction.knowledge_package.evidence)
+        DeterministicWebsiteMapper(repository).propose(extraction.evidence)
     )
     service = MappingReviewService(repository)
-    context = service.semantic_context(extraction.knowledge_package, mapping_result, index)
+    context = service.semantic_context(extraction, mapping_result, index)
     proposal = service.propose(
-        extraction.knowledge_package,
+        extraction,
         mapping_result,
         index,
         evidence_id=context.evidence[0].id,
@@ -417,7 +417,7 @@ def test_semantic_mapping_has_a_structured_review_explanation(tmp_path: Path) ->
     )
 
     _, _, reviewed = service.decide(
-        extraction.knowledge_package,
+        extraction,
         mapping_result,
         index,
         proposal,
