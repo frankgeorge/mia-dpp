@@ -112,7 +112,7 @@ export interface FieldMapping {
   humanComment?: string | null;
 }
 
-export type ProposedFieldMapping = Omit<FieldMapping, "id">;
+export type ProposedFieldMapping = FieldMapping;
 
 export interface ProductKnowledgePackage {
   productId: string;

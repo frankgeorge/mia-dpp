@@ -27,7 +27,7 @@ from mia_dpp.agent.models import (
     TraceStatus,
 )
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.mappings import ProposedFieldMapping
+from mia_dpp.domain.mappings import FieldMapping
 from mia_dpp.tools.mapping.models import MappingKnowledgeEntry, MappingKnowledgeStatus
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
@@ -398,7 +398,7 @@ class Store:
 
     def remember_mapping_candidate(
         self,
-        mapping: ProposedFieldMapping,
+        mapping: FieldMapping,
         *,
         manufacturer: str | None,
         domain: str | None,
@@ -414,7 +414,7 @@ class Store:
 
     def remember_mapping_review(
         self,
-        mapping: ProposedFieldMapping,
+        mapping: FieldMapping,
         *,
         decision: str,
         manufacturer: str | None,
@@ -465,7 +465,7 @@ class Store:
 
     def _upsert_mapping_knowledge(
         self,
-        mapping: ProposedFieldMapping,
+        mapping: FieldMapping,
         *,
         manufacturer: str | None,
         domain: str | None,

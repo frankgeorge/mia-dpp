@@ -13,7 +13,7 @@ from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import ProductWork
-from mia_dpp.domain.mappings import FieldMapping, MappingStatus, ProposedFieldMapping
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.errors import MappingError
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
@@ -78,7 +78,7 @@ async def ingest(
     return work
 
 
-def resolved_mappings(response: ProductWork) -> tuple[ProposedFieldMapping, ...]:
+def resolved_mappings(response: ProductWork) -> tuple[FieldMapping, ...]:
     assert response.mapping_result is not None
     result = response.mapping_result
     return (*result.mapped, *result.ambiguous, *result.rejected)
@@ -361,11 +361,7 @@ def test_website_does_not_treat_factory_setting_as_manufacturing_site() -> None:
 def test_website_evidence_survives_review_and_aas_compilation() -> None:
     response = asyncio.run(ingest())
     accepted = [
-        FieldMapping(
-            **mapping.model_dump(exclude={"status"}),
-            id=f"mapping-{index}",
-            status=MappingStatus.APPROVED,
-        )
+        mapping.model_copy(update={"id": f"mapping-{index}", "status": MappingStatus.APPROVED})
         for index, mapping in enumerate(resolved_mappings(response))
         if mapping.target.id_short != "MarkingName"
     ]
@@ -386,10 +382,11 @@ def test_website_evidence_survives_review_and_aas_compilation() -> None:
 def test_compiler_rejects_a_website_mapping_without_its_evidence() -> None:
     response = asyncio.run(ingest())
     mapping = resolved_mappings(response)[0]
-    accepted = FieldMapping(
-        **mapping.model_dump(exclude={"status"}),
-        id="mapping-with-missing-evidence",
-        status=MappingStatus.APPROVED,
+    accepted = mapping.model_copy(
+        update={
+            "id": "mapping-with-missing-evidence",
+            "status": MappingStatus.APPROVED,
+        }
     )
 
     with pytest.raises(MappingError, match="missing supplied evidence"):

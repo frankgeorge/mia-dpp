@@ -7,7 +7,7 @@ from typing import ClassVar
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord
-from mia_dpp.domain.mappings import MappingResult, MappingStatus, ProposedFieldMapping
+from mia_dpp.domain.mappings import FieldMapping, MappingResult, MappingStatus
 from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
@@ -49,8 +49,8 @@ class DeterministicWebsiteMapper:
     ) -> MappingResult:
         """Map each evidence record once and return mapped, ambiguous, and unmatched sets."""
 
-        mapped: list[ProposedFieldMapping] = []
-        ambiguous: list[ProposedFieldMapping] = []
+        mapped: list[FieldMapping] = []
+        ambiguous: list[FieldMapping] = []
         unmatched: list[str] = []
         claimed_targets: set[tuple[str, ...]] = set()
 
@@ -68,7 +68,8 @@ class DeterministicWebsiteMapper:
                     destination_candidates=1,
                 )
                 mapped.append(
-                    ProposedFieldMapping(
+                    FieldMapping(
+                        id=f"mapping-{record.id}",
                         evidence_id=record.id,
                         source_field=label,
                         source_value=str(record.value),
@@ -105,23 +106,16 @@ class DeterministicWebsiteMapper:
             has_competing_destination = any(
                 "target destinations remain" in item for item in candidate.assessment.uncertainties
             )
-            proposal = ProposedFieldMapping(
-                **candidate.model_copy(
-                    update={
-                        "evidence_id": record.id,
-                        "source_field": label,
-                        "source_value": value,
-                    }
-                ).model_dump(),
-                status=(
-                    MappingStatus.REVIEW
-                    if has_competing_destination
-                    else (
-                        MappingStatus.REVIEW
-                        if candidate.assessment.review_required
-                        else MappingStatus.AUTO
-                    )
-                ),
+            proposal = candidate.model_copy(
+                update={
+                    "id": f"mapping-{record.id}",
+                    "evidence_id": record.id,
+                    "source_field": label,
+                    "source_value": value,
+                    "status": (
+                        MappingStatus.REVIEW if has_competing_destination else candidate.status
+                    ),
+                },
             )
             (ambiguous if has_competing_destination else mapped).append(proposal)
 

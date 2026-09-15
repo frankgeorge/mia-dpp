@@ -16,13 +16,13 @@ from mia_dpp.domain.evidence import (
 )
 from mia_dpp.domain.mappings import (
     CoverageStatus,
+    FieldMapping,
     LlmReview,
     MappingAssessment,
     MappingBasis,
     MappingOrigin,
     MappingResult,
     MappingStatus,
-    ProposedFieldMapping,
     SemanticReviewItem,
 )
 from mia_dpp.domain.targets import RequirementKind, TemplateIndex
@@ -142,7 +142,8 @@ class MappingReviewService:
         return SemanticReviewItem(
             id="review-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
             requirement_id=requirement_id,
-            mapping=ProposedFieldMapping(
+            mapping=FieldMapping(
+                id="mapping-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
                 evidence_id=record.id,
                 source_field=record.source_label or record.predicate,
                 source_value=self._display_value(record.value, record.unit),
@@ -281,7 +282,9 @@ class MappingReviewService:
             review_required=False,
             reason="A trusted human supplied this value for the selected official target.",
         )
-        mapping = ProposedFieldMapping(
+        review_seed = f"{requirement_id}\0{evidence.id}"
+        mapping = FieldMapping(
+            id="mapping-" + hashlib.sha256(review_seed.encode()).hexdigest()[:24],
             evidence_id=evidence.id,
             source_field=requirement.id_short or target.id_short,
             source_value=cleaned,
@@ -293,7 +296,6 @@ class MappingReviewService:
             human_reviewed=True,
         )
         package = package.model_copy(update={"evidence": (*package.evidence, evidence)})
-        review_seed = f"{requirement_id}\0{evidence.id}"
         review = SemanticReviewItem(
             id="review-" + hashlib.sha256(review_seed.encode()).hexdigest()[:24],
             requirement_id=requirement_id,
@@ -341,7 +343,7 @@ class MappingReviewService:
 
     @staticmethod
     def _human_evidence(
-        mapping: ProposedFieldMapping,
+        mapping: FieldMapping,
         value: str,
         thread_id: str,
     ) -> EvidenceRecord:

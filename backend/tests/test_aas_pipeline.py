@@ -23,11 +23,7 @@ PRODUCT = (
 def accepted_mappings(text: str = PRODUCT) -> tuple[str, list[FieldMapping]]:
     proposal = propose_text_mappings(text, OfficialTemplateRepository())
     mappings = [
-        FieldMapping(
-            **mapping.model_dump(),
-            id=f"mapping-{index}",
-            status=MappingStatus.APPROVED,
-        )
+        mapping.model_copy(update={"id": f"mapping-{index}", "status": MappingStatus.APPROVED})
         for index, mapping in enumerate(proposal.mappings)
     ]
     return proposal.product_name, mappings

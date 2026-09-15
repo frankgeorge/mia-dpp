@@ -14,7 +14,7 @@ from re import Pattern
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation
-from mia_dpp.domain.mappings import MappingDraft, MappingTarget, TextMappingProposal
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus, MappingTarget, TextMappingProposal
 from mia_dpp.tools.mapping.confidence import (
     MatchQuality,
     ValueFormatQuality,
@@ -186,20 +186,23 @@ def _draft(
     value_format: ValueFormatQuality,
     semantic_match: MatchQuality,
     destination_candidates: int,
-) -> MappingDraft:
+) -> FieldMapping:
     assessment = assess_mapping(
         source_label=source_label,
         value_format=value_format,
         semantic_match=semantic_match,
         destination_candidates=destination_candidates,
     )
-    return MappingDraft(
+    identity = f"{evidence.id}\0{'/'.join(target.instance_path)}"
+    return FieldMapping(
+        id="mapping-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
         evidence_id=evidence.id,
         source_field=source_field,
         source_value=str(evidence.value),
         target=target,
         assessment=assessment,
         reasoning=reasoning,
+        status=MappingStatus.REVIEW if assessment.review_required else MappingStatus.AUTO,
     )
 
 
@@ -213,7 +216,7 @@ def propose_text_mappings(
 
     template = repository.load("digital_nameplate")
     evidence_records: list[EvidenceRecord] = []
-    mappings: list[MappingDraft] = []
+    mappings: list[FieldMapping] = []
     seen_instance_paths: set[tuple[str, ...]] = set()
 
     def add(

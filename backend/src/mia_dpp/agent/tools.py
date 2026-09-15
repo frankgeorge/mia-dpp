@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import time
 from urllib.parse import urlsplit
 
@@ -21,7 +20,7 @@ from mia_dpp.agent.models import (
     TraceStatus,
 )
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.mappings import FieldMapping, MappingStatus
+from mia_dpp.domain.mappings import MappingStatus
 from mia_dpp.store import ArtifactKind
 from mia_dpp.tools.mapping.coverage import coverage
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
@@ -876,13 +875,7 @@ async def build_product_aas(
             count=stats.required_missing + stats.required_candidate + stats.required_ambiguous,
         )
     accepted = [
-        FieldMapping(
-            **mapping.model_dump(),
-            id="mapping-"
-            + hashlib.sha256(
-                f"{mapping.evidence_id}\0{mapping.target.instance_path}".encode()
-            ).hexdigest()[:24],
-        )
+        mapping
         for mapping in work.mapping_result.mapped
         if mapping.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
     ]

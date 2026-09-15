@@ -183,36 +183,29 @@ class MappingTarget(WireModel):
     semantic_id: SemanticReference
 
 
-class MappingDraft(WireModel):
-    """One evidence value proposed for an official template target."""
+class FieldMapping(WireModel):
+    """One auditable evidence-to-target mapping at any decision status."""
 
+    id: str = Field(min_length=1)
     evidence_id: str = Field(min_length=1)
     source_field: str
     source_value: str
     target: MappingTarget
     assessment: MappingAssessment
     reasoning: str
+    status: MappingStatus
     mapping_origin: MappingOrigin = MappingOrigin.DETERMINISTIC
     human_reviewed: bool = False
     llm_review: LlmReview | None = None
     human_comment: str | None = Field(default=None, max_length=1000)
 
 
-class FieldMapping(MappingDraft):
-    id: str
-    status: MappingStatus
-
-
-class ProposedFieldMapping(MappingDraft):
-    status: MappingStatus
-
-
 class MappingResult(WireModel):
     """Downstream mapping outcome; unmatched evidence remains in the knowledge package."""
 
-    mapped: tuple[ProposedFieldMapping, ...] = ()
-    ambiguous: tuple[ProposedFieldMapping, ...] = ()
-    rejected: tuple[ProposedFieldMapping, ...] = ()
+    mapped: tuple[FieldMapping, ...] = ()
+    ambiguous: tuple[FieldMapping, ...] = ()
+    rejected: tuple[FieldMapping, ...] = ()
     unmatched_evidence_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -232,7 +225,7 @@ class MappingResult(WireModel):
 class TextMappingProposal(WireModel):
     product_name: str
     evidence: tuple[EvidenceRecord, ...]
-    mappings: tuple[MappingDraft, ...]
+    mappings: tuple[FieldMapping, ...]
 
 
 class SemanticReviewItem(WireModel):
@@ -240,4 +233,4 @@ class SemanticReviewItem(WireModel):
 
     id: str = Field(pattern=r"^review-[0-9a-f]{24}$")
     requirement_id: str = Field(pattern=r"^req-[0-9a-f]{24}$")
-    mapping: ProposedFieldMapping
+    mapping: FieldMapping

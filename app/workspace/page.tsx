@@ -304,33 +304,17 @@ export default function Workspace() {
     reviewItems: SemanticReviewItem[],
     awaitingReview: boolean
   ) {
-    const mappingKey = (mapping: Omit<FieldMapping, "id">) =>
-      `${mapping.evidenceId}|${mapping.target.templateKey}|${mapping.target.templatePath.join("/")}`;
     const resolvedMappings = [
       ...(product.mappingResult?.mapped ?? []),
       ...(product.mappingResult?.ambiguous ?? []),
       ...(product.mappingResult?.rejected ?? []),
     ];
-    const reviewByMapping = new Map(
-      reviewItems.map((item) => [mappingKey(item.mapping), item])
-    );
-    const deterministic: FieldMapping[] = resolvedMappings.map(
-      (mapping, index) => ({
-        ...(reviewByMapping.get(mappingKey(mapping))?.mapping ?? mapping),
-        id:
-          reviewByMapping.get(mappingKey(mapping))?.id ??
-          `${Date.now()}-website-${index}`,
-      })
-    );
-    const proposalKeys = new Set(resolvedMappings.map(mappingKey));
-    const semantic: FieldMapping[] = reviewItems
-      .filter((item) => !proposalKeys.has(mappingKey(item.mapping)))
-      .map((item) => ({
-        ...item.mapping,
-        id: item.id,
-      }));
+    const resolvedIds = new Set(resolvedMappings.map((mapping) => mapping.id));
+    const semantic = reviewItems
+      .map((item) => item.mapping)
+      .filter((mapping) => !resolvedIds.has(mapping.id));
     setProductName(product.productName || product.candidate?.name || "Website product");
-    setMappings([...deterministic, ...semantic]);
+    setMappings([...resolvedMappings, ...semantic]);
     setSemanticReview(awaitingReview ? reviewItems : []);
     if (awaitingReview) setReviewDecisions({});
     setEvidence(product.evidence);
@@ -383,11 +367,12 @@ export default function Workspace() {
     setMappings((prev) =>
       prev.map((m) => (m.id === id ? { ...m, status } : m))
     );
-    if (semanticReview.some((item) => item.id === id)) {
+    const review = semanticReview.find((item) => item.mapping.id === id);
+    if (review) {
       setReviewDecisions((previous) => ({
         ...previous,
-        [id]: {
-          reviewId: id,
+        [review.id]: {
+          reviewId: review.id,
           decision: status === "approved" ? "approve" : "reject",
           comment: comment?.trim() || null,
         },
@@ -423,11 +408,12 @@ export default function Workspace() {
     setMappings((previous) =>
       previous.map((item) => (item.id === id ? corrected : item))
     );
-    if (semanticReview.some((item) => item.id === id)) {
+    const review = semanticReview.find((item) => item.mapping.id === id);
+    if (review) {
       setReviewDecisions((previous) => ({
         ...previous,
-        [id]: {
-          reviewId: id,
+        [review.id]: {
+          reviewId: review.id,
           decision: "correct",
           correctedRequirementId: selected.id,
           correctedValue: correctedValue?.trim() || null,
@@ -494,8 +480,11 @@ export default function Workspace() {
     ? mappingResult.ambiguous.length +
       mappingResult.mapped.filter((mapping) => mapping.status === "review")
         .length +
-      mappings.filter(
-        (mapping) => mapping.id.startsWith("review-") && mapping.status === "review"
+      semanticReview.filter(
+        (item) =>
+          item.mapping.status === "review" &&
+          !mappingResult.mapped.some((mapping) => mapping.id === item.mapping.id) &&
+          !mappingResult.ambiguous.some((mapping) => mapping.id === item.mapping.id)
       ).length
     : 0;
   const gaps = coverageReport
