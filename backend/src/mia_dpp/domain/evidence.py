@@ -45,6 +45,14 @@ class EvidenceRecord(WireModel):
     )
     value: JsonValue
     unit: str | None = None
+
+    # Semantic source context retained from hierarchical source structures.
+    # Example:
+    # ("Submersible probe",)
+    # + "Degree of protection"
+    # = "IP68"
+    context_path: tuple[str, ...] = ()
+
     source_type: SourceType = SourceType.WEBSITE
     source_uri: str = Field(min_length=1)
     source_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

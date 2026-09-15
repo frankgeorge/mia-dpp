@@ -431,3 +431,75 @@ def test_service_checks_the_final_crawl4ai_url() -> None:
     )
     with pytest.raises(ProductUrlRejectedError, match="private"):
         asyncio.run(web_tool.extract(PRODUCT_URL))
+
+def test_grouped_properties_keep_source_hierarchy() -> None:
+    page = RenderedPage(
+        url=PRODUCT_URL,
+        html="""
+        <html><body>
+
+        <div class="group">
+          <dl>
+            <dt class="groupingProperty">Operating temperature range</dt>
+            <dd class="groupingProperty"></dd>
+          </dl>
+          <dl class="d-flex">
+            <dt class="groupedProperty">Medium:</dt>
+            <dd class="groupedProperty">-5/+70 °C</dd>
+          </dl>
+        </div>
+
+        <div class="group">
+          <dl>
+            <dt class="groupingProperty">Submersible probe</dt>
+            <dd class="groupingProperty"></dd>
+          </dl>
+          <dl class="d-flex">
+            <dt class="groupedProperty">Degree of protection:</dt>
+            <dd class="groupedProperty">IP54</dd>
+          </dl>
+        </div>
+
+        <div class="group">
+          <dl>
+            <dt class="groupingProperty">Housing</dt>
+            <dd class="groupingProperty"></dd>
+          </dl>
+          <dl class="d-flex">
+            <dt class="groupedProperty">Degree of protection:</dt>
+            <dd class="groupedProperty">IP54</dd>
+          </dl>
+        </div>
+
+        </body></html>
+        """,
+        acquired_at=ACQUIRED_AT,
+    )
+
+    facts, _ = WebsiteFactExtractor().extract(page)
+
+    medium = next(
+        item for item in facts
+        if item.source_label == "Medium:"
+    )
+
+    protections = [
+        item for item in facts
+        if item.source_label == "Degree of protection:"
+    ]
+
+    assert medium.context_path == (
+        "Operating temperature range",
+    )
+
+    assert medium.extraction_method == "html_grouped_label"
+
+    assert [
+        item.context_path
+        for item in protections
+    ] == [
+        ("Submersible probe",),
+        ("Housing",),
+    ]
+
+    assert protections[0].id != protections[1].id

@@ -14,7 +14,7 @@ from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocati
 from mia_dpp.tools.web.models import RenderedPage
 
 EXTRACTOR_NAME = "mia-website-fact-extractor"
-EXTRACTOR_VERSION = "1"
+EXTRACTOR_VERSION = "2"
 _YEAR = re.compile(r"\b((?:19|20)\d{2})\b")
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _JSON_LABELS = {
@@ -81,8 +81,15 @@ class WebsiteFactExtractor:
             location=SourceLocation(excerpt=source.url[:240]),
         )
 
+        self._extract_grouped_properties(facts, source, soup)
         for index, term in enumerate(soup.find_all("dt")):
+            classes = set(term.get("class") or ())
+
+            if classes & {"groupingProperty", "groupedProperty"}:
+                continue
+
             value_node = term.find_next_sibling("dd")
+
             if value_node is not None:
                 self._append_html_pair(
                     facts,
@@ -120,6 +127,74 @@ class WebsiteFactExtractor:
         facts = self._deduplicate(facts)
         product_name = self._first_value(facts, "Product name", "Model", "Page title")
         return tuple(facts), (product_name or source.url)[:120]
+
+    def _extract_grouped_properties(
+        self,
+        facts: list[EvidenceRecord],
+        source: RenderedPage,
+        soup: BeautifulSoup,
+    ) -> None:
+        for group_index, group in enumerate(soup.select("div.group"), 1):
+            parent_node = group.select_one(
+                ":scope > dl > dt.groupingProperty"
+            )
+
+            if parent_node is None:
+                continue
+
+            parent = self._text(
+                parent_node.get_text(" ", strip=True)
+            )
+
+            if not parent:
+                continue
+
+            context_path = (parent,)
+            child_index = 0
+
+            for dl in group.find_all("dl", recursive=False):
+                label_node = dl.find("dt", recursive=False)
+                value_node = dl.find("dd", recursive=False)
+
+                if label_node is None or value_node is None:
+                    continue
+
+                label_classes = set(label_node.get("class") or ())
+                value_classes = set(value_node.get("class") or ())
+
+                if (
+                    "groupedProperty" not in label_classes
+                    and "groupedProperty" not in value_classes
+                ):
+                    continue
+
+                label = self._text(
+                    label_node.get_text(" ", strip=True)
+                )
+                value = self._text(
+                    value_node.get_text(" ", strip=True)
+                )
+
+                # Leave description-only children for the next step.
+                if not label or not value:
+                    continue
+
+                child_index += 1
+
+                self._append_html_pair(
+                    facts,
+                    source,
+                    label_node,
+                    value_node,
+                    SourceLocation(
+                        selector=(
+                            f"div.group:nth-of-type({group_index}) "
+                            f"dt.groupedProperty:nth-of-type({child_index})"
+                        )
+                    ),
+                    context_path=context_path,
+                    method="html_grouped_label",
+                )
 
     def _append_json_product(
         self,
@@ -196,6 +271,9 @@ class WebsiteFactExtractor:
         label_node: Any,
         value_node: Any,
         location: SourceLocation,
+        *,
+        context_path: tuple[str, ...] = (),
+        method: str = "html_label",
     ) -> None:
         label = self._text(label_node.get_text(" ", strip=True))
         value = self._text(value_node.get_text(" ", strip=True))
@@ -206,8 +284,9 @@ class WebsiteFactExtractor:
             source,
             label=label,
             value=value,
-            method="html_label",
+            method=method,
             location=location.model_copy(update={"excerpt": f"{label}: {value}"[:240]}),
+            context_path=context_path,
         )
 
     @staticmethod
@@ -220,14 +299,26 @@ class WebsiteFactExtractor:
         method: str,
         location: SourceLocation,
         unit: str | None = None,
+        context_path: tuple[str, ...] = (),
     ) -> None:
         label = WebsiteFactExtractor._text(label)
         value = WebsiteFactExtractor._text(value)
         if not label or not value or len(label) > 120 or len(value) > 2_000:
             return
+
+        context_path = tuple(
+            WebsiteFactExtractor._text(item)
+            for item in context_path
+            if WebsiteFactExtractor._text(item)
+        )
+
+        context_identity = "\x1f".join(
+            item.casefold() for item in context_path
+        )
         identity = "\0".join(
             (
                 WebsiteFactExtractor._source_id(source),
+                context_identity,
                 label.casefold(),
                 value,
                 unit or "",
@@ -243,6 +334,7 @@ class WebsiteFactExtractor:
                 source_label=label,
                 value=value,
                 unit=unit,
+                context_path=context_path,
                 source_location=location,
                 extraction_method=method,
                 extractor_name=EXTRACTOR_NAME,
@@ -297,17 +389,21 @@ class WebsiteFactExtractor:
 
     @staticmethod
     def _deduplicate(facts: list[EvidenceRecord]) -> list[EvidenceRecord]:
-        seen: set[tuple[str, str, str]] = set()
+        seen: set[tuple[tuple[str, ...], str, str, str]] = set()
         result: list[EvidenceRecord] = []
+
         for fact in facts:
             key = (
+                tuple(item.casefold() for item in fact.context_path),
                 (fact.source_label or fact.predicate).casefold(),
                 str(fact.value).casefold(),
                 fact.unit or "",
             )
+
             if key not in seen:
                 seen.add(key)
                 result.append(fact)
+
         return result
 
     @staticmethod
