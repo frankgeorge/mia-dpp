@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 from mia_dpp.experiments.docling_source import (
@@ -16,60 +15,11 @@ from mia_dpp.experiments.docling_source import (
     lean_llm_view,
     lean_view_markdown,
 )
+from mia_dpp.experiments.source_benchmarks import BENCHMARK_PAGES, BenchmarkPage
 from mia_dpp.integrations.crawl4ai import Crawl4AIPageLoader
 
 
-@dataclass(frozen=True)
-class EvaluationPage:
-    name: str
-    label: str
-    url: str
-    relationships: tuple[tuple[str, str], ...] = ()
-
-
-PAGES = (
-    EvaluationPage(
-        name="afriso",
-        label="AFRISO TankControl 25",
-        url=(
-            "https://www.afriso.com/products/domestic-technology/"
-            "level-indicators-and-level-controllers/tankcontrol-20-25/"
-            "52161-fuellstandmessgeraet-tankcontrol-25"
-        ),
-        relationships=(
-            ("Operating temperature range", "Medium"),
-            ("Operating temperature range", "Ambient"),
-            ("Submersible probe", "IP68"),
-            ("Housing", "IP54"),
-        ),
-    ),
-    EvaluationPage(
-        name="apple-macbook-air",
-        label="Apple MacBook Air specifications",
-        url="https://www.apple.com/macbook-air/specs/",
-    ),
-    EvaluationPage(
-        name="raspberry-pi-5",
-        label="Raspberry Pi 5",
-        url="https://www.raspberrypi.com/products/raspberry-pi-5/",
-    ),
-    EvaluationPage(
-        name="framework-laptop-13",
-        label="Framework Laptop 13",
-        url="https://frame.work/products/laptop13-diy-intel-ultra-1",
-    ),
-    EvaluationPage(
-        name="cisco-catalyst-9200",
-        label="Cisco Catalyst 9200 Series data sheet",
-        url=(
-            "https://www.cisco.com/c/en/us/products/collateral/switches/"
-            "catalyst-9200-series-switches/nb-06-cat9200-ser-data-sheet-cte-en.html"
-        ),
-    ),
-)
-
-
-async def evaluate(page: EvaluationPage, output_root: Path) -> None:
+async def evaluate(page: BenchmarkPage, output_root: Path) -> None:
     output = output_root / page.name
     output.mkdir(parents=True, exist_ok=True)
 
@@ -162,7 +112,7 @@ def main() -> None:
     parser.add_argument(
         "--site",
         action="append",
-        choices=[page.name for page in PAGES],
+        choices=[page.name for page in BENCHMARK_PAGES],
         help="Evaluate only the selected site; repeat for multiple sites.",
     )
     parser.add_argument(
@@ -172,7 +122,7 @@ def main() -> None:
         help="Directory for generated experiment artifacts.",
     )
     args = parser.parse_args()
-    selected = [page for page in PAGES if not args.site or page.name in args.site]
+    selected = [page for page in BENCHMARK_PAGES if not args.site or page.name in args.site]
     for page in selected:
         asyncio.run(evaluate(page, args.output))
 

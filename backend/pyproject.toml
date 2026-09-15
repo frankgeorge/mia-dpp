@@ -19,6 +19,8 @@ dependencies = [
   "pydantic-ai-slim[openai]==2.43.0",
   "ddgs==9.16.0",
   "docling-slim[format-html]==2.126.0",
+  "unstructured==0.27.5",
+  "en-core-web-sm",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +46,7 @@ allow-direct-references = true
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 markers = [
   "live: requires network access and an external credential",
@@ -67,5 +70,8 @@ mypy_path = "src"
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["crawl4ai.*", "lxml.*", "pdf2aas.*"]
+module = ["crawl4ai.*", "lxml.*", "pdf2aas.*", "unstructured.*"]
 ignore_missing_imports = true
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
