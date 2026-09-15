@@ -88,9 +88,6 @@ export interface MappingTarget {
   instancePath: string[];
   idShort: string;
   semanticId: SemanticReference;
-  modelType: string;
-  valueType: string | null;
-  wildcard: boolean;
 }
 
 export interface FieldMapping {

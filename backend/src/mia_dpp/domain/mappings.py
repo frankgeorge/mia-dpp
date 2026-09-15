@@ -181,9 +181,6 @@ class MappingTarget(WireModel):
     instance_path: tuple[str, ...] = Field(min_length=1)
     id_short: str = Field(min_length=1)
     semantic_id: SemanticReference
-    model_type: str
-    value_type: str | None = None
-    wildcard: bool = False
 
 
 class MappingDraft(WireModel):

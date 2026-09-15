@@ -1,6 +1,6 @@
 """Selectable authoritative targets shown by mapping and review interfaces."""
 
-from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.aas.templates import OfficialTemplateRepository, resolve_element
 from mia_dpp.domain.mappings import NameplateElement
 from mia_dpp.domain.targets import SubmodelTemplate, TemplateElement
 from mia_dpp.tools.mapping.targets import ARBITRARY_PROPERTY_PATH, mapping_target
@@ -44,13 +44,14 @@ def nameplate_catalog(repository: OfficialTemplateRepository) -> tuple[Nameplate
                 name=target.id_short,
                 path=target.instance_path,
                 semantic_id=target.semantic_id.primary_value,
-                hint=element.description or f"Official {target.model_type} target.",
+                hint=element.description or f"Official {element.model_type} target.",
                 required=bool(element.cardinality and element.cardinality.minimum),
-                model_type=target.model_type,
-                value_type=target.value_type,
+                model_type=element.model_type,
+                value_type=element.value_type,
                 target=target,
             )
         )
+    arbitrary = resolve_element(template, ARBITRARY_PROPERTY_PATH)
     for name, semantic_id, hint in _KNOWN_ARBITRARY_TARGETS:
         target = mapping_target(
             template,
@@ -65,8 +66,8 @@ def nameplate_catalog(repository: OfficialTemplateRepository) -> tuple[Nameplate
                 semantic_id=semantic_id,
                 hint=hint,
                 required=False,
-                model_type=target.model_type,
-                value_type=target.value_type,
+                model_type=arbitrary.model_type,
+                value_type=arbitrary.value_type,
                 target=target,
             )
         )

@@ -56,7 +56,4 @@ def mapping_target(
         instance_path=instance_path,
         id_short=target_id_short,
         semantic_id=reference,
-        model_type=element.model_type,
-        value_type=element.value_type,
-        wildcard=element.wildcard,
     )

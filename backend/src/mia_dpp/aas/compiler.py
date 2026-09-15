@@ -83,10 +83,7 @@ def _set_leaf_value(raw: dict[str, Any], mapping: FieldMapping, value: str) -> N
     target = mapping.target
     raw["idShort"] = target.id_short
     raw["semanticId"] = _reference_json(target.semantic_id)
-    raw["modelType"] = target.model_type
-    if target.value_type is not None:
-        raw["valueType"] = target.value_type
-    model_type = target.model_type
+    model_type = raw.get("modelType")
     if model_type == "Property":
         raw["value"] = value
     elif model_type == "MultiLanguageProperty":
@@ -224,12 +221,6 @@ class AasCompiler:
         official = resolve_element(template, target.template_path)
         if official.model_type not in _VALUE_MODEL_TYPES:
             raise MappingError("mapping target is not a value-bearing template element")
-        if target.model_type != official.model_type:
-            raise MappingError("mapping target model type differs from official template")
-        if target.value_type != official.value_type:
-            raise MappingError("mapping target value type differs from official template")
-        if target.wildcard != official.wildcard:
-            raise MappingError("mapping target wildcard policy differs from official template")
         if not official.wildcard:
             if official.semantic_id is None or target.semantic_id != official.semantic_id:
                 raise MappingError("mapping target semantic ID differs from official template")

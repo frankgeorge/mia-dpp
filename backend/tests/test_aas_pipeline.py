@@ -50,7 +50,6 @@ def test_text_mapping_uses_official_and_wildcard_template_paths() -> None:
         "ArbitraryProperty",
     )
     assert targets["DegreeOfProtection"].instance_path[-1] == "DegreeOfProtection"
-    assert targets["DegreeOfProtection"].wildcard
     assert all(item.evidence_id.startswith("ev-") for item in proposal.mappings)
 
 
