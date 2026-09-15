@@ -245,14 +245,6 @@ class NameplateElement(WireModel):
     target: MappingTarget
 
 
-class SemanticMatchDecision(WireModel):
-    """Provider-neutral semantic suggestion constrained to existing domain IDs."""
-
-    evidence_id: str = Field(min_length=1)
-    requirement_id: str = Field(pattern=r"^req-[0-9a-f]{24}$")
-    reasoning: str = Field(min_length=1, max_length=600)
-
-
 class SemanticReviewItem(WireModel):
     """One semantic proposal that must be accepted or rejected by a person."""
 

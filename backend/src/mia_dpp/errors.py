@@ -13,10 +13,6 @@ class ExtractionError(MiaError):
     """A deterministic source extraction could not be completed."""
 
 
-class TemplateError(MiaError):
-    """An official template cannot be located or normalized."""
-
-
 class MappingError(MiaError):
     """A mapping does not refer to the selected authoritative template."""
 

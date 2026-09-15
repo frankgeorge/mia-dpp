@@ -555,15 +555,3 @@ class OfficialTemplateRepository:
 
     def resolve(self, key: str, path: str | Sequence[str]) -> TemplateElement:
         return resolve_element(self.load(key), path)
-
-
-def get_template_release(key: str) -> TemplateRelease:
-    """Get pinned metadata without reading the standards checkout."""
-
-    return OfficialTemplateRepository().get(key)
-
-
-def load_template(key: str, root: Path = DEFAULT_STANDARDS_ROOT) -> SubmodelTemplate:
-    """Load one official template from a standards checkout."""
-
-    return OfficialTemplateRepository(root).load(key)
