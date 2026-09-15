@@ -267,6 +267,34 @@ def test_additional_source_stays_attached_to_the_current_product(tmp_path: Path)
     assert len(state.products["product-direct"].source_urls) == 2
 
 
+def test_direct_url_ignores_a_model_invented_product_id(tmp_path: Path) -> None:
+    url = "https://manufacturer.example/products/pg-16"
+    repository = OfficialTemplateRepository()
+
+    async def public_resolver(host: str, port: int) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    dependencies = MiaDependencies(
+        state=MiaState(thread_id="thread-untrusted-product-id"),
+        search=FakeSearch(),
+        web_tool=WebExtractionTool(
+            loader=FixtureLoader(),
+            url_policy=ProductUrlPolicy(public_resolver),
+        ),
+        templates=repository,
+        mapping_review=MappingReviewService(repository),
+        store=Store(tmp_path / "store.sqlite3", tmp_path / "workspaces"),
+    )
+
+    observation = asyncio.run(
+        extract_product_page(SimpleNamespace(deps=dependencies), url, "null")  # type: ignore[arg-type]
+    )
+
+    product_id = observation.identifiers[0]
+    assert product_id != "null"
+    assert product_id in dependencies.state.products
+
+
 def test_trace_is_observable_before_agent_run_completes(tmp_path: Path) -> None:
     url = "https://manufacturer.example/products/pg-16"
     model = ScriptedTestModel(

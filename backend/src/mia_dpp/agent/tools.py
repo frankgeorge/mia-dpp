@@ -303,7 +303,12 @@ async def extract_product_page(
         ),
         None,
     )
-    resolved_id = product_id or source_candidate_owner or package.product_id
+    supplied_product_id = (
+        product_id
+        if product_id and product_id.strip().casefold() not in {"null", "none", "undefined"}
+        else None
+    )
+    resolved_id = supplied_product_id or source_candidate_owner or package.product_id
     candidate = next(
         (item for item in ctx.deps.state.product_candidates if item.id == resolved_id),
         None,
