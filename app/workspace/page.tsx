@@ -66,7 +66,6 @@ export default function Workspace() {
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
   const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
   const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
-  const [mode, setMode] = useState<string>("");
   const [threadId, setThreadId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
   const [companyCandidates, setCompanyCandidates] = useState<CompanyCandidate[]>([]);
@@ -230,7 +229,6 @@ export default function Workspace() {
   function applyAgentResponse(data: AgentResponse) {
     setThreadId(data.threadId);
     setAgentStatus(data.status);
-    setMode(data.mode);
     setCompanyCandidates(data.companyCandidates);
     setProductCandidates(data.productCandidates);
     setCurrentProductId(data.currentProduct?.productId ?? null);
@@ -518,31 +516,9 @@ export default function Workspace() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {mode === "demo" && (
-            <span className="rounded-full bg-mist px-2.5 py-1 font-mono text-[11px] text-muted">
-              Demo mode
-            </span>
-          )}
-          {mode === "live" && (
-            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
-              Live agent
-            </span>
-          )}
-          {mode === "website" && (
-            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
-              Website evidence
-            </span>
-          )}
-          {mode === "agent" && (
-            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
-              Autonomous agent
-            </span>
-          )}
-          {mode === "configuration_required" && (
-            <span className="rounded-full bg-warn/10 px-2.5 py-1 font-mono text-[11px] text-warn">
-              LLM key required
-            </span>
-          )}
+          <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
+            Autonomous agent
+          </span>
           <button
             onClick={() => void generate()}
             disabled={ready === 0}

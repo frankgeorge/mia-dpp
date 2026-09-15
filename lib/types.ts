@@ -344,7 +344,6 @@ export interface AgentProductWork {
   templateIndex: RequirementInventory | null;
   coverageReport: CoverageReport | null;
   pendingReviews: SemanticReviewItem[];
-  reviewComplete: boolean;
   aasArtifactSha256: string | null;
   artifactIds: string[];
 }
@@ -385,5 +384,4 @@ export interface AgentResponse {
   traceEvents: AgentTraceEvent[];
   pendingHumanRequest: HumanRequest | null;
   artifactCount: number;
-  mode: "agent";
 }

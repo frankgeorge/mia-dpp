@@ -102,7 +102,6 @@ class ProductWork(WireModel):
     mapping_result: MappingResult | None = None
     template_index: TemplateIndex | None = None
     pending_reviews: tuple[SemanticReviewItem, ...] = ()
-    review_complete: bool = False
     aas_artifact_sha256: str | None = None
     artifact_ids: tuple[str, ...] = ()
 
@@ -217,4 +216,3 @@ class AgentResponse(WireModel):
     pending_human_request: HumanRequest | None = None
     trace_events: tuple[AgentTraceEvent, ...] = ()
     artifact_count: int = 0
-    mode: str = "agent"
