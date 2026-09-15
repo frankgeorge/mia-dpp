@@ -14,7 +14,7 @@ import type {
   FieldMapping,
   HumanRequest,
   MappingResult,
-  NameplateElement,
+  Requirement,
   SemanticReviewItem,
   ProductCandidate,
   WorkspaceArtifact,
@@ -66,9 +66,6 @@ export default function Workspace() {
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
   const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
   const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
-  const [nameplateElements, setNameplateElements] = useState<
-    NameplateElement[]
-  >([]);
   const [mode, setMode] = useState<string>("");
   const [threadId, setThreadId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
@@ -339,7 +336,6 @@ export default function Workspace() {
     setEvidence(product.evidence);
     setMappingResult(product.mappingResult);
     setCoverageReport(product.coverageReport);
-    setNameplateElements(product.nameplateElements);
     setDpp(null);
     setTab("mappings");
   }
@@ -401,7 +397,7 @@ export default function Workspace() {
 
   function correct(
     id: string,
-    selected: NameplateElement,
+    selected: Requirement,
     correctedValue?: string,
     comment?: string
   ) {
@@ -409,7 +405,14 @@ export default function Workspace() {
     if (!mapping) return;
     const corrected: FieldMapping = {
       ...mapping,
-      target: selected.target,
+      target: {
+        templateKey: selected.templateKey,
+        templateRelease: selected.templateRelease,
+        templatePath: selected.templatePath,
+        instancePath: selected.templatePath,
+        idShort: selected.idShort ?? selected.templatePath.at(-1) ?? "Target",
+        semanticId: selected.semanticId!,
+      },
       sourceValue: correctedValue?.trim() || mapping.sourceValue,
       status: "approved",
       mappingOrigin: "human",
@@ -420,24 +423,17 @@ export default function Workspace() {
     setMappings((previous) =>
       previous.map((item) => (item.id === id ? corrected : item))
     );
-    if (semanticReview.some((item) => item.id === id) && coverageReport) {
-      const requirement = coverageReport.inventory.requirements.find(
-        (item) =>
-          item.templateKey === selected.target.templateKey &&
-          item.templatePath.join("/") === selected.target.templatePath.join("/")
-      );
-      if (requirement) {
-        setReviewDecisions((previous) => ({
-          ...previous,
-          [id]: {
-            reviewId: id,
-            decision: "correct",
-            correctedRequirementId: requirement.id,
-            correctedValue: correctedValue?.trim() || null,
-            comment: comment?.trim() || null,
-          },
-        }));
-      }
+    if (semanticReview.some((item) => item.id === id)) {
+      setReviewDecisions((previous) => ({
+        ...previous,
+        [id]: {
+          reviewId: id,
+          decision: "correct",
+          correctedRequirementId: selected.id,
+          correctedValue: correctedValue?.trim() || null,
+          comment: comment?.trim() || null,
+        },
+      }));
     }
   }
 
@@ -502,20 +498,20 @@ export default function Workspace() {
         (mapping) => mapping.id.startsWith("review-") && mapping.status === "review"
       ).length
     : 0;
-  const present = new Set(
-    mappings
-      .filter(
-        (mapping) =>
-          mapping.status === "approved" || mapping.status === "auto"
-      )
-      .map((mapping) => mapping.target.instancePath.join("/"))
-  );
-  const gaps = nameplateElements
-    .filter(
-      (element) =>
-        element.required && !present.has(element.target.instancePath.join("/"))
-    )
-    .map((element) => element.name);
+  const gaps = coverageReport
+    ? coverageReport.coverage.flatMap((item) => {
+        const requirement = coverageReport.inventory.requirements.find(
+          (candidate) => candidate.id === item.requirementId
+        );
+        return item.status === "missing" && requirement?.required
+          ? [requirement.idShort ?? requirement.templatePath.at(-1) ?? requirement.id]
+          : [];
+      })
+    : [];
+  const correctionTargets =
+    coverageReport?.inventory.requirements.filter(
+      (item) => item.kind === "value" && !item.wildcard && item.semanticId
+    ) ?? [];
 
   return (
     <div className="flex h-screen flex-col bg-mist">
@@ -920,7 +916,7 @@ export default function Workspace() {
                       <MappingRow
                         key={m.id}
                         mapping={m}
-                        elements={nameplateElements}
+                        elements={correctionTargets}
                         onDecide={decide}
                         onCorrect={correct}
                       />

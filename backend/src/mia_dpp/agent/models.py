@@ -13,7 +13,6 @@ from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
 from mia_dpp.domain.mappings import (
     CoverageReport,
     MappingResult,
-    NameplateElement,
     SemanticReviewItem,
 )
 from mia_dpp.domain.targets import TemplateIndex
@@ -102,7 +101,6 @@ class ProductWork(WireModel):
     evidence: tuple[EvidenceRecord, ...] = ()
     mapping_result: MappingResult | None = None
     template_index: TemplateIndex | None = None
-    nameplate_elements: tuple[NameplateElement, ...] = ()
     pending_reviews: tuple[SemanticReviewItem, ...] = ()
     review_complete: bool = False
     aas_artifact_sha256: str | None = None

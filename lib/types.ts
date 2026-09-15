@@ -188,17 +188,6 @@ export interface MappingResult {
   unmatchedEvidenceIds: string[];
 }
 
-export interface NameplateElement {
-  name: string;
-  path: string[];
-  semanticId: string;
-  hint: string;
-  required: boolean;
-  modelType: string;
-  valueType: string | null;
-  target: MappingTarget;
-}
-
 export interface MappingKnowledgeEntry {
   id: string;
   sourceField: string;
@@ -354,7 +343,6 @@ export interface AgentProductWork {
   mappingResult: MappingResult | null;
   templateIndex: RequirementInventory | null;
   coverageReport: CoverageReport | null;
-  nameplateElements: NameplateElement[];
   pendingReviews: SemanticReviewItem[];
   reviewComplete: boolean;
   aasArtifactSha256: string | null;

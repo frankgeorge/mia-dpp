@@ -23,7 +23,6 @@ from mia_dpp.agent.models import (
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
 from mia_dpp.store import ArtifactKind
-from mia_dpp.tools.mapping.catalog import nameplate_catalog
 from mia_dpp.tools.mapping.coverage import coverage
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.search import (
@@ -426,7 +425,6 @@ async def map_product_evidence(
     report = coverage(package, index, mapping_result=mapping_result)
     work.mapping_result = mapping_result
     work.template_index = index
-    work.nameplate_elements = nameplate_catalog(ctx.deps.templates)
     work.pending_reviews = ctx.deps.mapping_review.pending_deterministic_reviews(
         mapping_result,
         index,

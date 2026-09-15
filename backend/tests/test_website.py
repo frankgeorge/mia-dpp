@@ -15,7 +15,6 @@ from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import ProductWork
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus, ProposedFieldMapping
 from mia_dpp.errors import MappingError
-from mia_dpp.tools.mapping.catalog import nameplate_catalog
 from mia_dpp.tools.mapping.mapper import DeterministicWebsiteMapper
 from mia_dpp.tools.web.generic import WebsiteFactExtractor
 from mia_dpp.tools.web.models import ProductUrlRejectedError, RenderedPage
@@ -75,7 +74,6 @@ async def ingest(
         evidence=extraction.knowledge_package.evidence,
         mapping_result=mapping,
         template_index=index,
-        nameplate_elements=nameplate_catalog(repository),
     )
     return work
 

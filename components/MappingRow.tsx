@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { FieldMapping, NameplateElement } from "@/lib/types";
+import type { FieldMapping, Requirement } from "@/lib/types";
 
 export function MappingRow({
   mapping: m,
@@ -10,19 +10,17 @@ export function MappingRow({
   onCorrect,
 }: {
   mapping: FieldMapping;
-  elements: NameplateElement[];
+  elements: Requirement[];
   onDecide: (id: string, status: "approved" | "rejected", comment?: string) => void;
   onCorrect: (
     id: string,
-    target: NameplateElement,
+    target: Requirement,
     correctedValue?: string,
     comment?: string
   ) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [targetPath, setTargetPath] = useState(
-    m.target.instancePath.join("/")
-  );
+  const [targetPath, setTargetPath] = useState(elements[0]?.id ?? "");
   const [correctedValue, setCorrectedValue] = useState(m.sourceValue);
   const [comment, setComment] = useState("");
   const basis = m.assessment.basis[0].toUpperCase() + m.assessment.basis.slice(1);
@@ -130,10 +128,10 @@ export function MappingRow({
             >
               {elements.map((e) => (
                 <option
-                  key={e.target.instancePath.join("/")}
-                  value={e.target.instancePath.join("/")}
+                  key={e.id}
+                  value={e.id}
                 >
-                  {e.path.join(" / ")}
+                  {e.templatePath.join(" / ")}
                   {e.required ? " (required)" : ""}
                 </option>
               ))}
@@ -152,7 +150,7 @@ export function MappingRow({
               onClick={() => {
                 const target = elements.find(
                   (element) =>
-                    element.target.instancePath.join("/") === targetPath
+                    element.id === targetPath
                 );
                 if (target) onCorrect(m.id, target, correctedValue, comment);
                 setEditing(false);

@@ -235,17 +235,6 @@ class TextMappingProposal(WireModel):
     mappings: tuple[MappingDraft, ...]
 
 
-class NameplateElement(WireModel):
-    name: str
-    path: tuple[str, ...]
-    semantic_id: str
-    hint: str
-    required: bool
-    model_type: str
-    value_type: str | None = None
-    target: MappingTarget
-
-
 class SemanticReviewItem(WireModel):
     """One semantic proposal that must be accepted or rejected by a person."""
 
