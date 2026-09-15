@@ -15,7 +15,6 @@ from mia_dpp.domain.evidence import (
     SourceLocation,
 )
 from mia_dpp.domain.mappings import FieldMapping, MappingStatus
-from mia_dpp.domain.targets import TargetProfile
 from mia_dpp.errors import MappingError
 
 
@@ -53,11 +52,6 @@ def build_dpp(
     )
     templates = repository or OfficialTemplateRepository()
     template = templates.load("digital_nameplate")
-    profile = TargetProfile(
-        id="idta-digital-nameplate-3-0-1",
-        name="IDTA Digital Nameplate 3.0.1",
-        template=template.release,
-    )
     artifact = AasCompiler(templates).compile(package, accepted, template)
     validation = AasValidator().validate(artifact, template, accepted)
     gaps = gap_report_from_validation(validation)
@@ -68,7 +62,7 @@ def build_dpp(
         submodel=artifact.submodel,
         environment=artifact.environment,
         artifact_sha256=artifact.sha256,
-        target_profile=profile,
+        template=template.release,
         gap_report=gaps,
         validation_report=validation,
         deployable=validation.valid and not gaps.blocks_deployment,

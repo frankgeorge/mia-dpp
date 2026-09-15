@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -142,16 +141,6 @@ class TemplateIndex(WireModel):
         ):
             raise ValueError("every requirement must belong to a selected template release")
         return self
-
-
-class TargetProfile(WireModel):
-    """Versioned choice of one official target for deterministic compilation."""
-
-    id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    template: TemplateRelease
-    aas_metamodel_version: Literal["3.0"] = "3.0"
-    language: str = "en"
 
 
 class TemplateSummary(WireModel):

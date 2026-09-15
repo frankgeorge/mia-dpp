@@ -9,7 +9,7 @@ from pydantic import Field, model_validator
 
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import EvidenceRecord
-from mia_dpp.domain.targets import TargetProfile
+from mia_dpp.domain.targets import TemplateRelease
 
 
 class Severity(StrEnum):
@@ -93,7 +93,7 @@ class DppPackage(WireModel):
     environment: dict[str, Any]
     passport_id: str
     artifact_sha256: str
-    target_profile: TargetProfile
+    template: TemplateRelease
     gap_report: GapReport
     validation_report: ValidationReport
     deployable: bool

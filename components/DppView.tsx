@@ -150,7 +150,7 @@ export function DppView({ dpp }: { dpp: DppPackage }) {
       <div className="grid gap-px border-b border-hairline bg-hairline sm:grid-cols-3">
         <Summary
           label="Template"
-          value={`${dpp.targetProfile.template.family} ${dpp.targetProfile.template.release}`}
+          value={`${dpp.template.family} ${dpp.template.release}`}
         />
         <Summary
           label="Validation"

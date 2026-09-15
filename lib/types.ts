@@ -73,14 +73,6 @@ export interface TemplateRelease {
   metamodelVersion: string;
 }
 
-export interface TargetProfile {
-  id: string;
-  name: string;
-  template: TemplateRelease;
-  aasMetamodelVersion: "3.0";
-  language: string;
-}
-
 export interface MappingTarget {
   templateKey: string;
   templateRelease: string;
@@ -247,7 +239,7 @@ export interface DppPackage {
   environment: Record<string, unknown>;
   passportId: string;
   artifactSha256: string;
-  targetProfile: TargetProfile;
+  template: TemplateRelease;
   gapReport: GapReport;
   validationReport: ValidationReport;
   deployable: boolean;
@@ -280,7 +272,6 @@ export type AgentStatus =
   | "awaiting_review"
   | "awaiting_input"
   | "awaiting_optional_choice"
-  | "ready_to_build"
   | "completed"
   | "failed";
 
@@ -333,7 +324,7 @@ export interface AgentTraceEvent {
 
 export interface AgentProductWork {
   productId: string;
-  status: "queued" | "in_progress" | "awaiting_review" | "ready_to_build" | "completed" | "failed";
+  status: "queued" | "in_progress" | "awaiting_review" | "completed" | "failed";
   candidate: ProductCandidate | null;
   sourceCandidates: ProductSourceCandidate[];
   productName: string | null;

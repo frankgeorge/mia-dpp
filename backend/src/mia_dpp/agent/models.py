@@ -28,7 +28,6 @@ class AgentStatus(StrEnum):
     AWAITING_REVIEW = "awaiting_review"
     AWAITING_INPUT = "awaiting_input"
     AWAITING_OPTIONAL_CHOICE = "awaiting_optional_choice"
-    READY_TO_BUILD = "ready_to_build"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -43,7 +42,6 @@ class ProductStatus(StrEnum):
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"
     AWAITING_REVIEW = "awaiting_review"
-    READY_TO_BUILD = "ready_to_build"
     COMPLETED = "completed"
     FAILED = "failed"
 
