@@ -12,3 +12,6 @@ backend/.pytest_cache/
 backend/__pycache__/
 .coverage
 *.py[cod]
+
+# Reproducible local outputs from the Docling source-normalization experiment.
+artifacts/docling/
