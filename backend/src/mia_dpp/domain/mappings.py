@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import Field, model_validator
+from pydantic import Field, computed_field, model_validator
 
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import EvidenceRecord
@@ -106,30 +106,6 @@ class CoverageStatistics(WireModel):
     evidence_used: int = Field(ge=0)
     unmatched_evidence: int = Field(ge=0)
 
-    @model_validator(mode="after")
-    def subtotals_match(self) -> CoverageStatistics:
-        required = (
-            self.required_satisfied
-            + self.required_candidate
-            + self.required_ambiguous
-            + self.required_missing
-        )
-        optional = (
-            self.optional_satisfied
-            + self.optional_candidate
-            + self.optional_ambiguous
-            + self.optional_missing
-        )
-        if required != self.required_requirements:
-            raise ValueError("required coverage statistics do not add up")
-        if optional != self.optional_requirements:
-            raise ValueError("optional coverage statistics do not add up")
-        if required + optional != self.requirements:
-            raise ValueError("coverage statistics do not include every requirement")
-        if self.evidence_used + self.unmatched_evidence != self.evidence_records:
-            raise ValueError("coverage statistics do not include every evidence record")
-        return self
-
 
 class CoverageReport(WireModel):
     """Bidirectional accounting between retained evidence and target requirements."""
@@ -138,7 +114,43 @@ class CoverageReport(WireModel):
     coverage: tuple[RequirementCoverage, ...]
     analyzed_evidence_ids: tuple[str, ...]
     unmatched_evidence_ids: tuple[str, ...]
-    statistics: CoverageStatistics
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def statistics(self) -> CoverageStatistics:
+        """Derive summary counts from authoritative requirement coverage."""
+
+        requirements = {item.id: item for item in self.inventory.requirements}
+
+        def count(required: bool, status: CoverageStatus) -> int:
+            return sum(
+                requirements[item.requirement_id].required is required and item.status is status
+                for item in self.coverage
+            )
+
+        required = sum(item.required for item in self.inventory.requirements)
+        used = {
+            evidence_id
+            for item in self.coverage
+            for evidence_id in (*item.supporting_evidence_ids, *item.candidate_evidence_ids)
+        }
+        return CoverageStatistics(
+            selected_templates=len(self.inventory.selected_templates),
+            requirements=len(self.coverage),
+            required_requirements=required,
+            required_satisfied=count(True, CoverageStatus.SATISFIED),
+            required_candidate=count(True, CoverageStatus.CANDIDATE),
+            required_ambiguous=count(True, CoverageStatus.AMBIGUOUS),
+            required_missing=count(True, CoverageStatus.MISSING),
+            optional_requirements=len(self.coverage) - required,
+            optional_satisfied=count(False, CoverageStatus.SATISFIED),
+            optional_candidate=count(False, CoverageStatus.CANDIDATE),
+            optional_ambiguous=count(False, CoverageStatus.AMBIGUOUS),
+            optional_missing=count(False, CoverageStatus.MISSING),
+            evidence_records=len(self.analyzed_evidence_ids),
+            evidence_used=len(used),
+            unmatched_evidence=len(self.unmatched_evidence_ids),
+        )
 
     @model_validator(mode="after")
     def requirements_and_evidence_are_accounted_for(self) -> CoverageReport:
@@ -159,14 +171,6 @@ class CoverageReport(WireModel):
         unmatched = set(self.unmatched_evidence_ids)
         if used & unmatched or used | unmatched != analyzed:
             raise ValueError("every analyzed evidence record must be used or unmatched")
-        if self.statistics.requirements != len(self.coverage):
-            raise ValueError("requirement statistics differ from coverage")
-        if self.statistics.evidence_records != len(analyzed):
-            raise ValueError("evidence statistics differ from analyzed evidence")
-        if self.statistics.evidence_used != len(used):
-            raise ValueError("used evidence statistics differ from coverage")
-        if self.statistics.unmatched_evidence != len(unmatched):
-            raise ValueError("unmatched evidence statistics differ from coverage")
         return self
 
 

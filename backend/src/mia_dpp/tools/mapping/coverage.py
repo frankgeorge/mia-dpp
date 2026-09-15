@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from mia_dpp.domain.evidence import EvidenceRecord, ProductKnowledgePackage
 from mia_dpp.domain.mappings import (
     CoverageReport,
-    CoverageStatistics,
     CoverageStatus,
     MappingResult,
     MappingStatus,
@@ -98,13 +97,11 @@ def coverage(
     }
     analyzed_ids = tuple(evidence_by_id)
     unmatched = tuple(item for item in analyzed_ids if item not in used)
-    statistics = _statistics(inventory, coverage, len(analyzed_ids), len(used))
     return CoverageReport(
         inventory=inventory,
         coverage=coverage,
         analyzed_evidence_ids=analyzed_ids,
         unmatched_evidence_ids=unmatched,
-        statistics=statistics,
     )
 
 
@@ -303,42 +300,6 @@ def _coverage_for(
         candidate_evidence_ids=candidate_ids,
         match_method=method.method,
         explanation=method.explanation,
-    )
-
-
-def _statistics(
-    inventory: TemplateIndex,
-    coverage: Sequence[RequirementCoverage],
-    evidence_records: int,
-    evidence_used: int,
-) -> CoverageStatistics:
-    requirement_by_id = {item.id: item for item in inventory.requirements}
-
-    def count(required: bool, status: CoverageStatus) -> int:
-        return sum(
-            1
-            for item in coverage
-            if requirement_by_id[item.requirement_id].required is required and item.status is status
-        )
-
-    required_total = sum(item.required for item in inventory.requirements)
-    optional_total = len(inventory.requirements) - required_total
-    return CoverageStatistics(
-        selected_templates=len(inventory.selected_templates),
-        requirements=len(inventory.requirements),
-        required_requirements=required_total,
-        required_satisfied=count(True, CoverageStatus.SATISFIED),
-        required_candidate=count(True, CoverageStatus.CANDIDATE),
-        required_ambiguous=count(True, CoverageStatus.AMBIGUOUS),
-        required_missing=count(True, CoverageStatus.MISSING),
-        optional_requirements=optional_total,
-        optional_satisfied=count(False, CoverageStatus.SATISFIED),
-        optional_candidate=count(False, CoverageStatus.CANDIDATE),
-        optional_ambiguous=count(False, CoverageStatus.AMBIGUOUS),
-        optional_missing=count(False, CoverageStatus.MISSING),
-        evidence_records=evidence_records,
-        evidence_used=evidence_used,
-        unmatched_evidence=evidence_records - evidence_used,
     )
 
 
