@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Nameplate } from "@/components/Nameplate";
 
 export default function Home() {
@@ -22,12 +23,33 @@ export default function Home() {
               Integration Graph
             </a>
           </nav>
-          <Link
-            href="/workspace"
-            className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
-          >
-            Try for free
-          </Link>
+          <SignedOut>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/login"
+                className="text-[13px] font-medium text-muted transition-colors hover:text-ink"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/signup"
+                className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
+              >
+                Get started
+              </Link>
+            </div>
+          </SignedOut>
+          <SignedIn>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/workspace"
+                className="rounded-full bg-signal px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
+              >
+                Open workspace
+              </Link>
+              <UserButton />
+            </div>
+          </SignedIn>
         </div>
       </header>
 
@@ -61,7 +83,7 @@ export default function Home() {
               style={{ animationDelay: "180ms" }}
             >
               <Link
-                href="/workspace"
+                href="/signup"
                 className="rounded-full bg-signal px-6 py-3 text-[15px] font-medium text-white transition-transform hover:scale-[1.02] active:scale-[0.99]"
               >
                 Try for free
@@ -277,7 +299,7 @@ export default function Home() {
             wherever it needs you.
           </p>
           <Link
-            href="/workspace"
+            href="/signup"
             className="mt-9 inline-block rounded-full bg-white px-7 py-3.5 text-[15px] font-medium text-ink transition-transform hover:scale-[1.02] active:scale-[0.99]"
           >
             Try for free
