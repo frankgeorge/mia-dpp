@@ -83,6 +83,68 @@ export default function Workspace() {
   const [tab, setTab] = useState<WorkspaceTab>("mappings");
   const endRef = useRef<HTMLDivElement>(null);
 
+  // ── Supplier outreach state ───────────────────────────────────────────────
+  const [supplierEmail, setSupplierEmail] = useState("");
+  const [outreachStatus, setOutreachStatus] = useState<
+    "idle" | "sending" | "sent" | "responded" | "error"
+  >("idle");
+  const [outreachToken, setOutreachToken] = useState<string | null>(null);
+  const [outreachError, setOutreachError] = useState("");
+  const outreachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll for supplier response every 10 s after email is sent
+  useEffect(() => {
+    if (outreachStatus !== "sent" || !outreachToken) return;
+    outreachPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/session/${outreachToken}`);
+        if (res.ok) {
+          const data = (await res.json()) as { responded?: boolean; response?: Record<string, string> };
+          if (data.responded && data.response) {
+            setOutreachStatus("responded");
+            clearInterval(outreachPollRef.current!);
+            // Auto-fill gaps into chat
+            const filled = Object.entries(data.response)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(", ");
+            void send(`Supplier provided missing data — ${filled}`);
+          }
+        }
+      } catch { /* ignore poll errors */ }
+    }, 10_000);
+    return () => clearInterval(outreachPollRef.current!);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outreachStatus, outreachToken]);
+
+  async function sendGapEmail() {
+    if (!supplierEmail || gaps.length === 0) return;
+    setOutreachStatus("sending");
+    setOutreachError("");
+    try {
+      const res = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactEmail: supplierEmail,
+          productName: productName || "Product",
+          productUrl: websiteUrl || "",
+          gaps,
+        }),
+      });
+      const data = (await res.json()) as { token?: string; portalUrl?: string; sent?: boolean; error?: string };
+      if (res.ok) {
+        setOutreachToken(data.token ?? null);
+        setOutreachStatus("sent");
+      } else {
+        setOutreachError(data.error ?? "Failed to send email.");
+        setOutreachStatus("error");
+      }
+    } catch {
+      setOutreachError("Network error. Please try again.");
+      setOutreachStatus("error");
+    }
+  }
+
   const mergeActivity = useCallback((events: AgentTraceEvent[]) => {
     setAgentActivity((previous) => {
       const known = new Set(previous.map((event) => event.id));
@@ -897,6 +959,66 @@ export default function Workspace() {
                       </p>
                       <p className="mt-2 text-[12px] text-muted">
                         Add these values in the chat. MIA will not invent them.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ── Supplier Outreach ─────────────────────────────── */}
+                  {gaps.length > 0 && outreachStatus !== "responded" && (
+                    <div className="rounded-xl border border-hairline bg-paper p-4 shadow-sm">
+                      <p className="text-[13px] font-semibold text-ink">
+                        Supplier Outreach
+                      </p>
+                      <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                        Send a data-request email to your supplier. They will
+                        receive a branded form pre-filled with exactly the fields
+                        above. MIA auto-fills the passport when they respond.
+                      </p>
+                      {outreachStatus === "idle" || outreachStatus === "error" ? (
+                        <>
+                          <div className="mt-3 flex gap-2">
+                            <input
+                              type="email"
+                              value={supplierEmail}
+                              onChange={(e) => setSupplierEmail(e.target.value)}
+                              placeholder="supplier@example.com"
+                              className="flex-1 rounded-lg border border-hairline bg-mist px-3 py-2 text-[13px] text-ink placeholder:text-muted/60 focus:border-signal/50 focus:outline-none focus:ring-2 focus:ring-signal/10"
+                            />
+                            <button
+                              onClick={() => void sendGapEmail()}
+                              disabled={!supplierEmail || gaps.length === 0}
+                              className="rounded-full bg-ink px-4 py-2 text-[12px] font-medium text-white transition-all hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
+                            >
+                              Send gap request
+                            </button>
+                          </div>
+                          {outreachStatus === "error" && (
+                            <p className="mt-2 text-[11px] text-warn">
+                              {outreachError}
+                            </p>
+                          )}
+                        </>
+                      ) : outreachStatus === "sending" ? (
+                        <p className="mt-3 text-[12px] text-muted">Sending&hellip;</p>
+                      ) : (
+                        /* sent */
+                        <div className="mt-3 flex items-center gap-2">
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-ok" />
+                          <p className="text-[12px] text-muted">
+                            Email sent to <strong className="text-ink">{supplierEmail}</strong>. Polling for response every 10 s&hellip;
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {gaps.length > 0 && outreachStatus === "responded" && (
+                    <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4 shadow-sm">
+                      <p className="text-[13px] font-semibold text-ok">
+                        Supplier responded
+                      </p>
+                      <p className="mt-1 text-[12px] text-muted">
+                        Missing fields received from <strong className="text-ink">{supplierEmail}</strong>. MIA is auto-filling the passport.
                       </p>
                     </div>
                   )}
