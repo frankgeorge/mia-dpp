@@ -11,6 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY --from=uv /uv /uvx /bin/
 
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system mia && \
     useradd --system --create-home --gid mia --home-dir /app mia && \
     mkdir -p /data && \
