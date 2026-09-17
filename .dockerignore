@@ -1,0 +1,33 @@
+.git
+.github
+.next
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.env
+.env.*
+node_modules
+backend/.mypy_cache
+backend/.pytest_cache
+backend/.ruff_cache
+backend/.venv
+backend/tests
+**/__pycache__
+**/*.py[cod]
+*.tsbuildinfo
+MIA_README.md
+
+# Runtime supports two reviewed templates. Keep the full upstream checkout out
+# of the build context and re-include only those exact authoritative JSON files.
+standards/idta-submodel-templates/**
+!standards/idta-submodel-templates/published/
+!standards/idta-submodel-templates/published/Digital nameplate/
+!standards/idta-submodel-templates/published/Digital nameplate/3/
+!standards/idta-submodel-templates/published/Digital nameplate/3/0/
+!standards/idta-submodel-templates/published/Digital nameplate/3/0/1/
+!standards/idta-submodel-templates/published/Digital nameplate/3/0/1/IDTA 02006-3-0-1_Template_Digital Nameplate.json
+!standards/idta-submodel-templates/published/Technical_Data/
+!standards/idta-submodel-templates/published/Technical_Data/2/
+!standards/idta-submodel-templates/published/Technical_Data/2/0/
+!standards/idta-submodel-templates/published/Technical_Data/2/0/1/
+!standards/idta-submodel-templates/published/Technical_Data/2/0/1/IDTA 02003_2-0-1_Template_TechnicalData.json

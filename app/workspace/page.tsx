@@ -1,21 +1,43 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
+  AgentTraceEvent,
+  AgentReviewDecision,
+  AgentResponse,
+  CompanyCandidate,
   ChatMessage,
+  CoverageReport,
   DppPackage,
+  EvidenceRecord,
   FieldMapping,
-  GraphEntry,
-  NameplateElement,
-  ProposedFieldMapping,
+  HumanRequest,
+  MappingResult,
+  Requirement,
+  SemanticReviewItem,
+  ProductCandidate,
+  WorkspaceArtifact,
+  MappingKnowledgeEntry,
 } from "@/lib/types";
-import { MappingRow } from "@/components/MappingRow";
+import { CoveragePanel } from "@/components/CoveragePanel";
+import { EvidencePanel } from "@/components/EvidencePanel";
+import { MappingReviewRow, MappingRow } from "@/components/MappingRow";
 import { DppView } from "@/components/DppView";
+import { AgentActivity } from "@/components/AgentActivity";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { LiveActivity } from "@/components/LiveActivity";
+import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
+import { IntegrationGraph } from "@/components/IntegrationGraph";
 
-const GRAPH_KEY = "mia.graph.v1";
-const API_URL =
-  process.env.NEXT_PUBLIC_MIA_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
+type WorkspaceTab =
+  | "mappings"
+  | "evidence"
+  | "coverage"
+  | "process"
+  | "data"
+  | "graph";
 
 const SAMPLES = [
   {
@@ -35,39 +57,81 @@ const SAMPLES = [
 export default function Workspace() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [productName, setProductName] = useState("");
   const [dpp, setDpp] = useState<DppPackage | null>(null);
-  const [graph, setGraph] = useState<GraphEntry[]>([]);
-  const [nameplateElements, setNameplateElements] = useState<
-    NameplateElement[]
-  >([]);
-  const [mode, setMode] = useState<string>("");
-  const [tab, setTab] = useState<"mappings" | "graph">("mappings");
+  const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
+  const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
+  const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
+  const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
+  const [companyCandidates, setCompanyCandidates] = useState<CompanyCandidate[]>([]);
+  const [productCandidates, setProductCandidates] = useState<ProductCandidate[]>([]);
+  const [currentProductId, setCurrentProductId] = useState<string | null>(null);
+  const [mappingCycleId, setMappingCycleId] = useState<string | null>(null);
+  const [agentActivity, setAgentActivity] = useState<AgentTraceEvent[]>([]);
+  const [artifacts, setArtifacts] = useState<WorkspaceArtifact[]>([]);
+  const [semanticReview, setSemanticReview] = useState<SemanticReviewItem[]>([]);
+  const [humanRequest, setHumanRequest] = useState<HumanRequest | null>(null);
+  const [humanValue, setHumanValue] = useState("");
+  const [reviewDecisions, setReviewDecisions] = useState<
+    Record<string, AgentReviewDecision>
+  >({});
+  const [tab, setTab] = useState<WorkspaceTab>("mappings");
   const endRef = useRef<HTMLDivElement>(null);
 
-  /* Integration Graph persists across sessions in the browser. */
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(GRAPH_KEY);
-      if (raw) setGraph(JSON.parse(raw));
-    } catch {
-      /* ignore unreadable storage */
-    }
+  const mergeActivity = useCallback((events: AgentTraceEvent[]) => {
+    setAgentActivity((previous) => {
+      const known = new Set(previous.map((event) => event.id));
+      return [...previous, ...events.filter((event) => !known.has(event.id))];
+    });
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(GRAPH_KEY, JSON.stringify(graph));
-    } catch {
-      /* ignore full or blocked storage */
-    }
-  }, [graph]);
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, busy, agentActivity]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
+    const load = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/mapping-knowledge`);
+        if (response.ok) {
+          setMappingKnowledge((await response.json()) as MappingKnowledgeEntry[]);
+        }
+      } catch {
+        /* The empty state remains usable while the backend is unavailable. */
+      }
+    };
+    void load();
+  }, []);
+
+  useEffect(() => {
+    if (!busy || !threadId) return;
+    let cancelled = false;
+    const poll = async () => {
+      const response = await fetch(
+        `${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/trace`
+      );
+      if (!cancelled && response.ok) {
+        mergeActivity((await response.json()) as AgentTraceEvent[]);
+      }
+    };
+    void poll();
+    const interval = window.setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [busy, threadId, mergeActivity]);
+
+  function activeThread(): string {
+    const active = threadId ?? `thread-${crypto.randomUUID()}`;
+    if (!threadId) setThreadId(active);
+    return active;
+  }
 
   async function send(text: string) {
     const t = text.trim();
@@ -76,34 +140,21 @@ export default function Workspace() {
     const next: ChatMessage[] = [...messages, { role: "user", content: t }];
     setMessages(next);
     setInput("");
+    const activeThreadId = activeThread();
     setBusy(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/chat`, {
+      const res = await fetch(`${API_URL}/api/agent/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, graph }),
+        body: JSON.stringify({ threadId: activeThreadId, message: t }),
       });
-      if (!res.ok) throw new Error(`Python backend returned ${res.status}`);
-      const data = await res.json();
-      setMode(data.mode ?? "");
-      setNameplateElements(data.nameplateElements ?? []);
-
-      if (data.proposal) {
-        setProductName(data.proposal.productName || "Product");
-        setMappings(
-          (data.proposal.mappings ?? []).map(
-            (m: ProposedFieldMapping, i: number) => ({
-              ...m,
-              id: `${Date.now()}-${i}`,
-            })
-          )
-        );
-        setDpp(null);
-        setTab("mappings");
+      const body = (await res.json()) as AgentResponse | { detail?: string };
+      if (!res.ok) {
+        throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${res.status}`);
       }
-
-      if (data.generate) await generate();
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
 
       setMessages((prev) => [
         ...prev,
@@ -123,75 +174,307 @@ export default function Workspace() {
     }
   }
 
-  function decide(id: string, status: "approved" | "rejected") {
+  async function ingestWebsite() {
+    const url = websiteUrl.trim();
+    if (!url || busy || semanticReview.length > 0) return;
+    const activeThreadId = activeThread();
+    setBusy(true);
+    setMessages((previous) => [
+      ...previous,
+      { role: "user", content: `Import product website: ${url}` },
+    ]);
+
+    try {
+      const response = await fetch(`${API_URL}/api/agent/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadId: activeThreadId,
+          message: `Import product website: ${url}`,
+        }),
+      });
+      const responseText = await response.text();
+      let body: unknown;
+      try {
+        body = JSON.parse(responseText) as unknown;
+      } catch {
+        body = { detail: responseText || `Python backend returned ${response.status}` };
+      }
+      if (!response.ok) {
+        const detail =
+          typeof body === "object" &&
+          body !== null &&
+          "detail" in body &&
+          typeof body.detail === "string"
+            ? body.detail
+            : null;
+        throw new Error(
+          detail ?? `Python backend returned ${response.status}`
+        );
+      }
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
+      setWebsiteUrl("");
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          content: `The product website could not be imported: ${message}`,
+        },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function applyAgentResponse(data: AgentResponse) {
+    setThreadId(data.threadId);
+    setAgentStatus(data.status);
+    setCompanyCandidates(data.companyCandidates);
+    setProductCandidates(data.productCandidates);
+    setCurrentProductId(data.currentProduct?.productId ?? null);
+    setHumanRequest(data.pendingHumanRequest);
+    mergeActivity(data.traceEvents);
+    void refreshArtifacts(data.threadId);
+    void refreshMappingKnowledge();
+    const product = data.currentProduct;
+    if (product?.mappingResult && product.coverageReport) {
+      applyWebsiteResult(
+        product,
+        product.pendingReviews,
+        data.status === "awaiting_review"
+      );
+    }
+  }
+
+  async function submitHumanValue() {
+    if (!threadId || !humanRequest?.requirementId || !humanValue.trim() || busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_URL}/api/agent/value`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadId,
+          productId: humanRequest.productId,
+          requirementId: humanRequest.requirementId,
+          value: humanValue.trim(),
+        }),
+      });
+      const body = (await response.json()) as AgentResponse | { detail?: string };
+      if (!response.ok) {
+        throw new Error("detail" in body && body.detail ? body.detail : "Value was rejected");
+      }
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
+      setHumanValue("");
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: humanValue.trim() },
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: `The value could not be saved: ${message}` },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshArtifacts(activeThreadId: string) {
+    const response = await fetch(
+      `${API_URL}/api/workspaces/${encodeURIComponent(activeThreadId)}/artifacts`
+    );
+    if (response.ok) setArtifacts((await response.json()) as WorkspaceArtifact[]);
+  }
+
+  async function refreshMappingKnowledge() {
+    const response = await fetch(`${API_URL}/api/mapping-knowledge`);
+    if (response.ok) {
+      setMappingKnowledge((await response.json()) as MappingKnowledgeEntry[]);
+    }
+  }
+
+  function applyWebsiteResult(
+    product: NonNullable<AgentResponse["currentProduct"]>,
+    reviewItems: SemanticReviewItem[],
+    awaitingReview: boolean
+  ) {
+    const resolvedMappings = [
+      ...(product.mappingResult?.mapped ?? []),
+      ...(product.mappingResult?.ambiguous ?? []),
+      ...(product.mappingResult?.rejected ?? []),
+    ];
+    const resolvedIds = new Set(resolvedMappings.map((mapping) => mapping.id));
+    const semantic = reviewItems
+      .flatMap((item) => item.mapping ? [item.mapping] : [])
+      .filter((mapping) => !resolvedIds.has(mapping.id));
+    setProductName(product.productName || product.candidate?.name || "Website product");
+    setMappingCycleId(product.mappingCycleId);
+    setMappings([...resolvedMappings, ...semantic]);
+    setSemanticReview(awaitingReview ? reviewItems : []);
+    setReviewDecisions(
+      awaitingReview
+        ? Object.fromEntries(
+            reviewItems
+              .filter((item) => item.status !== "uncertain")
+              .map((item) => [item.id, { reviewId: item.id, decision: "keep" }])
+          )
+        : {}
+    );
+    setEvidence(product.evidence);
+    setMappingResult(product.mappingResult);
+    setCoverageReport(product.coverageReport);
+    setDpp(null);
+    setTab("mappings");
+  }
+
+  async function confirmSemanticReview() {
+    if (!threadId || semanticReview.length === 0 || busy) return;
+    const decisions = semanticReview.flatMap((item) => {
+      const decision = reviewDecisions[item.id];
+      return decision ? [decision] : [];
+    });
+    const invalid =
+      decisions.length !== semanticReview.length ||
+      decisions.some(
+        (decision) =>
+          decision.decision === "change_target" && !decision.correctedRequirementId
+      );
+    if (invalid) return;
+
+    setBusy(true);
+    try {
+      if (!currentProductId) throw new Error("No active product is available for review.");
+      const response = await fetch(`${API_URL}/api/agent/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadId,
+          productId: currentProductId,
+          mappingCycleId,
+          decisions,
+        }),
+      });
+      const body = (await response.json()) as AgentResponse | { detail?: string };
+      if (!response.ok) {
+        throw new Error("detail" in body && body.detail ? body.detail : `Python backend returned ${response.status}`);
+      }
+      const data = body as AgentResponse;
+      applyAgentResponse(data);
+      setReviewDecisions({});
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: `The semantic review could not be saved: ${message}` },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function decide(id: string, status: "approved" | "rejected", comment?: string) {
     setMappings((prev) =>
       prev.map((m) => (m.id === id ? { ...m, status } : m))
     );
-    const m = mappings.find((x) => x.id === id);
-    if (m && status === "approved") writeToGraph(m);
+    const review = semanticReview.find((item) => item.mapping?.id === id);
+    if (review) {
+      setReviewDecisions((previous) => ({
+        ...previous,
+        [review.id]: {
+          reviewId: review.id,
+          decision: status === "approved" ? "keep" : "reject",
+          comment: comment?.trim() || null,
+        },
+      }));
+    }
   }
 
-  function correct(id: string, targetElement: string) {
-    setMappings((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              targetElement,
-              semanticId:
-                nameplateElements.find((e) => e.name === targetElement)
-                  ?.semanticId ?? m.semanticId,
-              status: "approved",
-              reasoning: "Corrected by you, and saved to the Integration Graph.",
-            }
-          : m
-      )
+  function correct(
+    id: string,
+    selected: Requirement,
+    correctedValue?: string,
+    comment?: string
+  ) {
+    const mapping = mappings.find((item) => item.id === id);
+    if (!mapping) return;
+    const corrected: FieldMapping = {
+      ...mapping,
+      target: {
+        templateKey: selected.templateKey,
+        templateRelease: selected.templateRelease,
+        templatePath: selected.templatePath,
+        instancePath: selected.templatePath,
+        idShort: selected.idShort ?? selected.templatePath.at(-1) ?? "Target",
+        semanticId: selected.semanticId!,
+      },
+      sourceValue: correctedValue?.trim() || mapping.sourceValue,
+      status: "approved",
+      mappingOrigin: "human",
+      humanReviewed: true,
+      humanComment: comment?.trim() || null,
+      reasoning: "Corrected by you and awaiting trusted backend persistence.",
+    };
+    setMappings((previous) =>
+      previous.map((item) => (item.id === id ? corrected : item))
     );
-    const m = mappings.find((x) => x.id === id);
-    if (m) writeToGraph({ ...m, targetElement });
-  }
-
-  /* Every human decision is written back — this is the compounding memory. */
-  function writeToGraph(m: FieldMapping) {
-    setGraph((prev) => {
-      const i = prev.findIndex(
-        (g) => g.sourceField.toLowerCase() === m.sourceField.toLowerCase()
-      );
-      const entry: GraphEntry = {
-        sourceField: m.sourceField,
-        targetElement: m.targetElement,
-        semanticId: m.semanticId,
-        verifiedAt: new Date().toISOString(),
-        corrections: i >= 0 ? prev[i].corrections + 1 : 1,
-      };
-      if (i >= 0) {
-        const copy = [...prev];
-        copy[i] = entry;
-        return copy;
-      }
-      return [entry, ...prev];
-    });
+    const review = semanticReview.find((item) => item.mapping?.id === id);
+    if (review) {
+      setReviewDecisions((previous) => ({
+        ...previous,
+        [review.id]: {
+          reviewId: review.id,
+          decision: "change_target",
+          correctedRequirementId: selected.id,
+          correctedValue: correctedValue?.trim() || null,
+          comment: comment?.trim() || null,
+        },
+      }));
+    }
   }
 
   function approveAll() {
-    mappings
-      .filter((m) => m.status === "review" || m.status === "auto")
-      .forEach(writeToGraph);
     setMappings((prev) =>
       prev.map((m) =>
         m.status === "rejected" ? m : { ...m, status: "approved" }
       )
     );
+    setReviewDecisions((previous) => {
+      const next = { ...previous };
+      for (const item of semanticReview) {
+        next[item.id] = { reviewId: item.id, decision: "keep" };
+      }
+      return next;
+    });
   }
 
-  async function generate() {
+  async function generate(
+    selectedProduct = productName,
+    selectedMappings = mappings,
+    selectedEvidence = evidence
+  ) {
     try {
       const response = await fetch(`${API_URL}/api/dpp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productName: productName || "Product",
-          mappings,
+          productName: selectedProduct || "Product",
+          mappings: selectedMappings,
+          evidence: selectedEvidence,
         }),
       });
       if (!response.ok) {
@@ -214,17 +497,32 @@ export default function Workspace() {
   const ready = mappings.filter(
     (m) => m.status === "approved" || m.status === "auto"
   ).length;
-  const present = new Set(
-    mappings
-      .filter(
-        (mapping) =>
-          mapping.status === "approved" || mapping.status === "auto"
-      )
-      .map((mapping) => mapping.targetElement)
-  );
-  const gaps = nameplateElements
-    .filter((element) => element.required && !present.has(element.name))
-    .map((element) => element.name);
+  const websiteAutoMapped =
+    mappingResult?.mapped.filter((mapping) => mapping.status === "auto")
+      .length ?? 0;
+  const websiteNeedsReview = mappingResult
+    ? mappingResult.ambiguous.length +
+      mappingResult.mapped.filter((mapping) => mapping.status === "review")
+        .length +
+      semanticReview.filter(
+        (item) =>
+          item.status === "uncertain" || item.mapping?.status === "review"
+      ).length
+    : 0;
+  const gaps = coverageReport
+    ? coverageReport.coverage.flatMap((item) => {
+        const requirement = coverageReport.inventory.requirements.find(
+          (candidate) => candidate.id === item.requirementId
+        );
+        return item.status === "missing" && requirement?.required
+          ? [requirement.idShort ?? requirement.templatePath.at(-1) ?? requirement.id]
+          : [];
+      })
+    : [];
+  const correctionTargets =
+    coverageReport?.inventory.requirements.filter(
+      (item) => item.kind === "value" && !item.wildcard && item.semanticId
+    ) ?? [];
 
   return (
     <div className="flex h-screen flex-col bg-mist">
@@ -242,18 +540,11 @@ export default function Workspace() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {mode === "demo" && (
-            <span className="rounded-full bg-mist px-2.5 py-1 font-mono text-[11px] text-muted">
-              Demo mode
-            </span>
-          )}
-          {mode === "live" && (
-            <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
-              Live agent
-            </span>
-          )}
+          <span className="rounded-full bg-signalDim px-2.5 py-1 font-mono text-[11px] text-signal">
+            Autonomous agent
+          </span>
           <button
-            onClick={generate}
+            onClick={() => void generate()}
             disabled={ready === 0}
             className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-all hover:shadow-md hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:translate-y-0 disabled:hover:shadow-none"
           >
@@ -269,12 +560,12 @@ export default function Workspace() {
             {messages.length === 0 && (
               <div className="mx-auto max-w-md pt-6">
                 <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-                  Describe a product.
+                  Import or describe a product.
                 </h1>
                 <p className="mt-2 text-[15px] leading-relaxed text-muted">
-                  Manufacturer, model, serial number, year, plant, and any
-                  technical values you have. MIA maps it to the IDTA Digital
-                  Nameplate and stops wherever it needs your decision.
+                  Start from a public product page, or enter manufacturer,
+                  model, serial number and technical values manually. MIA stops
+                  wherever it needs your decision.
                 </p>
                 <div className="mt-8 space-y-3">
                   {SAMPLES.map((s) => (
@@ -306,26 +597,138 @@ export default function Workspace() {
                         : "max-w-[92%] rounded-2xl rounded-bl-sm border border-hairline bg-white px-4 py-3 text-[14px] leading-relaxed text-ink shadow-sm"
                     }
                   >
-                    {m.content}
+                    {m.role === "assistant" ? (
+                      <ChatMarkdown>{m.content}</ChatMarkdown>
+                    ) : (
+                      m.content
+                    )}
                   </div>
                 </div>
               ))}
-              {busy && (
-                <div className="flex gap-1.5 py-2 pl-2">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal/60"
-                      style={{ animationDelay: `${i * 140}ms` }}
-                    />
+              {agentStatus === "awaiting_company" && companyCandidates.length > 0 && !busy && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                    Select the company
+                  </p>
+                  {companyCandidates.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      onClick={() => void send(`Select company ${candidate.id}: ${candidate.name}`)}
+                      className="w-full rounded-xl border border-hairline bg-white p-3 text-left hover:border-signal/40"
+                    >
+                      <p className="text-sm font-semibold text-ink">{candidate.name}</p>
+                      <p className="mt-1 text-xs text-muted">{candidate.domain}</p>
+                      {candidate.description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-muted">
+                          {candidate.description}
+                        </p>
+                      )}
+                    </button>
                   ))}
                 </div>
               )}
+              {agentStatus === "awaiting_product" && productCandidates.length > 0 && !busy && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                    Select a product
+                  </p>
+                  {productCandidates.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      onClick={() => void send(`Select product ${candidate.id}: ${candidate.name}`)}
+                      className="w-full rounded-xl border border-hairline bg-white p-3 text-left hover:border-signal/40"
+                    >
+                      <p className="text-sm font-semibold text-ink">{candidate.name}</p>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted">
+                        {candidate.description || candidate.officialUrl}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {agentStatus === "awaiting_optional_choice" && !busy && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => void send("Continue with current data")}
+                    className="rounded-full bg-ink px-4 py-2 text-[12px] font-medium text-white"
+                  >
+                    Continue with current data
+                  </button>
+                  <button
+                    onClick={() => void send("Add optional information")}
+                    className="rounded-full border border-hairline bg-white px-4 py-2 text-[12px] font-medium text-ink"
+                  >
+                    Add optional information
+                  </button>
+                </div>
+              )}
+              {humanRequest?.kind === "requirement_value" && !busy && (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitHumanValue();
+                  }}
+                  className="rounded-xl border border-warn/20 bg-white p-4"
+                >
+                  <p className="text-sm font-medium text-ink">{humanRequest.summary}</p>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={humanValue}
+                      onChange={(event) => setHumanValue(event.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-hairline px-3 py-2 text-sm"
+                      placeholder="Enter the verified value"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!humanValue.trim()}
+                      className="rounded-lg bg-ink px-4 py-2 text-xs font-medium text-white disabled:opacity-30"
+                    >
+                      Save value
+                    </button>
+                  </div>
+                </form>
+              )}
+              {busy && <LiveActivity events={agentActivity} />}
               <div ref={endRef} />
             </div>
           </div>
 
           <div className="shrink-0 p-4 pb-6">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void ingestWebsite();
+              }}
+              className="mx-auto mb-3 max-w-md"
+            >
+              <label
+                htmlFor="product-url"
+                className="mb-1.5 block text-[11px] font-medium text-muted"
+              >
+                Direct product page URL
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="product-url"
+                  type="url"
+                  required
+                  value={websiteUrl}
+                  onChange={(event) => setWebsiteUrl(event.target.value)}
+                  placeholder="https://manufacturer.com/products/model"
+                  className="min-w-0 flex-1 rounded-xl border border-hairline bg-white px-3 py-2.5 text-[13px] text-ink shadow-sm placeholder:text-muted focus:border-signal focus:outline-none focus:ring-4 focus:ring-signal/10"
+                />
+                <button
+                  type="submit"
+                  disabled={busy || semanticReview.length > 0 || !websiteUrl.trim()}
+                  className="rounded-xl border border-signal/30 bg-signalDim px-3 text-[12px] font-medium text-signal transition-colors hover:bg-signal/15 disabled:opacity-30"
+                >
+                  Import
+                </button>
+              </div>
+            </form>
+            <p className="mx-auto mb-2 max-w-md text-center text-[10px] uppercase tracking-wider text-muted">
+              or describe it manually
+            </p>
             <div className="mx-auto flex max-w-md items-end gap-2 rounded-[24px] border border-hairline bg-white p-1.5 shadow-sm transition-all focus-within:border-signal/50 focus-within:ring-4 focus-within:ring-signal/10">
               <textarea
                 value={input}
@@ -337,7 +740,7 @@ export default function Workspace() {
                   }
                 }}
                 rows={1}
-                placeholder="Describe the product..."
+                placeholder="Ask MIA, clarify a review, or paste a product URL..."
                 className="max-h-32 flex-1 resize-none bg-transparent px-4 py-2.5 text-[14px] leading-relaxed text-ink placeholder:text-muted focus:outline-none"
               />
               <button
@@ -364,7 +767,16 @@ export default function Workspace() {
         <section className="flex min-h-0 flex-1 flex-col bg-mist">
           <div className="flex shrink-0 items-center justify-between border-b border-hairline bg-paper px-5">
             <div className="flex">
-              {(["mappings", "graph"] as const).map((t) => (
+              {(
+                [
+                  "mappings",
+                  "evidence",
+                  "coverage",
+                  "process",
+                  "data",
+                  "graph",
+                ] as WorkspaceTab[]
+              ).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -372,10 +784,27 @@ export default function Workspace() {
                     tab === t ? "text-signal" : "text-muted hover:text-ink"
                   }`}
                 >
-                  {t === "graph" ? "Integration Graph" : "Mappings"}
-                  {t === "graph" && graph.length > 0 && (
+                  {tabLabel(t)}
+                  {t === "evidence" && evidence.length > 0 && (
                     <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
-                      {graph.length}
+                      {evidence.length}
+                    </span>
+                  )}
+                  {t === "coverage" && coverageReport && (
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                      {coverageReport.inventory.requirements.filter(
+                        (item) => item.kind === "value" && !item.wildcard
+                      ).length}
+                    </span>
+                  )}
+                  {t === "graph" && mappingKnowledge.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                      {mappingKnowledge.length}
+                    </span>
+                  )}
+                  {t === "data" && artifacts.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                      {artifacts.length}
                     </span>
                   )}
                   {tab === t && (
@@ -404,10 +833,59 @@ export default function Workspace() {
               ) : (
                 <div className="space-y-5">
                   <div className="flex flex-wrap gap-3">
-                    <Stat label="Ready" value={ready} tone="ok" />
-                    <Stat label="Needs you" value={pending} tone="warn" />
-                    <Stat label="Gaps" value={gaps.length} tone="plain" />
+                    {mappingResult ? (
+                      <>
+                        <Stat
+                          label="Extracted facts"
+                          value={evidence.length}
+                          tone="plain"
+                        />
+                        <Stat
+                          label="Mapped automatically"
+                          value={websiteAutoMapped}
+                          tone="ok"
+                        />
+                        <Stat
+                          label="Needs semantic reasoning/review"
+                          value={websiteNeedsReview}
+                          tone="warn"
+                        />
+                        <Stat
+                          label="Currently unmatched"
+                          value={mappingResult.unmatchedEvidenceIds.length}
+                          tone="plain"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Stat label="Ready" value={ready} tone="ok" />
+                        <Stat label="Needs you" value={pending} tone="warn" />
+                        <Stat label="Gaps" value={gaps.length} tone="plain" />
+                      </>
+                    )}
                   </div>
+
+                  {semanticReview.length > 0 && (
+                    <div className="rounded-xl border border-signal/20 bg-signal/5 p-4 shadow-sm">
+                      <p className="text-[13px] font-semibold text-ink">
+                        Human semantic review required
+                      </p>
+                      <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+                        Every retained fact is shown below. Correct only what is
+                        wrong; unchanged rows are already set to keep. Uncertain
+                        rows require an explicit choice.
+                      </p>
+                      <button
+                        onClick={() => void confirmSemanticReview()}
+                        disabled={semanticReview.some(
+                          (item) => !reviewDecisions[item.id]
+                        )}
+                        className="mt-3 rounded-full bg-ink px-4 py-1.5 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        Confirm mappings
+                      </button>
+                    </div>
+                  )}
 
                   {gaps.length > 0 && (
                     <div className="rounded-xl border border-warn/20 bg-warn/[0.04] p-4 shadow-sm">
@@ -424,11 +902,23 @@ export default function Workspace() {
                   )}
 
                   <div className="space-y-3">
-                    {mappings.map((m) => (
+                    {semanticReview.length > 0 ? semanticReview.map((item) => {
+                      const record = evidence.find((candidate) => candidate.id === item.evidenceId);
+                      return record ? (
+                        <MappingReviewRow
+                          key={item.id}
+                          item={item}
+                          evidence={record}
+                          targets={correctionTargets}
+                          decision={reviewDecisions[item.id]}
+                          onChange={(decision) => setReviewDecisions((previous) => ({ ...previous, [item.id]: decision }))}
+                        />
+                      ) : null;
+                    }) : mappings.map((m) => (
                       <MappingRow
                         key={m.id}
                         mapping={m}
-                        elements={nameplateElements}
+                        elements={correctionTargets}
                         onDecide={decide}
                         onCorrect={correct}
                       />
@@ -438,47 +928,34 @@ export default function Workspace() {
                   {dpp && <DppView dpp={dpp} />}
                 </div>
               )
-            ) : graph.length === 0 ? (
-              <Empty
-                title="The graph is empty"
-                body="Approve or correct a mapping and it gets saved here. The next product that uses the same field starts from your decision."
+            ) : tab === "evidence" ? (
+              <EvidencePanel
+                evidence={evidence}
+                mappingResult={mappingResult}
               />
+            ) : tab === "coverage" ? (
+              <CoveragePanel report={coverageReport} evidence={evidence} mappingResult={mappingResult} />
+            ) : tab === "process" ? (
+              <AgentActivity events={agentActivity} />
+            ) : tab === "data" ? (
+              <WorkspaceExplorer apiUrl={API_URL} threadId={threadId} artifacts={artifacts} />
             ) : (
-              <div className="space-y-3">
-                <p className="pb-2 text-[13px] leading-relaxed text-muted">
-                  Verified mappings reused across products. These raise MIA&rsquo;s
-                  confidence on the next passport.
-                </p>
-                {graph.map((g) => (
-                  <div
-                    key={g.sourceField}
-                    className="rounded-xl border border-hairline bg-paper p-4 shadow-sm transition-all hover:shadow-md"
-                  >
-                    <p className="font-mono text-[13px]">
-                      {g.sourceField}{" "}
-                      <span className="text-muted">&rarr;</span>{" "}
-                      <span className="text-signal">{g.targetElement}</span>
-                    </p>
-                    <p className="mt-1.5 font-mono text-[11px] text-muted">
-                      {g.semanticId} · verified {g.corrections}&times;
-                    </p>
-                  </div>
-                ))}
-                <div className="pt-2">
-                  <button
-                    onClick={() => setGraph([])}
-                    className="text-[12px] text-muted underline underline-offset-2 hover:text-ink"
-                  >
-                    Clear graph
-                  </button>
-                </div>
-              </div>
+              <IntegrationGraph entries={mappingKnowledge} />
             )}
           </div>
         </section>
       </div>
     </div>
   );
+}
+
+function tabLabel(tab: WorkspaceTab): string {
+  if (tab === "graph") return "Integration Graph";
+  if (tab === "process") return "Process";
+  if (tab === "data") return "Workspace Data";
+  if (tab === "coverage") return "Coverage";
+  if (tab === "evidence") return "Evidence";
+  return "Mappings";
 }
 
 function Stat({
