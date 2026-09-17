@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mia-dpp-backend"
+version = "0.2.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "aas-core3.0==1.1.4",
+  "beautifulsoup4>=4.12,<5",
+  "crawl4ai==0.9.3",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.8,<3",
+  "python-dotenv>=1,<2",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic-ai-slim[openai]==2.43.0",
+  "ddgs==9.16.0",
+]
+
+[project.optional-dependencies]
+pdf = [
+  "pdf2aas @ git+https://github.com/eclipse-basyx/basyx-pdf-to-aas.git@0111a119e3d75e447c0de4fbaebb93353d647636",
+]
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.26,<2",
+  "pytest-cov>=6,<8",
+  "ruff>=0.11,<1",
+  "types-beautifulsoup4>=4.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mia_dpp"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "live: requires network access and an external credential",
+  "upstream: requires an optional upstream package or runtime",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "DTZ", "PTH", "RUF"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["mia_dpp"]
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["crawl4ai.*", "lxml.*", "pdf2aas.*"]
+ignore_missing_imports = true

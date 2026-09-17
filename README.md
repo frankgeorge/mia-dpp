@@ -1,116 +1,117 @@
-# MIA — Mittelstand Integration Agent
+# MIA — deterministic product data to AAS
 
-Turns a manufacturer's messy product data into a standards-compliant Digital
-Product Passport, mapped onto the IDTA Digital Nameplate submodel. Agents
-propose every mapping with a confidence score; a human approves anything the
-system isn't sure about.
+MIA turns traceable product evidence into a validated Asset Administration
+Shell (AAS) environment. The backend is Python. AI can propose unfamiliar
+semantic mappings, but Python owns extraction rules, mapping acceptance,
+template resolution, AAS compilation, validation, and deployment gates.
 
-Built for the LEVEL3 AI Engineering track.
-
----
-
-## Deploy to Vercel
-
-**Option A — from GitHub (recommended)**
-
-```bash
-git init
-git add .
-git commit -m "MIA initial"
-git branch -M main
-git remote add origin https://github.com/<you>/mia-dpp.git
-git push -u origin main
-```
-
-Then on [vercel.com/new](https://vercel.com/new): import the repo and press
-Deploy. Next.js is detected automatically — no build settings to change.
-
-**Option B — from the CLI**
-
-```bash
-npm i -g vercel
-vercel
-```
-
-### Environment variable
-
-| Name | Required | Effect |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | No | With it, the chat runs on a real Claude agent with tool calling. Without it, the app runs a deterministic local agent and shows a **Demo mode** badge. |
-
-Set it in Vercel under **Settings → Environment Variables**, then redeploy.
-
-The app is fully demoable with no key set — useful if you're presenting on
-someone else's network or don't want to burn credits during a pitch.
-
----
+The current end-to-end path targets IDTA Digital Nameplate 3.0.1. The same
+template loader and compiler are also tested against nested elements from IDTA
+Technical Data 2.0.1, so the backend is not a hand-written one-template JSON
+generator.
 
 ## Run locally
 
+Requirements: Git, Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 20.19+,
+and npm. Docker is optional.
+
 ```bash
-npm install
-cp .env.example .env.local   # optional, add your key
-npm run dev                  # http://localhost:3000
+git clone --recurse-submodules git@github.com:frankgeorge/mia-dpp.git
+cd mia-dpp
+make install
+make crawl-setup
+make dev
 ```
 
----
+Open `http://127.0.0.1:3000`. `Ctrl-C` stops both processes started by
+`make dev`.
 
-## What's in it
+The deterministic `/api/dpp` capability does not need an API key. The autonomous
+workspace does: copy `.env.example` to `.env.local` and set
+`OPENROUTER_API_KEY`. Crawl4AI uses locally installed Chromium to render pages.
+The model can choose actions and propose bounded mappings, but it cannot invent
+authoritative semantic IDs, set confidence, compile AAS JSON, or bypass validation.
 
+With an OpenRouter key, the workspace uses a persistent PydanticAI decision loop:
+
+```text
+conversation ↔ autonomous agent ↔ discovery/extraction/mapping/AAS tools
+                              ↓
+                  typed state + trusted history
 ```
-app/
-  page.tsx              Landing page
-  workspace/page.tsx    The application
-  api/chat/route.ts     Agent endpoint (Claude tool calling + demo fallback)
-components/
-  Nameplate.tsx         Hero: an etched plate resolving into mapped fields
-  MappingRow.tsx        One proposed mapping + its approval gate
-  DppView.tsx           Generated passport, preview and download
-lib/
-  idta.ts               Digital Nameplate submodel, DPP builder, demo agent
-  types.ts              Shared types
+
+The chat accepts a company name, product choice, or direct URL. Website acquisition,
+fact extraction, mapping assessment, coverage, compilation, and validation remain deterministic.
+Semantic proposals are constrained to retained evidence and official requirement IDs.
+Trusted PydanticAI message history and typed workflow state are stored server-side in
+SQLite for local development.
+
+Run `make help` to see the short command list. The most useful checks are:
+
+```bash
+make test       # deterministic Python tests
+make check      # standards, lint, types, tests, frontend build, Compose config
+make smoke      # build, start, probe, and stop the Docker stack
 ```
 
-### Core features
+## Deterministic path
 
-- **Chat-driven passport creation.** Describe a product in plain language; the
-  agent extracts fields and proposes mappings.
-- **Confidence scoring.** Every mapping carries a score. Above 0.85 clears
-  automatically; below it stops for a person.
-- **Approval gates.** Approve, re-target, or discard any mapping. Nothing
-  reaches the passport without passing this.
-- **Gap reporting.** Missing required elements are listed explicitly. The agent
-  never invents values it wasn't given.
-- **Integration Graph.** Every approval and correction is written back and
-  reused on the next product, raising confidence on fields you've already
-  verified. Persists in the browser across sessions.
-- **AAS-shaped export.** Downloads a Digital Nameplate submodel as JSON, with
-  confidence and source field preserved as qualifiers for audit.
+```text
+source data
+  -> EvidenceRecord with provenance
+  -> proposed mapping plus an explainable basis and review policy
+  -> human-approved MappingSpecification
+  -> pinned official IDTA template
+  -> aas-core3.0 Environment
+  -> AAS metamodel and IDTA template validation
+  -> deployable artifact or explicit GapReport
+```
 
----
+Mappings state whether their basis is an exact deterministic rule, semantic
+reasoning, or trusted human input. Ambiguity and weak signals require review;
+MIA does not present handcrafted scores as statistical confidence.
 
-## Demo script (about 3 minutes)
+## Repository map
 
-1. Land on `/`, point at the nameplate — the same plate before and after mapping.
-2. **Try for free** → workspace.
-3. Press the **Pressure gauge** sample. Eight fields map; note the confidence
-   bars and that one sits below the line.
-4. Open **Change target** on the low-confidence row, correct it, approve.
-5. Switch to the **Integration Graph** tab — your decision is now stored.
-6. Press the **Sparse data** sample. The field you just verified comes back
-   marked *From Integration Graph* at much higher confidence. **This is the
-   whole thesis: the second passport costs less human attention than the first.**
-7. **Generate passport** → preview, then **Download package**.
+```text
+app/, components/                 Next.js structured-agent interface
+backend/src/mia_dpp/mia.py       PydanticAI autonomy and trusted defer/resume
+backend/src/mia_dpp/agent/       model-visible tools, state, prompts, dependencies
+backend/src/mia_dpp/store.py     sessions, deferrals, reviewed knowledge, artifacts
+backend/src/mia_dpp/tools/web/    provenance-aware generic evidence extraction
+backend/src/mia_dpp/tools/mapping/
+                                  mapping, confidence, coverage, review
+backend/src/mia_dpp/aas/          official templates, compiler, validator
+backend/src/mia_dpp/domain/       framework-neutral Pydantic concepts
+backend/src/mia_dpp/integrations/ vendor-specific adapters
+backend/tests/                    deterministic and autonomous-loop tests
+standards/idta-submodel-templates/
+                                  unmodified, commit-pinned standards data
+```
 
----
+MIA does not copy upstream application source into its own package. `aas-core`
+and Crawl4AI are locked Python dependencies behind small MIA boundaries. BaSyx
+PDF-to-AAS remains optional, and BaSyx is an external runtime. PydanticAI owns
+tool selection and deferred human calls; MIA validates and persists trusted
+resume results server-side.
 
-## Notes and honest limits
+See `docs/deterministic-backend.md` for the validation layers.
 
-- The Integration Graph persists to `localStorage`, which is right for a
-  five-week MVP demo but would be a real database in production.
-- One submodel (Digital Nameplate) is covered deliberately and properly rather
-  than many shallowly. Technical Data, Handover Documentation and Carbon
-  Footprint are the natural next ones.
-- Demo mode uses pattern matching, not a model. It exists so the demo can't
-  dead-end on a missing key or a flaky network — set `ANTHROPIC_API_KEY` to see
-  the real agent reasoning, which handles far messier input.
+## Local deployment
+
+```bash
+make docker-build
+make up
+make down
+```
+
+The frontend runs on port 3000 and the Python API on port 8000 by default.
+Override them with `FRONTEND_PORT`, `BACKEND_PORT`, and `API_URL` when needed.
+
+Current limits are explicit: generic website ingestion recognizes common
+schema.org Product data and labelled specification tables. A generated
+Crawl4AI site schema must be reviewed and fixture-tested before it is committed
+as trusted extraction data. Automatic PDF fact mapping is not yet implemented,
+and Digital Nameplate's external
+Address Information drop-in is structurally present but reported as not deeply
+validated. No OPC-UA, MQTT, PLC, telemetry, or time-series path is included.

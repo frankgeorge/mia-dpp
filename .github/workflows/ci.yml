@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out application and pinned standards
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.3"
+          enable-cache: true
+
+      - name: Install Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: make install
+
+      - name: Run local quality gate
+        run: make check
+
+      - name: Build deployment images
+        run: make docker-build

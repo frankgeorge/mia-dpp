@@ -17,8 +17,8 @@ export function Nameplate() {
   useEffect(() => {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) {
-      setMapped(true);
-      return;
+      const immediate = setTimeout(() => setMapped(true), 0);
+      return () => clearTimeout(immediate);
     }
     const t = setTimeout(() => setMapped(true), 1400);
     const loop = setInterval(() => setMapped((m) => !m), 6000);
