@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from mia_dpp.documents import PdfToAasDocumentExtractor
+from mia_dpp.domain.evidence import DocumentReference
 from mia_dpp.errors import ExtractionError
-from mia_dpp.models import DocumentReference
+from mia_dpp.tools.documents.tool import PdfToAasDocumentExtractor
 
 
 class FakePreprocessor:
