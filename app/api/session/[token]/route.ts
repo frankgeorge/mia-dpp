@@ -1,21 +1,15 @@
-import { db } from "@/lib/db";
-import { supplierSessions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { getSession, respondToSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
-  const rows = await db
-    .select()
-    .from(supplierSessions)
-    .where(eq(supplierSessions.token, params.token))
-    .limit(1);
+  const { token } = await params;
+  const session = getSession(token);
 
-  const session = rows[0];
-  if (!session || new Date(session.expiresAt) < new Date()) {
+  if (!session) {
     return Response.json(
       { error: "Session not found or expired." },
       { status: 404 }
@@ -27,16 +21,18 @@ export async function GET(
     productUrl: session.productUrl,
     gaps: session.gaps,
     branding: session.branding ?? null,
-    responded: session.responded,
+    responded: !!session.response,
     response: session.response ?? null,
-    respondedAt: session.respondedAt?.toISOString() ?? null,
+    respondedAt: session.respondedAt ?? null,
   });
 }
 
 export async function POST(
   req: Request,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
+  const { token } = await params;
+
   let body: { response?: Record<string, string> };
   try {
     body = await req.json();
@@ -52,28 +48,13 @@ export async function POST(
     );
   }
 
-  const rows = await db
-    .select({ token: supplierSessions.token, expiresAt: supplierSessions.expiresAt })
-    .from(supplierSessions)
-    .where(eq(supplierSessions.token, params.token))
-    .limit(1);
-
-  const session = rows[0];
-  if (!session || new Date(session.expiresAt) < new Date()) {
+  const ok = respondToSession(token, response);
+  if (!ok) {
     return Response.json(
       { error: "Session not found or expired." },
       { status: 404 }
     );
   }
-
-  await db
-    .update(supplierSessions)
-    .set({
-      response,
-      responded: true,
-      respondedAt: new Date(),
-    })
-    .where(eq(supplierSessions.token, params.token));
 
   return Response.json({ success: true });
 }
