@@ -1,18 +1,19 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
-const isProtected = createRouteMatcher([
-  "/workspace(.*)",
-  "/dashboard(.*)",
-  "/settings(.*)",
-  "/api/email(.*)",
-  "/api/chat(.*)",
-  "/api/upload(.*)",
-  "/api/passport(.*)",
-  "/api/sap(.*)",
-]);
+const PROTECTED_PREFIXES = [
+  "/workspace",
+  "/dashboard",
+  "/settings",
+  "/api/email",
+  "/api/chat",
+  "/api/upload",
+  "/api/passport",
+  "/api/sap",
+];
 
 export default clerkMiddleware(async (auth, req) => {
-  if (isProtected(req)) {
+  const path = req.nextUrl.pathname;
+  if (PROTECTED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
     await auth.protect();
   }
 });
