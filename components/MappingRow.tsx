@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { FieldMapping } from "@/lib/types";
-import { NAMEPLATE_ELEMENTS } from "@/lib/idta";
+import type { FieldMapping } from "@/lib/standards/types";
+import { NAMEPLATE_ELEMENTS } from "@/lib/standards/idta";
 
 export function MappingRow({
   mapping: m,

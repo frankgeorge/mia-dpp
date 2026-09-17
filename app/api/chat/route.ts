@@ -1,99 +1,11 @@
-import OpenAI from "openai";
-import { NAMEPLATE_ELEMENTS, semanticIdFor, demoPropose } from "@/lib/idta";
-import type { GraphEntry } from "@/lib/types";
+import { createAIClient, MODEL } from "@/lib/ai/client";
+import { CHAT_SYSTEM } from "@/lib/ai/prompts";
+import { CHAT_TOOLS } from "@/lib/ai/tools";
+import { semanticIdFor, demoPropose } from "@/lib/standards/idta";
+import type { GraphEntry } from "@/lib/standards/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const MODEL = "deepseek/deepseek-chat-v3-0324";
-
-const SYSTEM = `You are MIA, an integration agent that turns a manufacturer's messy product data into a standards-compliant Digital Product Passport.
-
-You map source fields onto the IDTA Digital Nameplate submodel. These are the only valid target elements:
-
-${NAMEPLATE_ELEMENTS.map(
-  (e) =>
-    `- ${e.name}${e.required ? " (required)" : ""} — ${e.hint}`
-).join("\n")}
-
-Rules you must follow:
-1. When the user describes a product, call propose_mappings once with every field you can identify.
-2. Give each mapping an honest confidence between 0 and 1. Be genuinely uncertain when the evidence is weak — a guessed field at 0.55 is far more useful than a false 0.95. Reserve above 0.9 for cases where the label is explicit and unambiguous.
-3. sourceField should be the field name as it would appear in a German manufacturer's SAP system (WERKS, MATNR, SERNR, BAUJAHR, NAME1, LAND1) when you can infer it, otherwise a plain descriptive name.
-4. Never invent values the user did not provide. Missing data is a gap to report, not to fill.
-5. After proposing, tell the user in one or two short sentences what you mapped and what still needs their decision. Do not repeat the whole table back — the interface already shows it.
-6. Only call generate_dpp when the user explicitly asks to generate, build, or export the passport.
-
-Be brief and concrete. You are a working tool, not a chatbot.`;
-
-const tools: OpenAI.ChatCompletionTool[] = [
-  {
-    type: "function",
-    function: {
-      name: "propose_mappings",
-      description:
-        "Propose field mappings from the user's product data onto the IDTA Digital Nameplate submodel. Call this once per product description.",
-      parameters: {
-        type: "object",
-        properties: {
-          productName: {
-            type: "string",
-            description: "Short human-readable product name for this passport.",
-          },
-          mappings: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                sourceField: {
-                  type: "string",
-                  description:
-                    "Field name as it would appear in the manufacturer's own system.",
-                },
-                sourceValue: { type: "string", description: "The value provided by the user." },
-                targetElement: {
-                  type: "string",
-                  description: "Exact name of the target Digital Nameplate element.",
-                },
-                confidence: {
-                  type: "number",
-                  description: "Honest confidence from 0 to 1.",
-                },
-                reasoning: {
-                  type: "string",
-                  description: "One sentence on why this mapping was chosen.",
-                },
-              },
-              required: [
-                "sourceField",
-                "sourceValue",
-                "targetElement",
-                "confidence",
-                "reasoning",
-              ],
-            },
-          },
-        },
-        required: ["productName", "mappings"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "generate_dpp",
-      description:
-        "Assemble the Digital Product Passport from the mappings the user has approved. Only call when the user asks to generate or export.",
-      parameters: {
-        type: "object",
-        properties: {
-          confirm: { type: "boolean", description: "Always true." },
-        },
-        required: ["confirm"],
-      },
-    },
-  },
-];
 
 export async function POST(req: Request) {
   try {
@@ -111,14 +23,7 @@ export async function POST(req: Request) {
     }
 
     /* ---------- Live mode via OpenRouter → DeepSeek ---------- */
-    const client = new OpenAI({
-      apiKey: key,
-      baseURL: "https://openrouter.ai/api/v1",
-      defaultHeaders: {
-        "HTTP-Referer": "https://mia-dpp.vercel.app",
-        "X-Title": "MIA Digital Product Passport",
-      },
-    });
+    const client = createAIClient();
 
     const graphHint = graph.length
       ? `\n\nIntegration Graph — mappings a human already verified on earlier products. Reuse these when the same source field appears again, and raise your confidence accordingly:\n${graph
@@ -129,10 +34,10 @@ export async function POST(req: Request) {
     const res = await client.chat.completions.create({
       model: MODEL,
       max_tokens: 2000,
-      tools,
+      tools: CHAT_TOOLS,
       tool_choice: "auto",
       messages: [
-        { role: "system", content: SYSTEM + graphHint },
+        { role: "system", content: CHAT_SYSTEM + graphHint },
         ...messages.map((m) => ({ role: m.role, content: m.content })),
       ],
     });
