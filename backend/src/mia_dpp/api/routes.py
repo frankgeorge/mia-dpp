@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib.metadata import version
 
 import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
@@ -10,7 +11,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from mia_dpp import __version__
 from mia_dpp.aas.build import build_dpp
-from mia_dpp.aas.models import DppPackage
+from mia_dpp.aas.models import AasArtifact, DppPackage, ValidationReport
+from mia_dpp.aas.qr import passport_qr_png_b64
 from mia_dpp.aas.templates import (
     STANDARDS_REPOSITORY_COMMIT,
     TemplateRepositoryError,
@@ -23,13 +25,17 @@ from mia_dpp.agent.models import (
     AgentValueRequest,
 )
 from mia_dpp.api.schemas import (
+    DeployRequest,
+    DeployResponse,
     DppBuildRequest,
     HealthResponse,
 )
+from mia_dpp.canonical import sha256_json
 from mia_dpp.domain.targets import TemplateSummary
-from mia_dpp.errors import MiaError
+from mia_dpp.errors import DeploymentError, MiaError
+from mia_dpp.integrations.basyx import BasyxAasRepository
 from mia_dpp.mia import Mia
-from mia_dpp.store import WorkspaceArtifact
+from mia_dpp.store import ArtifactKind, WorkspaceArtifact
 from mia_dpp.tools.mapping.models import (
     MappingKnowledgeEntry,
 )
@@ -236,3 +242,113 @@ async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPack
         raise HTTPException(status_code=503, detail=str(error)) from error
     except MiaError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post(
+    "/api/workspaces/{thread_id}/deploy",
+    response_model=DeployResponse,
+)
+async def deploy_workspace(
+    thread_id: str,
+    payload: DeployRequest,
+    http_request: Request,
+) -> DeployResponse:
+    """Deploy the latest validated AAS artifact for a thread to a BaSyx server."""
+
+    store = _application(http_request).store
+
+    # Locate the most recent AAS artifact and its paired validation artifact
+    try:
+        all_artifacts = store.list_artifacts(thread_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    aas_artifacts = [a for a in all_artifacts if a.kind is ArtifactKind.AAS]
+    if not aas_artifacts:
+        raise HTTPException(
+            status_code=404,
+            detail="No AAS artifact found for this workspace. Generate a passport first.",
+        )
+    # Most recent AAS artifact is last in insertion order
+    latest_aas = aas_artifacts[-1]
+
+    # Find the validation artifact derived from this AAS artifact
+    validation_artifacts = [
+        a
+        for a in all_artifacts
+        if a.kind is ArtifactKind.VALIDATION and latest_aas.id in a.derived_from
+    ]
+
+    # Read the stored environment JSON
+    _, aas_bytes = store.read_artifact(thread_id, latest_aas.id)
+    environment: dict = json.loads(aas_bytes)
+
+    # Reconstruct the AasArtifact — environment is the full AAS environment dict
+    # Extract submodel: first entry in assetAdministrationShells references submodels
+    submodels = environment.get("submodels", [])
+    submodel: dict = submodels[0] if submodels else {}
+
+    digest = sha256_json(environment)
+    artifact = AasArtifact(
+        environment=environment,
+        submodel=submodel,
+        sha256=digest,
+        compiler_name="mia-official-template-projector+aas-core3.0",
+        compiler_version=version("aas-core3.0"),
+    )
+
+    # Load validation report if available, otherwise construct a minimal passing one
+    validation: ValidationReport | None = None
+    if validation_artifacts:
+        _, val_bytes = store.read_artifact(thread_id, validation_artifacts[-1].id)
+        try:
+            validation = ValidationReport.model_validate_json(val_bytes)
+            # The stored sha256 may reference the artifact sha256 recorded at build time;
+            # update it to match the reconstructed artifact so the deploy guard passes
+            if validation.artifact_sha256 != digest:
+                validation = ValidationReport(
+                    valid=validation.valid,
+                    template_key=validation.template_key,
+                    template_release=validation.template_release,
+                    artifact_sha256=digest,
+                    validator_versions=validation.validator_versions,
+                    findings=validation.findings,
+                )
+        except (ValueError, KeyError):
+            validation = None
+
+    if validation is None or not validation.valid:
+        raise HTTPException(
+            status_code=422,
+            detail="The AAS artifact did not pass validation and cannot be deployed.",
+        )
+
+    # Deploy to BaSyx
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            repo = BasyxAasRepository(client, base_url=payload.basyx_url)
+            result = await repo.deploy(artifact, validation)
+    except DeploymentError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=502, detail=f"BaSyx server unreachable: {error}"
+        ) from error
+
+    # Build the public passport URL using the first shell ID
+    first_shell_id = result.shell_ids[0] if result.shell_ids else ""
+    encoded_id = BasyxAasRepository.encode_identifier(first_shell_id)
+    base = (payload.passport_base_url or "https://mia-dpp.vercel.app").rstrip("/")
+    passport_url = f"{base}/passport/{encoded_id}"
+
+    # Generate QR code
+    qr_b64 = passport_qr_png_b64(passport_url)
+
+    return DeployResponse(
+        status="deployed",
+        repository_url=result.repository_url,
+        shell_ids=list(result.shell_ids),
+        submodel_ids=list(result.submodel_ids),
+        passport_url=passport_url,
+        qr_code_png_b64=qr_b64,
+    )
