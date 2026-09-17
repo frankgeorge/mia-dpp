@@ -1,5 +1,4 @@
-import { db } from "@/lib/db";
-import { supplierSessions } from "@/lib/db/schema";
+import { createSession } from "@/lib/session";
 import { NAMEPLATE_ELEMENTS } from "@/lib/standards/idta";
 import { buildHtml, buildText } from "@/lib/email";
 
@@ -29,22 +28,12 @@ export async function POST(req: Request) {
     return { name, hint: el?.hint ?? name, required: el?.required ?? false };
   });
 
-  const token =
-    Math.random().toString(36).slice(2, 10) +
-    Math.random().toString(36).slice(2, 10);
-
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-  await db.insert(supplierSessions).values({
-    token,
+  const token = createSession({
     productName,
     productUrl,
     contactEmail,
     gaps: gapDetails,
-    branding: branding ?? null,
-    createdAt: now,
-    expiresAt,
+    branding,
   });
 
   const baseUrl =

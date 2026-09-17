@@ -21,7 +21,7 @@ interface Session {
   };
 }
 
-export default function ReplyPage({ params }: { params: { token: string } }) {
+export default function ReplyPage({ params }: { params: Promise<{ token: string }> & { token: string } }) {
   const [session, setSession] = useState<Session | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<"loading" | "form" | "done" | "error">(

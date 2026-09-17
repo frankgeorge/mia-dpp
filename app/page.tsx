@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
+import { UserButton } from "@clerk/nextjs";
 import { Nameplate } from "@/components/Nameplate";
 
-export default function Home() {
+export default async function Home() {
+  const { userId } = await auth();
+  const signedIn = !!userId;
   return (
     <main className="min-h-screen bg-paper">
       {/* Nav */}
@@ -23,7 +26,17 @@ export default function Home() {
               Integration Graph
             </a>
           </nav>
-          <SignedOut>
+          {signedIn ? (
+            <div className="flex items-center gap-3">
+              <Link
+                href="/workspace"
+                className="rounded-full bg-signal px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
+              >
+                Open workspace
+              </Link>
+              <UserButton />
+            </div>
+          ) : (
             <div className="flex items-center gap-3">
               <Link
                 href="/login"
@@ -38,18 +51,7 @@ export default function Home() {
                 Get started
               </Link>
             </div>
-          </SignedOut>
-          <SignedIn>
-            <div className="flex items-center gap-3">
-              <Link
-                href="/workspace"
-                className="rounded-full bg-signal px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
-              >
-                Open workspace
-              </Link>
-              <UserButton />
-            </div>
-          </SignedIn>
+          )}
         </div>
       </header>
 
