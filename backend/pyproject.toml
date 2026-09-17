@@ -9,17 +9,18 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "aas-core3.0==1.1.4",
   "beautifulsoup4>=4.12,<5",
+  "crawl4ai==0.9.3",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
-  "lxml>=5,<7",
   "pydantic>=2.11,<3",
   "pydantic-settings>=2.8,<3",
   "python-dotenv>=1,<2",
   "uvicorn[standard]>=0.34,<1",
+  "pydantic-ai-slim[openai]==2.43.0",
+  "ddgs==9.16.0",
 ]
 
 [project.optional-dependencies]
-crawl = ["crawl4ai==0.9.3"]
 pdf = [
   "pdf2aas @ git+https://github.com/eclipse-basyx/basyx-pdf-to-aas.git@0111a119e3d75e447c0de4fbaebb93353d647636",
 ]

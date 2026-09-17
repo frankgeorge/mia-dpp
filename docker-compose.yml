@@ -2,10 +2,15 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
       network: "${DOCKER_BUILD_NETWORK:-host}"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      MIA_THREAD_STORE_PATH: /data/mia-agent.sqlite3
+      MIA_WORKSPACE_ROOT: /data/workspaces
+    volumes:
+      - mia-data:/data
     healthcheck:
       test:
         - CMD
@@ -44,3 +49,6 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+volumes:
+  mia-data:

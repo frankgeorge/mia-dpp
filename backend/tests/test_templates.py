@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mia_dpp.models import Cardinality
-from mia_dpp.templates import (
+from mia_dpp.aas.templates import (
     DIGITAL_NAMEPLATE,
     STANDARDS_REPOSITORY_COMMIT,
     TECHNICAL_DATA,
@@ -16,6 +15,7 @@ from mia_dpp.templates import (
     UnknownTemplateError,
     resolve_semantic_id,
 )
+from mia_dpp.domain.targets import Cardinality
 
 
 def test_catalog_pins_exact_official_artifacts() -> None:

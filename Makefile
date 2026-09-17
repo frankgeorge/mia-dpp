@@ -11,7 +11,7 @@ COMPOSE ?= docker compose
 STANDARDS_DIR := standards/idta-submodel-templates
 STANDARDS_COMMIT := a9664731a903b29ac5f45e23ab3a25c581f3d92f
 
-.PHONY: help install refs refs-check backend frontend dev lint format typecheck \
+.PHONY: help install crawl-setup refs refs-check backend frontend dev lint format typecheck \
 	test build check docker-build up down smoke
 
 help: ## Show the available commands.
@@ -34,8 +34,11 @@ install: refs ## Install the locked Python and frontend dependencies.
 	$(UV) sync --project backend --locked --group dev
 	npm ci
 
+crawl-setup: ## Install the Chromium runtime used by Crawl4AI website imports.
+	$(UV) run --project backend --no-sync python -m playwright install --only-shell chromium
+
 backend: ## Run the Python API at http://127.0.0.1:8000.
-	$(UV) run --project backend --no-sync uvicorn mia_dpp.api:app \
+	$(UV) run --project backend --no-sync uvicorn mia_dpp.main:app \
 		--reload --host 127.0.0.1 --port $(BACKEND_PORT)
 
 frontend: ## Run only the Next.js interface.
@@ -43,7 +46,7 @@ frontend: ## Run only the Next.js interface.
 		npm run dev -- --hostname 127.0.0.1 --port $(FRONTEND_PORT)
 
 dev: ## Run the Python backend and Next.js frontend together.
-	@$(UV) run --project backend --no-sync uvicorn mia_dpp.api:app \
+	@$(UV) run --project backend --no-sync uvicorn mia_dpp.main:app \
 		--host 127.0.0.1 --port $(BACKEND_PORT) &
 	backend_pid=$$!
 	trap 'kill "$$backend_pid" 2>/dev/null || true; wait "$$backend_pid" 2>/dev/null || true' EXIT INT TERM

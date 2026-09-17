@@ -6,6 +6,7 @@ node_modules
 *.tsbuildinfo
 next-env.d.ts
 .env*
+.mia-data/
 
 backend/.venv/
 backend/.pytest_cache/

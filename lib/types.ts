@@ -1,6 +1,49 @@
 export type MappingStatus = "auto" | "review" | "approved" | "rejected";
+export type MappingOrigin = "deterministic" | "semantic_agent" | "human";
 export type Severity = "info" | "warning" | "error";
 export type ValidationCategory = "metamodel" | "template" | "policy";
+export type RequirementKind = "value" | "structural";
+export type CoverageStatus =
+  | "satisfied"
+  | "candidate"
+  | "ambiguous"
+  | "missing";
+export type EvidenceStatus =
+  | "observed"
+  | "inferred"
+  | "verified"
+  | "conflicting"
+  | "rejected";
+
+export interface SourceLocation {
+  page: number | null;
+  selector: string | null;
+  jsonPointer: string | null;
+  excerpt: string | null;
+  table: string | null;
+  cell: string | null;
+}
+
+export interface EvidenceRecord {
+  id: string;
+  predicate: string;
+  /** Label exactly as presented by the source, before semantic mapping. */
+  sourceLabel: string | null;
+  /** Optional understood meaning; null means MIA has not assigned one. */
+  canonicalPredicate: string | null;
+  value: unknown;
+  unit: string | null;
+  contextPath: string[];
+  sourceType: "website" | "human";
+  sourceUri: string;
+  sourceContentSha256: string;
+  sourceLocation: SourceLocation;
+  extractionMethod: string;
+  extractorName: string;
+  extractorVersion: string;
+  status: EvidenceStatus;
+  acquiredAt: string;
+}
 
 export interface ReferenceKey {
   type: string;
@@ -12,19 +55,13 @@ export interface SemanticReference {
   keys: ReferenceKey[];
 }
 
-export interface ConfidenceFactor {
-  code: string;
-  label: string;
-  awarded: number;
-  maximum: number;
-  explanation: string;
-  uncertainty: string | null;
-}
+export type MappingBasis = "exact" | "semantic" | "human";
 
-export interface ConfidenceAssessment {
-  score: number;
-  factors: ConfidenceFactor[];
-  remainingUncertainty: string[];
+export interface MappingAssessment {
+  basis: MappingBasis;
+  reviewRequired: boolean;
+  reason: string;
+  uncertainties: string[];
 }
 
 export interface TemplateRelease {
@@ -37,14 +74,6 @@ export interface TemplateRelease {
   metamodelVersion: string;
 }
 
-export interface TargetProfile {
-  id: string;
-  name: string;
-  template: TemplateRelease;
-  aasMetamodelVersion: "3.0";
-  language: string;
-}
-
 export interface MappingTarget {
   templateKey: string;
   templateRelease: string;
@@ -52,9 +81,6 @@ export interface MappingTarget {
   instancePath: string[];
   idShort: string;
   semanticId: SemanticReference;
-  modelType: string;
-  valueType: string | null;
-  wildcard: boolean;
 }
 
 export interface FieldMapping {
@@ -63,38 +89,135 @@ export interface FieldMapping {
   /** Field name as it appears in the manufacturer's own system. */
   sourceField: string;
   sourceValue: string;
-  /** Compatibility label; target contains the authoritative template metadata. */
-  targetElement: string;
-  semanticId: string;
   target: MappingTarget;
-  /** Reproducible score from confidenceAssessment, not a probability. */
-  confidence: number;
-  confidenceAssessment: ConfidenceAssessment;
+  assessment: MappingAssessment;
   reasoning: string;
   status: MappingStatus;
-  /** True when earlier human review helped resolve the target. */
-  fromGraph?: boolean;
+  mappingOrigin: MappingOrigin;
+  humanReviewed: boolean;
+  llmReview?: {
+    conclusion: string;
+    rationale: string;
+    evidenceIds: string[];
+    alternativeTargetIds: string[];
+    uncertainties: string[];
+  } | null;
+  humanComment?: string | null;
 }
 
-export type ProposedFieldMapping = Omit<FieldMapping, "id">;
+export type ProposedFieldMapping = FieldMapping;
 
-export interface NameplateElement {
-  name: string;
-  path: string[];
-  semanticId: string;
-  hint: string;
-  required: boolean;
+export interface ProductKnowledgePackage {
+  productId: string;
+  productName: string;
+  sourceArtifactIds: string[];
+  evidence: EvidenceRecord[];
+}
+
+export interface Requirement {
+  id: string;
+  templateKey: string;
+  templateRelease: string;
+  templatePath: string[];
+  idShort: string | null;
+  semanticId: SemanticReference | null;
+  supplementalSemanticIds: SemanticReference[];
   modelType: string;
   valueType: string | null;
-  target: MappingTarget;
+  cardinality: "One" | "ZeroToOne" | "OneToMany" | "ZeroToMany" | null;
+  kind: RequirementKind;
+  required: boolean;
+  conditional: boolean;
+  unit: string | null;
+  allowedValues: string[];
+  description: string | null;
+  wildcard: boolean;
 }
 
-export interface GraphEntry {
+export interface RequirementInventory {
+  selectedTemplates: TemplateRelease[];
+  requirements: Requirement[];
+}
+
+export interface RequirementCoverage {
+  requirementId: string;
+  status: CoverageStatus;
+  supportingEvidenceIds: string[];
+  candidateEvidenceIds: string[];
+  matchMethod: string;
+  explanation: string;
+}
+
+export interface CoverageStatistics {
+  selectedTemplates: number;
+  requirements: number;
+  requiredRequirements: number;
+  requiredSatisfied: number;
+  requiredCandidate: number;
+  requiredAmbiguous: number;
+  requiredMissing: number;
+  optionalRequirements: number;
+  optionalSatisfied: number;
+  optionalCandidate: number;
+  optionalAmbiguous: number;
+  optionalMissing: number;
+  evidenceRecords: number;
+  evidenceUsed: number;
+  unmatchedEvidence: number;
+}
+
+export interface CoverageReport {
+  inventory: RequirementInventory;
+  coverage: RequirementCoverage[];
+  analyzedEvidenceIds: string[];
+  unmatchedEvidenceIds: string[];
+  statistics: CoverageStatistics;
+}
+
+export interface MappingResult {
+  mapped: ProposedFieldMapping[];
+  ambiguous: ProposedFieldMapping[];
+  rejected: ProposedFieldMapping[];
+  unmatchedEvidenceIds: string[];
+  irrelevantEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  outcomes: EvidenceOutcome[];
+}
+
+export type EvidenceOutcomeStatus =
+  | "mapped"
+  | "uncertain"
+  | "unmapped"
+  | "irrelevant"
+  | "rejected";
+
+export interface EvidenceOutcome {
+  evidenceId: string;
+  status: EvidenceOutcomeStatus;
+  requirementId: string | null;
+  alternativeRequirementIds: string[];
+  reason: string;
+  mappingOrigin: MappingOrigin;
+}
+
+export interface MappingKnowledgeEntry {
+  id: string;
   sourceField: string;
-  targetElement: string;
+  exampleValues: string[];
+  targetTemplate: string;
+  targetPath: string[];
   semanticId: string;
-  verifiedAt: string;
+  manufacturer: string | null;
+  domain: string | null;
+  productFamily: string | null;
+  llmReviewSummary: string | null;
+  humanComments: string[];
+  confirmations: number;
   corrections: number;
+  rejections: number;
+  createdAt: string;
+  updatedAt: string;
+  status: "candidate" | "trusted";
 }
 
 export interface Gap {
@@ -136,10 +259,11 @@ export interface DppPackage {
   environment: Record<string, unknown>;
   passportId: string;
   artifactSha256: string;
-  targetProfile: TargetProfile;
+  template: TemplateRelease;
   gapReport: GapReport;
   validationReport: ValidationReport;
   deployable: boolean;
+  evidence: EvidenceRecord[];
 }
 
 export interface ChatMessage {
@@ -147,13 +271,139 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface ChatResponse {
+export interface SemanticReviewItem {
+  id: string;
+  evidenceId: string;
+  status: EvidenceOutcomeStatus;
+  requirementId: string | null;
+  alternativeRequirementIds: string[];
+  reason: string;
+  mapping: ProposedFieldMapping | null;
+}
+
+export interface AgentReviewDecision {
+  reviewId: string;
+  decision:
+    | "keep"
+    | "change_target"
+    | "unmapped"
+    | "irrelevant"
+    | "reject";
+  correctedRequirementId?: string | null;
+  correctedValue?: string | null;
+  comment?: string | null;
+}
+
+export type AgentStatus =
+  | "running"
+  | "awaiting_company"
+  | "awaiting_product"
+  | "awaiting_review"
+  | "awaiting_input"
+  | "awaiting_optional_choice"
+  | "completed"
+  | "failed";
+
+export interface CompanyCandidate {
+  id: string;
+  name: string;
+  officialUrl: string;
+  domain: string;
+  description: string;
+  sourceUri: string;
+  identityVerified: boolean;
+}
+
+export interface ProductCandidate {
+  id: string;
+  name: string;
+  officialUrl: string;
+  description: string;
+  family: string | null;
+  model: string | null;
+  thumbnailUrl: string | null;
+  sourceUri: string;
+}
+
+export interface ProductSourceCandidate {
+  id: string;
+  productId: string;
+  title: string;
+  url: string;
+  description: string;
+  authoritativeDomain: boolean;
+  sourceUri: string;
+}
+
+export interface AgentTraceEvent {
+  id: string;
+  threadId: string;
+  eventType: string;
+  status: "started" | "completed" | "failed";
+  timestamp: string;
+  summary: string;
+  toolName: string | null;
+  productId: string | null;
+  inputSummary: string | null;
+  outputSummary: string | null;
+  sourceIds: string[];
+  durationMs: number | null;
+  metadata: Record<string, string | number | boolean | null>;
+}
+
+export interface AgentProductWork {
+  productId: string;
+  status: "queued" | "in_progress" | "awaiting_review" | "completed" | "failed";
+  candidate: ProductCandidate | null;
+  sourceCandidates: ProductSourceCandidate[];
+  productName: string | null;
+  sourceUrls: string[];
+  sourceArtifactIds: string[];
+  evidence: EvidenceRecord[];
+  mappingResult: MappingResult | null;
+  templateIndex: RequirementInventory | null;
+  coverageReport: CoverageReport | null;
+  pendingReviews: SemanticReviewItem[];
+  mappingCycleId: string | null;
+  confirmedMappingCycleIds: string[];
+  aasArtifactSha256: string | null;
+  artifactIds: string[];
+}
+
+export interface HumanRequest {
+  kind: "mapping_review" | "requirement_value";
+  productId: string;
+  summary: string;
+  requirementId: string | null;
+}
+
+export interface WorkspaceArtifact {
+  id: string;
+  kind: "search" | "source" | "raw" | "evidence" | "mapping" | "coverage" | "review" | "aas" | "validation" | "export";
+  name: string;
+  relativePath: string;
+  createdAt: string;
+  createdBy: string;
+  contentType: string;
+  sha256: string;
+  size: number;
+  productId: string | null;
+  sourceUrl: string | null;
+  derivedFrom: string[];
+  downloadable: boolean;
+}
+
+export interface AgentResponse {
+  threadId: string;
   reply: string;
-  proposal: {
-    productName: string;
-    mappings: ProposedFieldMapping[];
-  } | null;
-  generate: boolean;
-  mode: string;
-  nameplateElements: NameplateElement[];
+  status: AgentStatus;
+  decisionSummary: string;
+  companyCandidates: CompanyCandidate[];
+  selectedCompany: CompanyCandidate | null;
+  productCandidates: ProductCandidate[];
+  selectedProductIds: string[];
+  currentProduct: AgentProductWork | null;
+  traceEvents: AgentTraceEvent[];
+  pendingHumanRequest: HumanRequest | null;
+  artifactCount: number;
 }

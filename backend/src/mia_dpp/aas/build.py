@@ -1,0 +1,135 @@
+"""Application service composing evidence, reviewed mappings, compilation and validation."""
+
+from __future__ import annotations
+
+import hashlib
+from datetime import UTC, datetime
+
+from mia_dpp.aas import AasCompiler, AasValidator, gap_report_from_validation
+from mia_dpp.aas.models import DppPackage
+from mia_dpp.aas.templates import OfficialTemplateRepository
+from mia_dpp.domain.evidence import (
+    EvidenceRecord,
+    EvidenceStatus,
+    ProductKnowledgePackage,
+    SourceLocation,
+)
+from mia_dpp.domain.mappings import FieldMapping, MappingStatus
+from mia_dpp.errors import MappingError
+
+DPP_TEMPLATE_KEY = "digital_nameplate"
+
+
+def build_dpp(
+    product_name: str,
+    mappings: list[FieldMapping],
+    *,
+    repository: OfficialTemplateRepository | None = None,
+    evidence: tuple[EvidenceRecord, ...] = (),
+    now: datetime | None = None,
+) -> DppPackage:
+    """Build and verify one Digital Nameplate AAS from accepted mappings."""
+
+    templates = repository or OfficialTemplateRepository()
+    template = templates.load(DPP_TEMPLATE_KEY)
+    accepted = [
+        mapping
+        for mapping in mappings
+        if mapping.status in {MappingStatus.AUTO, MappingStatus.APPROVED}
+        and mapping.target.template_key == template.release.key
+        and mapping.target.template_release == template.release.release
+    ]
+    if not accepted:
+        raise MappingError("at least one accepted mapping is required")
+    moment = now or datetime.now(UTC)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    moment = moment.astimezone(UTC)
+    selected_evidence = _select_evidence(
+        accepted,
+        evidence,
+        product_name=product_name,
+        acquired_at=moment,
+    )
+    package = ProductKnowledgePackage(
+        product_id=f"product-{hashlib.sha256(product_name.encode()).hexdigest()[:24]}",
+        product_name=product_name,
+        evidence=selected_evidence,
+    )
+    artifact = AasCompiler(templates).compile(package, accepted, template)
+    validation = AasValidator().validate(artifact, template, accepted)
+    gaps = gap_report_from_validation(validation)
+    return DppPackage(
+        product_name=product_name,
+        generated_at=moment.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        passport_id=str(artifact.environment["assetAdministrationShells"][0]["id"]),
+        submodel=artifact.submodel,
+        environment=artifact.environment,
+        artifact_sha256=artifact.sha256,
+        template=template.release,
+        gap_report=gaps,
+        validation_report=validation,
+        deployable=validation.valid and not gaps.blocks_deployment,
+        evidence=selected_evidence,
+    )
+
+
+def _select_evidence(
+    mappings: list[FieldMapping],
+    supplied: tuple[EvidenceRecord, ...],
+    *,
+    product_name: str,
+    acquired_at: datetime,
+) -> tuple[EvidenceRecord, ...]:
+    if not supplied:
+        return tuple(_evidence(mapping, product_name, acquired_at) for mapping in mappings)
+    by_id = {item.id: item for item in supplied}
+    if len(by_id) != len(supplied):
+        raise MappingError("supplied evidence IDs must be unique")
+    selected: list[EvidenceRecord] = []
+    for mapping in mappings:
+        record = by_id.get(mapping.evidence_id)
+        if record is None:
+            raise MappingError(
+                f"mapping refers to missing supplied evidence {mapping.evidence_id!r}"
+            )
+        if str(record.value) != mapping.source_value:
+            raise MappingError(
+                f"mapping value differs from supplied evidence {mapping.evidence_id!r}"
+            )
+        selected.append(record)
+    return tuple(selected)
+
+
+def _evidence(
+    mapping: FieldMapping,
+    product_name: str,
+    acquired_at: datetime,
+) -> EvidenceRecord:
+    source = f"{product_name}\0{mapping.source_field}\0{mapping.source_value}"
+    content_hash = hashlib.sha256(source.encode()).hexdigest()
+    normalized_field = "_".join(
+        part
+        for part in "".join(
+            character.casefold() if character.isalnum() else " "
+            for character in mapping.source_field
+        ).split()
+        if part
+    )
+    return EvidenceRecord(
+        id=mapping.evidence_id,
+        predicate=f"reviewed.{normalized_field or 'field'}",
+        value=mapping.source_value,
+        source_uri=f"urn:mia:review:{content_hash[:24]}",
+        source_content_sha256=content_hash,
+        source_location=SourceLocation(excerpt=mapping.source_value[:240]),
+        extraction_method="reviewed_mapping",
+        extractor_name="mia-workspace",
+        extractor_version="2",
+        status=(
+            EvidenceStatus.VERIFIED
+            if mapping.status is MappingStatus.APPROVED
+            else EvidenceStatus.OBSERVED
+        ),
+        acquired_at=acquired_at,
+    )

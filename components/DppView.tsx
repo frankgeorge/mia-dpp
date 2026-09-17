@@ -150,7 +150,7 @@ export function DppView({ dpp }: { dpp: DppPackage }) {
       <div className="grid gap-px border-b border-hairline bg-hairline sm:grid-cols-3">
         <Summary
           label="Template"
-          value={`${dpp.targetProfile.template.family} ${dpp.targetProfile.template.release}`}
+          value={`${dpp.template.family} ${dpp.template.release}`}
         />
         <Summary
           label="Validation"
@@ -238,6 +238,48 @@ export function DppView({ dpp }: { dpp: DppPackage }) {
                       : finding.templatePath
                     ).join(" / ")}
                   </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {dpp.evidence.length > 0 && (
+        <details className="border-t border-hairline px-5 py-4">
+          <summary className="cursor-pointer text-[13px] font-medium">
+            Source provenance ({dpp.evidence.length})
+          </summary>
+          <ul className="mt-3 space-y-3">
+            {dpp.evidence.map((record) => (
+              <li key={record.id} className="text-[11px] leading-relaxed">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-mono text-ink">{record.predicate}</span>
+                  <span className="text-muted">{record.extractionMethod}</span>
+                </div>
+                <p className="mt-0.5 break-words text-[12px]">
+                  {printable(record.value)}
+                </p>
+                {record.sourceUri.startsWith("http") ? (
+                  <a
+                    href={record.sourceUri}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-0.5 block break-all text-signal underline underline-offset-2"
+                  >
+                    {record.sourceUri}
+                  </a>
+                ) : (
+                  <p className="mt-0.5 break-all text-muted">
+                    {record.sourceUri}
+                  </p>
+                )}
+                {(record.sourceLocation.jsonPointer ||
+                  record.sourceLocation.selector) && (
+                  <p className="mt-0.5 font-mono text-[10px] text-muted">
+                    {record.sourceLocation.jsonPointer ??
+                      record.sourceLocation.selector}
+                  </p>
                 )}
               </li>
             ))}
