@@ -21,11 +21,11 @@ RUN groupadd --system mia && \
 WORKDIR /app
 
 COPY backend/pyproject.toml backend/uv.lock ./backend/
-RUN uv sync --project backend --locked --no-dev --no-install-project
+RUN uv sync --project backend --no-dev --no-install-project
 RUN /app/backend/.venv/bin/python -m playwright install --with-deps --only-shell chromium
 
 COPY backend/src ./backend/src
-RUN uv sync --project backend --locked --no-dev
+RUN uv sync --project backend --no-dev
 
 COPY ["standards/idta-submodel-templates/published/Digital nameplate/3/0/1/IDTA 02006-3-0-1_Template_Digital Nameplate.json", "/app/standards/idta-submodel-templates/published/Digital nameplate/3/0/1/IDTA 02006-3-0-1_Template_Digital Nameplate.json"]
 COPY ["standards/idta-submodel-templates/published/Technical_Data/2/0/1/IDTA 02003_2-0-1_Template_TechnicalData.json", "/app/standards/idta-submodel-templates/published/Technical_Data/2/0/1/IDTA 02003_2-0-1_Template_TechnicalData.json"]
