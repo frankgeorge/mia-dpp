@@ -552,6 +552,30 @@ export default function Workspace() {
     });
   }
 
+  async function savePassportRecord(overrides: {
+    status?: "draft" | "deployed";
+    qr_code_b64?: string;
+    passport_url?: string;
+    basyx_shell_id?: string;
+    aas_json?: unknown;
+  } = {}) {
+    const tid = threadId;
+    const pname = productName;
+    if (!tid || !pname) return;
+    try {
+      await fetch("/api/passports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          thread_id: tid,
+          product_name: pname,
+          submodel: "IDTA 02006",
+          ...overrides,
+        }),
+      });
+    } catch { /* non-blocking — silently ignore */ }
+  }
+
   async function generate(
     selectedProduct = productName,
     selectedMappings = mappings,
@@ -570,7 +594,9 @@ export default function Workspace() {
       if (!response.ok) {
         throw new Error(`Python backend returned ${response.status}`);
       }
-      setDpp(await response.json());
+      const dppResult = await response.json();
+      setDpp(dppResult);
+      void savePassportRecord({ status: "draft", aas_json: dppResult });
     } catch {
       setMessages((previous) => [
         ...previous,
@@ -605,12 +631,19 @@ export default function Workspace() {
       if (!res.ok) {
         throw new Error(body.detail ?? `Deploy failed: ${res.status}`);
       }
-      setDeployResult({
+      const result = {
         passport_url: body.passport_url ?? "",
         qr_code_png_b64: body.qr_code_png_b64 ?? "",
         shell_ids: body.shell_ids ?? [],
-      });
+      };
+      setDeployResult(result);
       setDeployStatus("deployed");
+      void savePassportRecord({
+        status: "deployed",
+        qr_code_b64: result.qr_code_png_b64,
+        passport_url: result.passport_url,
+        basyx_shell_id: result.shell_ids[0] ?? null,
+      });
     } catch (error) {
       setDeployError(error instanceof Error ? error.message : "Deployment failed.");
       setDeployStatus("error");
