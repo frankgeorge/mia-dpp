@@ -8,7 +8,13 @@
     "backend": {
       "root": ".",
       "entrypoint": "Dockerfile",
-      "runtime": "container"
+      "runtime": "container",
+      "volumes": [
+        {
+          "name": "mia-data",
+          "mountPath": "/data"
+        }
+      ]
     }
   },
   "rewrites": [

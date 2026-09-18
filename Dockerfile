@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    MIA_STANDARDS_ROOT=/app/standards/idta-submodel-templates
+    MIA_STANDARDS_ROOT=/app/standards/idta-submodel-templates \
+    MIA_THREAD_STORE_PATH=/data/mia-agent.sqlite3 \
+    MIA_WORKSPACE_ROOT=/data/workspaces
 
 COPY --from=uv /uv /uvx /bin/
 
