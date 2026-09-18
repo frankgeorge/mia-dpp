@@ -589,6 +589,7 @@ export default function Workspace() {
           productName: selectedProduct || "Product",
           mappings: selectedMappings,
           evidence: selectedEvidence,
+          thread_id: threadId,
         }),
       });
       if (!response.ok) {

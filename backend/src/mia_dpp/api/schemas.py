@@ -13,6 +13,7 @@ class DppBuildRequest(WireModel):
     product_name: str
     mappings: tuple[FieldMapping, ...]
     evidence: tuple[EvidenceRecord, ...] = ()
+    thread_id: str | None = None
 
 
 class HealthResponse(WireModel):

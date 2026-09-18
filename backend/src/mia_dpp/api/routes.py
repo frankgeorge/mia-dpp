@@ -232,7 +232,7 @@ async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPack
     """Build and validate an official-template-backed AAS environment."""
 
     try:
-        return build_dpp(
+        package = build_dpp(
             payload.product_name,
             list(payload.mappings),
             repository=_application(http_request).templates,
@@ -242,6 +242,30 @@ async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPack
         raise HTTPException(status_code=503, detail=str(error)) from error
     except MiaError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # Persist AAS + validation artifacts so the deploy endpoint can find them
+    if payload.thread_id:
+        store = _application(http_request).store
+        try:
+            aas_artifact = store.write_json(
+                payload.thread_id,
+                ArtifactKind.AAS,
+                "aas.json",
+                package.environment,
+                created_by="manual_generate",
+            )
+            store.write_json(
+                payload.thread_id,
+                ArtifactKind.VALIDATION,
+                "validation.json",
+                package.validation_report.model_dump(mode="json"),
+                created_by="manual_generate",
+                derived_from=(aas_artifact.id,),
+            )
+        except (ValueError, OSError):
+            pass  # Non-blocking — artifact persistence failure does not fail the response
+
+    return package
 
 
 @router.post(
