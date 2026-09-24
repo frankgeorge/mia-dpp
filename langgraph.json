@@ -1,0 +1,7 @@
+{
+  "dependencies": ["./backend"],
+  "graphs": {
+    "mia": "./backend/src/mia_dpp/studio.py:graph"
+  },
+  "env": ".env.local"
+}

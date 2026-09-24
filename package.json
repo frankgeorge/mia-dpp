@@ -11,13 +11,16 @@
   "dependencies": {
     "@clerk/nextjs": "^7.9.4",
     "@neondatabase/serverless": "^1.1.0",
+    "cytoscape": "^3.34.3",
+    "cytoscape-elk": "^2.3.0",
     "next": "16.3.4",
     "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
-    "resend": "^6.28.1"
+    "resend": "^6.28.1",
+    "workflow": "^4.8.9"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

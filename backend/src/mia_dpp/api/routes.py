@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from importlib.metadata import version
+import secrets
 
 import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from mia_dpp import __version__
 from mia_dpp.aas.build import build_dpp
-from mia_dpp.aas.models import AasArtifact, DppPackage, ValidationReport
-from mia_dpp.aas.qr import passport_qr_png_b64
+from mia_dpp.aas.models import DppPackage
 from mia_dpp.aas.templates import (
     STANDARDS_REPOSITORY_COMMIT,
     TemplateRepositoryError,
@@ -24,18 +25,25 @@ from mia_dpp.agent.models import (
     AgentTraceEvent,
     AgentValueRequest,
 )
+from mia_dpp.api.auth import AuthenticatedUser
 from mia_dpp.api.schemas import (
-    DeployRequest,
-    DeployResponse,
     DppBuildRequest,
     HealthResponse,
+    ProductDetail,
+    ProductLibraryItem,
+    StorageStatus,
 )
-from mia_dpp.canonical import sha256_json
+from mia_dpp.domain.product import (
+    BackgroundJob,
+    BackgroundJobStatus,
+    ChatMessage,
+    RunStatus,
+    ThreadRecord,
+)
 from mia_dpp.domain.targets import TemplateSummary
-from mia_dpp.errors import DeploymentError, MiaError
-from mia_dpp.integrations.basyx import BasyxAasRepository
+from mia_dpp.errors import MiaError
 from mia_dpp.mia import Mia
-from mia_dpp.store import ArtifactKind, WorkspaceArtifact
+from mia_dpp.storage.models import WorkspaceArtifact
 from mia_dpp.tools.mapping.models import (
     MappingKnowledgeEntry,
 )
@@ -75,6 +83,35 @@ async def health(http_request: Request) -> HealthResponse:
     )
 
 
+@router.get("/api/runtime/storage", response_model=StorageStatus)
+async def runtime_storage(
+    http_request: Request,
+    _user_id: AuthenticatedUser,
+) -> StorageStatus:
+    """Report which durable storage adapters the running deployment actually selected."""
+
+    application = _application(http_request)
+    database_url = application.settings.database_url or ""
+    database_backend = application.context.catalogue.backend
+    provider = (
+        "supabase"
+        if "supabase.com" in database_url.casefold()
+        else ("postgres" if database_backend == "postgres" else "local")
+    )
+    artifact_backend = (
+        "vercel_blob"
+        if application.context.artifacts.__class__.__name__ == "VercelBlobArtifactStore"
+        else "filesystem"
+    )
+    return StorageStatus(
+        database_backend=database_backend,
+        database_provider=provider,
+        artifact_backend=artifact_backend,
+        durable_metadata=database_backend == "postgres",
+        durable_artifacts=artifact_backend == "vercel_blob",
+    )
+
+
 @router.get("/api/templates", response_model=tuple[TemplateSummary, ...])
 async def template_catalog(http_request: Request) -> tuple[TemplateSummary, ...]:
     """Expose the two pinned templates currently used to prove generic loading."""
@@ -90,11 +127,12 @@ async def template_catalog(http_request: Request) -> tuple[TemplateSummary, ...]
 async def agent_message(
     payload: AgentRequest,
     http_request: Request,
+    user_id: AuthenticatedUser,
 ) -> AgentResponse:
     """Run one checkpointed autonomous turn for a trusted thread."""
 
     try:
-        return await _application(http_request).message(payload)
+        return await _application(http_request).message(payload, user_id=user_id)
     except ProductUrlRejectedError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ExtractionDependencyError as error:
@@ -112,17 +150,29 @@ async def agent_message(
         json.JSONDecodeError,
     ) as error:
         raise HTTPException(status_code=502, detail=f"agent failed: {error}") from error
+    except Exception as error:
+        # Temporary integration-branch diagnostic: surface the exception class
+        # and a bounded message so runtime failures can be located without
+        # exposing tracebacks or database credentials to the browser.
+        detail = str(error) or type(error).__name__
+        if "://" in detail:
+            detail = "runtime dependency failed; inspect server logs for connection details"
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(error).__name__}: {detail[:500]}",
+        ) from error
 
 
 @router.post("/api/agent/review", response_model=AgentResponse)
 async def agent_review(
     payload: AgentReviewRequest,
     http_request: Request,
+    user_id: AuthenticatedUser,
 ) -> AgentResponse:
     """Resume an interrupt with trusted mapping-review decisions."""
 
     try:
-        return await _application(http_request).review(payload)
+        return await _application(http_request).review(payload, user_id=user_id)
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(
             status_code=422,
@@ -131,10 +181,14 @@ async def agent_review(
 
 
 @router.post("/api/agent/value", response_model=AgentResponse)
-async def agent_value(payload: AgentValueRequest, http_request: Request) -> AgentResponse:
+async def agent_value(
+    payload: AgentValueRequest,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> AgentResponse:
     """Resume an interrupt with a trusted human-supplied requirement value."""
     try:
-        return await _application(http_request).provide_value(payload)
+        return await _application(http_request).provide_value(payload, user_id=user_id)
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(
             status_code=422,
@@ -149,11 +203,12 @@ async def agent_value(payload: AgentValueRequest, http_request: Request) -> Agen
 async def list_workspace_artifacts(
     thread_id: str,
     http_request: Request,
+    user_id: AuthenticatedUser,
 ) -> tuple[WorkspaceArtifact, ...]:
     """List the manifest entries belonging to one thread workspace."""
 
     try:
-        return _application(http_request).store.list_artifacts(thread_id)
+        return _application(http_request).store.list_artifacts(thread_id, user_id=user_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -163,12 +218,17 @@ async def read_workspace_artifact(
     thread_id: str,
     artifact_id: str,
     http_request: Request,
+    user_id: AuthenticatedUser,
     download: bool = Query(default=False),
 ) -> Response:
     """Read or download an artifact resolved only through its manifest ID."""
 
     try:
-        artifact, data = _application(http_request).store.read_artifact(thread_id, artifact_id)
+        artifact, data = _application(http_request).store.read_artifact(
+            thread_id,
+            artifact_id,
+            user_id=user_id,
+        )
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -180,11 +240,15 @@ async def read_workspace_artifact(
 
 
 @router.get("/api/workspaces/{thread_id}/download")
-async def download_workspace(thread_id: str, http_request: Request) -> Response:
+async def download_workspace(
+    thread_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> Response:
     """Download all manifest-registered artifacts in one ZIP archive."""
 
     try:
-        data = _application(http_request).store.export_zip(thread_id)
+        data = _application(http_request).store.export_zip(thread_id, user_id=user_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return Response(
@@ -195,11 +259,15 @@ async def download_workspace(thread_id: str, http_request: Request) -> Response:
 
 
 @router.get("/api/workspaces/{thread_id}/export")
-async def export_workspace(thread_id: str, http_request: Request) -> dict[str, object]:
+async def export_workspace(
+    thread_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> dict[str, object]:
     """Return the combined structured workspace export as JSON."""
 
     try:
-        return _application(http_request).store.combined_export(thread_id)
+        return _application(http_request).store.combined_export(thread_id, user_id=user_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -211,168 +279,309 @@ async def export_workspace(thread_id: str, http_request: Request) -> dict[str, o
 async def workspace_trace(
     thread_id: str,
     http_request: Request,
+    user_id: AuthenticatedUser,
 ) -> tuple[AgentTraceEvent, ...]:
     """Return normalized activity events without exposing hidden model reasoning."""
 
-    return _application(http_request).store.list_events(thread_id)
+    return _application(http_request).store.list_events(thread_id, user_id=user_id)
 
 
 @router.get(
     "/api/mapping-knowledge",
     response_model=tuple[MappingKnowledgeEntry, ...],
 )
-async def mapping_knowledge(http_request: Request) -> tuple[MappingKnowledgeEntry, ...]:
+async def mapping_knowledge(
+    http_request: Request,
+    _user_id: AuthenticatedUser,
+) -> tuple[MappingKnowledgeEntry, ...]:
     """List backend-owned mapping knowledge for the Integration Graph."""
 
     return _application(http_request).store.list_mapping_knowledge()
 
 
 @router.post("/api/dpp", response_model=DppPackage)
-async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPackage:
-    """Build and validate an official-template-backed AAS environment."""
+async def create_dpp(
+    payload: DppBuildRequest,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> DppPackage:
+    """Build, validate, and when scoped to a workspace, durably persist the DPP."""
 
     try:
+        application = _application(http_request)
         package = build_dpp(
             payload.product_name,
             list(payload.mappings),
-            repository=_application(http_request).templates,
+            repository=application.templates,
             evidence=payload.evidence,
         )
+        if payload.thread_id and payload.product_id:
+            catalogue = application.context.catalogue
+            if catalogue.get_thread(payload.thread_id, user_id=user_id) is None:
+                raise ValueError("unknown thread")
+            product = catalogue.get_product(payload.product_id, user_id=user_id)
+            if product is None:
+                raise ValueError("unknown product")
+            run = catalogue.start_run(
+                product.id,
+                payload.thread_id,
+                user_id=user_id,
+                refresh_requested=True,
+            )
+
+            def persist(key: str, data: bytes, content_type: str) -> str:
+                artifact = application.context.artifacts.put(
+                    key,
+                    data,
+                    content_type=content_type,
+                    product_id=product.id,
+                    run_id=run.id,
+                )
+                catalogue.register_artifact(artifact)
+                return artifact.id
+
+            dpp_id = persist(
+                "dpp/manual-package.json",
+                package.model_dump_json(by_alias=True, indent=2).encode(),
+                "application/json",
+            )
+            aas_id = persist(
+                "aas/manual-environment.json",
+                json.dumps(package.environment, indent=2, default=str).encode(),
+                "application/json",
+            )
+            validation_id = persist(
+                "aas/manual-validation.json",
+                package.validation_report.model_dump_json(by_alias=True, indent=2).encode(),
+                "application/json",
+            )
+            catalogue.finish_run(
+                run.id,
+                RunStatus.COMPLETED if package.deployable else RunStatus.FAILED,
+                error=None if package.deployable else "Manual DPP validation blocked deployment",
+            )
+            if package.deployable:
+                catalogue.create_dpp_version(
+                    product.id,
+                    run.id,
+                    dpp_artifact_id=dpp_id,
+                    aas_artifact_id=aas_id,
+                    validation_artifact_id=validation_id,
+                    source_fingerprint=hashlib.sha256(
+                        package.model_dump_json(by_alias=True).encode()
+                    ).hexdigest(),
+                    deployable=True,
+                )
+        return package
     except TemplateRepositoryError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
-    except MiaError as error:
+    except (MiaError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
-    # Persist AAS + validation artifacts so the deploy endpoint can find them
-    if payload.thread_id:
-        store = _application(http_request).store
-        try:
-            aas_artifact = store.write_json(
-                payload.thread_id,
-                ArtifactKind.AAS,
-                "aas.json",
-                package.environment,
-                created_by="manual_generate",
-            )
-            store.write_json(
-                payload.thread_id,
-                ArtifactKind.VALIDATION,
-                "validation.json",
-                package.validation_report.model_dump(mode="json"),
-                created_by="manual_generate",
-                derived_from=(aas_artifact.id,),
-            )
-        except (ValueError, OSError):
-            pass  # Non-blocking — artifact persistence failure does not fail the response
 
-    return package
+@router.get("/api/threads/{thread_id}", response_model=AgentResponse)
+async def thread_state(
+    thread_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> AgentResponse:
+    """Restore the checkpoint-backed workspace state for an owned conversation."""
+
+    try:
+        return await _application(http_request).thread_state(thread_id, user_id=user_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="unknown thread") from error
+
+
+@router.get("/api/debug/graph/stream")
+async def workflow_graph_stream(
+    http_request: Request,
+    user_id: AuthenticatedUser,
+    thread_id: str | None = None,
+) -> StreamingResponse:
+    """Stream safe LangGraph node lifecycle events for the owned local workflow."""
+
+    application = _application(http_request)
+    if not application.graph_debug_enabled:
+        raise HTTPException(status_code=404, detail="live graph debugging is local-only")
+    if (
+        thread_id is not None
+        and application.context.catalogue.get_thread(thread_id, user_id=user_id) is None
+    ):
+        raise HTTPException(status_code=404, detail="unknown thread")
+
+    async def events():
+        try:
+            async for event in application.graph_debug_stream(thread_id, user_id=user_id):
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+        except Exception as error:
+            detail = {"errorType": type(error).__name__}
+            yield f"event: error\ndata: {json.dumps(detail)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get(
+    "/api/threads/{thread_id}/messages",
+    response_model=tuple[ChatMessage, ...],
+)
+async def thread_messages(
+    thread_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> tuple[ChatMessage, ...]:
+    """Return timestamped human/assistant chat history for one durable thread."""
+
+    return _application(http_request).context.catalogue.list_messages(
+        thread_id,
+        user_id=user_id,
+    )
+
+
+@router.get("/api/threads", response_model=tuple[ThreadRecord, ...])
+async def threads(
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> tuple[ThreadRecord, ...]:
+    """List only conversations owned by the authenticated Clerk account."""
+
+    return _application(http_request).context.catalogue.list_threads(user_id)
+
+
+@router.get(
+    "/api/threads/{thread_id}/background-jobs",
+    response_model=tuple[BackgroundJob, ...],
+)
+async def background_jobs(
+    thread_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> tuple[BackgroundJob, ...]:
+    """Expose live deep-research progress only to the thread owner."""
+
+    catalogue = _application(http_request).context.catalogue
+    if catalogue.get_thread(thread_id, user_id=user_id) is None:
+        raise HTTPException(status_code=404, detail="unknown thread")
+    return catalogue.list_background_jobs(user_id=user_id, thread_id=thread_id)
+
+
+@router.post("/api/background-jobs/{job_id}/retry", response_model=BackgroundJob)
+async def retry_background_job(
+    job_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> BackgroundJob:
+    """Requeue a failed owned background job for the persistent local/hosted worker."""
+
+    catalogue = _application(http_request).context.catalogue
+    job = catalogue.get_background_job(job_id, user_id=user_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown background job")
+    if job.status is not BackgroundJobStatus.FAILED:
+        return job
+    return catalogue.requeue_background_job(job.id, user_id=user_id)
+
+
+@router.get("/api/background-jobs/{job_id}", response_model=BackgroundJob)
+async def background_job(
+    job_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> BackgroundJob:
+    """Return one job only when it belongs to the authenticated account."""
+
+    job = _application(http_request).context.catalogue.get_background_job(
+        job_id,
+        user_id=user_id,
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown background job")
+    return job
 
 
 @router.post(
-    "/api/workspaces/{thread_id}/deploy",
-    response_model=DeployResponse,
+    "/api/background-jobs/{job_id}/execute",
+    response_model=BackgroundJob,
 )
-async def deploy_workspace(
-    thread_id: str,
-    payload: DeployRequest,
-    http_request: Request,
-) -> DeployResponse:
-    """Deploy the latest validated AAS artifact for a thread to a BaSyx server."""
+async def execute_background_job(job_id: str, http_request: Request) -> BackgroundJob:
+    """Worker-only idempotent entrypoint invoked by Vercel Workflow steps."""
 
-    store = _application(http_request).store
-
-    # Locate the most recent AAS artifact and its paired validation artifact
-    try:
-        all_artifacts = store.list_artifacts(thread_id)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-
-    aas_artifacts = [a for a in all_artifacts if a.kind is ArtifactKind.AAS]
-    if not aas_artifacts:
-        raise HTTPException(
-            status_code=404,
-            detail="No AAS artifact found for this workspace. Generate a passport first.",
+    mia = _application(http_request)
+    configured = mia.settings.workflow_secret
+    supplied = http_request.headers.get("x-mia-workflow-secret")
+    if (
+        configured is None
+        or supplied is None
+        or not secrets.compare_digest(
+            supplied,
+            configured.get_secret_value(),
         )
-    # Most recent AAS artifact is last in insertion order
-    latest_aas = aas_artifacts[-1]
+    ):
+        raise HTTPException(status_code=401, detail="invalid workflow credential")
+    job = mia.context.catalogue.get_background_job_internal(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown background job")
+    return await mia.run_deep_research(job_id, user_id=job.user_id)
 
-    # Find the validation artifact derived from this AAS artifact
-    validation_artifacts = [
-        a
-        for a in all_artifacts
-        if a.kind is ArtifactKind.VALIDATION and latest_aas.id in a.derived_from
-    ]
 
-    # Read the stored environment JSON
-    _, aas_bytes = store.read_artifact(thread_id, latest_aas.id)
-    environment: dict = json.loads(aas_bytes)
+@router.get("/api/products", response_model=tuple[ProductLibraryItem, ...])
+async def product_library(
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> tuple[ProductLibraryItem, ...]:
+    """List every durable product with its latest successful passport."""
 
-    # Reconstruct the AasArtifact — environment is the full AAS environment dict
-    # Extract submodel: first entry in assetAdministrationShells references submodels
-    submodels = environment.get("submodels", [])
-    submodel: dict = submodels[0] if submodels else {}
-
-    digest = sha256_json(environment)
-    artifact = AasArtifact(
-        environment=environment,
-        submodel=submodel,
-        sha256=digest,
-        compiler_name="mia-official-template-projector+aas-core3.0",
-        compiler_version=version("aas-core3.0"),
+    catalogue = _application(http_request).context.catalogue
+    return tuple(
+        ProductLibraryItem(
+            product=product,
+            latest_dpp=catalogue.latest_successful_dpp(product.id, user_id=user_id),
+            run_count=len(catalogue.list_runs(product.id, user_id=user_id)),
+        )
+        for product in catalogue.list_products(user_id=user_id)
     )
 
-    # Load validation report if available, otherwise construct a minimal passing one
-    validation: ValidationReport | None = None
-    if validation_artifacts:
-        _, val_bytes = store.read_artifact(thread_id, validation_artifacts[-1].id)
-        try:
-            validation = ValidationReport.model_validate_json(val_bytes)
-            # The stored sha256 may reference the artifact sha256 recorded at build time;
-            # update it to match the reconstructed artifact so the deploy guard passes
-            if validation.artifact_sha256 != digest:
-                validation = ValidationReport(
-                    valid=validation.valid,
-                    template_key=validation.template_key,
-                    template_release=validation.template_release,
-                    artifact_sha256=digest,
-                    validator_versions=validation.validator_versions,
-                    findings=validation.findings,
-                )
-        except (ValueError, KeyError):
-            validation = None
 
-    if validation is None or not validation.valid:
-        raise HTTPException(
-            status_code=422,
-            detail="The AAS artifact did not pass validation and cannot be deployed.",
-        )
+@router.get("/api/products/{product_id}", response_model=ProductDetail)
+async def product_detail(
+    product_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> ProductDetail:
+    """Show product presentation data, attempts, DPP versions, and artifacts."""
 
-    # Deploy to BaSyx
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            repo = BasyxAasRepository(client, base_url=payload.basyx_url)
-            result = await repo.deploy(artifact, validation)
-    except DeploymentError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except httpx.HTTPError as error:
-        raise HTTPException(
-            status_code=502, detail=f"BaSyx server unreachable: {error}"
-        ) from error
+    catalogue = _application(http_request).context.catalogue
+    product = catalogue.get_product(product_id, user_id=user_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="unknown product")
+    return ProductDetail(
+        product=product,
+        runs=catalogue.list_runs(product_id, user_id=user_id),
+        dpp_versions=catalogue.list_dpp_versions(product_id, user_id=user_id),
+        artifacts=catalogue.list_artifacts(product_id=product_id, user_id=user_id),
+    )
 
-    # Build the public passport URL using the first shell ID
-    first_shell_id = result.shell_ids[0] if result.shell_ids else ""
-    encoded_id = BasyxAasRepository.encode_identifier(first_shell_id)
-    base = (payload.passport_base_url or "https://mia-dpp.vercel.app").rstrip("/")
-    passport_url = f"{base}/passport/{encoded_id}"
 
-    # Generate QR code
-    qr_b64 = passport_qr_png_b64(passport_url)
+@router.get("/api/artifacts/{artifact_id}")
+async def read_durable_artifact(
+    artifact_id: str,
+    http_request: Request,
+    user_id: AuthenticatedUser,
+) -> Response:
+    """Read a product-library artifact by its durable catalogue identity."""
 
-    return DeployResponse(
-        status="deployed",
-        repository_url=result.repository_url,
-        shell_ids=list(result.shell_ids),
-        submodel_ids=list(result.submodel_ids),
-        passport_url=passport_url,
-        qr_code_png_b64=qr_b64,
+    mia = _application(http_request)
+    artifact = mia.context.catalogue.get_artifact(artifact_id)
+    if artifact is None or artifact.run_id is None:
+        raise HTTPException(status_code=404, detail="unknown artifact")
+    run = mia.context.catalogue.get_run(artifact.run_id)
+    if run is None or mia.context.catalogue.get_thread(run.thread_id, user_id=user_id) is None:
+        raise HTTPException(status_code=404, detail="unknown artifact")
+    return Response(
+        content=mia.context.artifacts.get(artifact),
+        media_type=artifact.content_type,
     )

@@ -7,6 +7,8 @@ from typing import Literal
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import EvidenceRecord
 from mia_dpp.domain.mappings import FieldMapping
+from mia_dpp.domain.product import DppVersion, ProductRecord, ProductRun
+from mia_dpp.storage.models import StoredArtifact
 
 
 class DppBuildRequest(WireModel):
@@ -14,6 +16,7 @@ class DppBuildRequest(WireModel):
     mappings: tuple[FieldMapping, ...]
     evidence: tuple[EvidenceRecord, ...] = ()
     thread_id: str | None = None
+    product_id: str | None = None
 
 
 class HealthResponse(WireModel):
@@ -23,15 +26,24 @@ class HealthResponse(WireModel):
     standards_commit: str
 
 
-class DeployRequest(WireModel):
-    basyx_url: str = "https://v3.admin-shell.io"
-    passport_base_url: str = ""
+class ProductLibraryItem(WireModel):
+    product: ProductRecord
+    latest_dpp: DppVersion | None = None
+    run_count: int = 0
 
 
-class DeployResponse(WireModel):
-    status: Literal["deployed"]
-    repository_url: str
-    shell_ids: list[str]
-    submodel_ids: list[str]
-    passport_url: str
-    qr_code_png_b64: str
+class ProductDetail(WireModel):
+    product: ProductRecord
+    runs: tuple[ProductRun, ...] = ()
+    dpp_versions: tuple[DppVersion, ...] = ()
+    artifacts: tuple[StoredArtifact, ...] = ()
+
+
+class StorageStatus(WireModel):
+    """Safe runtime persistence diagnostics without exposing credentials."""
+
+    database_backend: Literal["sqlite", "postgres"]
+    database_provider: Literal["local", "postgres", "supabase"]
+    artifact_backend: Literal["filesystem", "vercel_blob"]
+    durable_metadata: bool
+    durable_artifacts: bool

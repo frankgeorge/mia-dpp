@@ -7,10 +7,15 @@ node_modules
 next-env.d.ts
 .env*
 .mia-data/
-CLAUDE.md
 
 backend/.venv/
 backend/.pytest_cache/
 backend/__pycache__/
 .coverage
 *.py[cod]
+test-output
+/.swc
+/logs/
+/.langgraph_api/
+.playwright-mcp/
+TODO_LIST.md

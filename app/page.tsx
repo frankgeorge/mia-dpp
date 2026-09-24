@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 import { Nameplate } from "@/components/Nameplate";
+import { AUTHENTICATION_ENABLED } from "@/lib/server-config";
 
 export default async function Home() {
-  const { userId } = await auth();
-  const signedIn = !!userId;
+  const userId = AUTHENTICATION_ENABLED ? (await auth()).userId : "local-development";
   return (
     <main className="min-h-screen bg-paper">
       {/* Nav */}
@@ -25,27 +25,29 @@ export default async function Home() {
             <a href="#graph" className="transition-colors hover:text-ink">
               Integration Graph
             </a>
+            <Link href="/products" className="transition-colors hover:text-ink">
+              Products
+            </Link>
           </nav>
-          {signedIn ? (
+          {userId ? (
             <div className="flex items-center gap-3">
               <Link
                 href="/workspace"
-                className="rounded-full bg-signal px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
+                className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
               >
                 Open workspace
               </Link>
-              <UserButton />
+              {AUTHENTICATION_ENABLED && <UserButton />}
             </div>
           ) : (
             <div className="flex items-center gap-3">
+              {AUTHENTICATION_ENABLED && (
+                <Link href="/login" className="text-[13px] font-medium text-muted hover:text-ink">
+                  Sign in
+                </Link>
+              )}
               <Link
-                href="/login"
-                className="text-[13px] font-medium text-muted transition-colors hover:text-ink"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/signup"
+                href={AUTHENTICATION_ENABLED ? "/signup" : "/workspace"}
                 className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
               >
                 Get started
@@ -85,7 +87,7 @@ export default async function Home() {
               style={{ animationDelay: "180ms" }}
             >
               <Link
-                href="/signup"
+                href={userId ? "/workspace" : "/signup"}
                 className="rounded-full bg-signal px-6 py-3 text-[15px] font-medium text-white transition-transform hover:scale-[1.02] active:scale-[0.99]"
               >
                 Try for free
@@ -101,7 +103,7 @@ export default async function Home() {
               className="mt-4 animate-rise text-[13px] text-muted"
               style={{ animationDelay: "220ms" }}
             >
-              No account. Runs in your browser.
+              Your chats, evidence, and passports remain available in your account.
             </p>
           </div>
 
@@ -301,7 +303,7 @@ export default async function Home() {
             wherever it needs you.
           </p>
           <Link
-            href="/signup"
+            href="/workspace"
             className="mt-9 inline-block rounded-full bg-white px-7 py-3.5 text-[15px] font-medium text-ink transition-transform hover:scale-[1.02] active:scale-[0.99]"
           >
             Try for free
