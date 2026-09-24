@@ -1,218 +1,267 @@
-"use client";
+import { notFound } from "next/navigation";
+import sql from "@/lib/db";
+import type { DppPackage } from "@/lib/types";
+import { CopyLink } from "./CopyLink";
 
-import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+type JsonObject = Record<string, unknown>;
 
-interface ShellData {
-  id: string;
-  idShort?: string;
-  assetInformation?: {
-    globalAssetId?: string;
-  };
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function decodeBase64Url(encoded: string): string {
-  // Add padding back
-  const padded = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
-  return atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+function printable(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        isObject(item) &&
+        typeof item.language === "string" &&
+        typeof item.text === "string"
+    )
+  ) {
+    return value
+      .map((item) => `${String(item.language)}: ${String(item.text)}`)
+      .join(" · ");
+  }
+  return JSON.stringify(value);
 }
 
-export default function PassportPage() {
-  const params = useParams();
-  const searchParams = useSearchParams();
+function nestedElements(element: JsonObject): JsonObject[] {
+  const modelType = element.modelType;
+  const childKey =
+    modelType === "SubmodelElementCollection" ||
+    modelType === "SubmodelElementList"
+      ? "value"
+      : modelType === "Entity"
+      ? "statements"
+      : modelType === "AnnotatedRelationshipElement"
+      ? "annotations"
+      : null;
+  const children = childKey ? element[childKey] : null;
+  if (!Array.isArray(children)) return [];
+  return children.filter(isObject);
+}
 
-  const encodedId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
+interface LeafValue {
+  path: string[];
+  value: string;
+}
 
-  const [shellId, setShellId] = useState<string>("");
-  const [shellData, setShellData] = useState<ShellData | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+function collectLeafValues(
+  element: JsonObject,
+  parentPath: string[],
+  index: number
+): LeafValue[] {
+  const segment =
+    typeof element.idShort === "string" && element.idShort
+      ? element.idShort
+      : `[${index + 1}]`;
+  const path = [...parentPath, segment];
+  const children = nestedElements(element);
+  if (children.length > 0) {
+    return children.flatMap((child, i) => collectLeafValues(child, path, i));
+  }
+  if (element.modelType === "Range") {
+    return [
+      {
+        path,
+        value: `${printable(element.min) || "?"} – ${printable(element.max) || "?"}`,
+      },
+    ];
+  }
+  if ("value" in element) {
+    return [{ path, value: printable(element.value) }];
+  }
+  return [];
+}
 
-  // QR may be passed as query param if navigating directly from the workspace
-  const qrFromQuery = searchParams.get("qr");
-  const basyxUrl = searchParams.get("basyx") ?? "https://v3.admin-shell.io";
+function artifactLeaves(dpp: DppPackage): LeafValue[] {
+  const elements = dpp.submodel.submodelElements;
+  if (!Array.isArray(elements)) return [];
+  const root =
+    typeof dpp.submodel.idShort === "string"
+      ? [dpp.submodel.idShort as string]
+      : ["Nameplate"];
+  return (elements as unknown[])
+    .filter(isObject)
+    .flatMap((el, i) => collectLeafValues(el, root, i));
+}
 
-  useEffect(() => {
-    if (!encodedId) return;
-    let decoded: string;
-    try {
-      decoded = decodeBase64Url(encodedId);
-      setShellId(decoded);
-    } catch {
-      setLoadError("Invalid passport identifier.");
-      setLoading(false);
-      return;
-    }
+export default async function PassportPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
 
-    // Try to fetch shell data from BaSyx directly
-    const fetchShell = async () => {
-      try {
-        const shellUrl = `${basyxUrl}/shells/${encodedId}`;
-        const res = await fetch(shellUrl, {
-          headers: { Accept: "application/json" },
-        });
-        if (res.ok) {
-          const data = (await res.json()) as ShellData;
-          setShellData(data);
-        }
-      } catch {
-        // BaSyx may not be reachable — we still show the passport page with the ID
-      } finally {
-        setLoading(false);
-      }
-    };
+  const rows = await sql`
+    SELECT id, product_name, submodel, status, qr_code_b64, passport_url, aas_json, created_at
+    FROM passports
+    WHERE id = ${id}
+    LIMIT 1
+  `;
 
-    void fetchShell();
-  }, [encodedId, basyxUrl]);
+  const record = rows[0];
+  if (!record) notFound();
 
-  const productName =
-    shellData?.idShort ??
-    shellData?.assetInformation?.globalAssetId?.split("/").pop() ??
-    (shellId ? shellId.split(":").pop() ?? "Product" : "Product");
-
-  const basyxShellUrl = `${basyxUrl}/shells/${encodedId}`;
+  const dpp = record.aas_json as DppPackage | null;
+  const leaves = dpp ? artifactLeaves(dpp) : [];
+  const productName = record.product_name as string;
+  const submodel = record.submodel as string;
+  const qrCodeB64 = record.qr_code_b64 as string | null;
+  const passportUrl =
+    (record.passport_url as string | null) ??
+    `https://mia-dpp.vercel.app/passport/${id}`;
+  const issuedAt = new Date(record.created_at as string).toLocaleDateString(
+    "en-GB",
+    { year: "numeric", month: "long", day: "numeric" }
+  );
 
   return (
-    <div className="min-h-screen bg-white" style={{ fontFamily: "system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-mist">
       {/* Header */}
-      <header className="border-b border-[#e8e8e8] bg-white px-6 py-4">
-        <div className="mx-auto flex max-w-2xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="grid h-8 w-8 place-items-center rounded-lg"
-              style={{ background: "linear-gradient(135deg, #3b5bdb 0%, #4dabf7 100%)" }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <header className="border-b border-hairline bg-paper">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="grid h-7 w-7 place-items-center rounded-lg bg-ink">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <path
-                  d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+                  d="M3 8h10M8 3l5 5-5 5"
                   stroke="white"
-                  strokeWidth="2"
+                  strokeWidth="1.8"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
               </svg>
             </div>
-            <span className="text-[15px] font-semibold text-[#1a1a1a]">MIA</span>
+            <span className="text-[14px] font-semibold tracking-tight text-ink">MIA</span>
           </div>
-          <span className="rounded-full border border-[#e8e8e8] px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-[#666]">
+          <span className="rounded-full border border-hairline px-3 py-1 font-mono text-[11px] text-muted">
             Digital Product Passport
           </span>
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="mx-auto max-w-2xl px-6 py-12">
-        {loading ? (
-          <div className="flex flex-col items-center py-24">
-            <div
-              className="h-8 w-8 animate-spin rounded-full border-2 border-[#e8e8e8]"
-              style={{ borderTopColor: "#3b5bdb" }}
-            />
-            <p className="mt-4 text-[14px] text-[#888]">Loading passport...</p>
-          </div>
-        ) : loadError ? (
-          <div className="rounded-2xl border border-red-100 bg-red-50 p-8 text-center">
-            <p className="text-[15px] font-semibold text-red-700">Invalid passport</p>
-            <p className="mt-1 text-[13px] text-red-500">{loadError}</p>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-8">
-            {/* Product name */}
-            <div className="text-center">
-              <h1 className="text-[28px] font-bold tracking-tight text-[#1a1a1a]">
+      <main className="mx-auto max-w-3xl space-y-5 px-6 py-10">
+        {/* Hero card */}
+        <div className="rounded-2xl border border-hairline bg-paper p-8 shadow-sm">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            {/* Product identity */}
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-[11px] uppercase tracking-widest text-muted">
+                {submodel}
+              </p>
+              <h1 className="mt-2 text-[26px] font-bold leading-tight tracking-tight text-ink">
                 {productName}
               </h1>
-              <p className="mt-1 text-[14px] text-[#888]">
-                EU ESPR Digital Product Passport
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-ok/10 px-3 py-1 text-[12px] font-medium text-ok">
+                  EU ESPR Compliant
+                </span>
+                <span className="text-[12px] text-muted">Issued {issuedAt}</span>
+              </div>
+              <p className="mt-4 font-mono text-[11px] text-muted/50">ID: {id}</p>
             </div>
 
-            {/* QR code section */}
-            <div className="flex flex-col items-center gap-4 rounded-2xl border border-[#e8e8e8] bg-[#fafafa] p-8 shadow-sm">
-              {qrFromQuery ? (
+            {/* QR code */}
+            {qrCodeB64 && (
+              <div className="shrink-0 text-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`data:image/png;base64,${qrFromQuery}`}
+                  src={`data:image/png;base64,${qrCodeB64}`}
                   alt="Passport QR Code"
-                  className="h-56 w-56"
+                  width={160}
+                  height={160}
+                  className="rounded-xl border border-hairline shadow-sm"
                   style={{ imageRendering: "pixelated" }}
                 />
-              ) : (
-                <div className="flex h-56 w-56 flex-col items-center justify-center rounded-xl border border-dashed border-[#d0d0d0] bg-white text-[#aaa]">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="3" width="7" height="7" />
-                    <rect x="14" y="3" width="7" height="7" />
-                    <rect x="3" y="14" width="7" height="7" />
-                    <path d="M14 14h.01M18 14h.01M14 18h.01M18 18h.01M14 22h.01M18 22h.01M22 14h.01M22 18h.01M22 22h.01" strokeLinecap="round" />
-                  </svg>
-                  <p className="mt-2 text-[11px]">QR not available</p>
-                </div>
-              )}
-              <p className="text-[13px] font-medium text-[#555]">Scan to verify this passport</p>
-            </div>
-
-            {/* Passport ID & live data link */}
-            <div className="w-full rounded-2xl border border-[#e8e8e8] bg-white p-6 shadow-sm">
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
-                    Passport ID
-                  </p>
-                  <p className="mt-1 break-all font-mono text-[12px] text-[#333]">{shellId}</p>
-                </div>
-                <div className="border-t border-[#f0f0f0]" />
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
-                    Live AAS Data
-                  </p>
-                  <a
-                    href={basyxShellUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 block break-all font-mono text-[12px] text-[#3b5bdb] underline underline-offset-2"
-                  >
-                    {basyxShellUrl}
-                  </a>
-                </div>
-                <div className="border-t border-[#f0f0f0]" />
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <p className="text-[12px] text-[#555]">
-                    Deployed to IDTA public AAS repository
-                  </p>
-                </div>
+                <p className="mt-2 text-[11px] text-muted">Scan to share</p>
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Standards badges */}
-            <div className="flex flex-wrap justify-center gap-2">
-              {["IDTA 02006", "AAS v3.0", "EU ESPR"].map((badge) => (
-                <span
-                  key={badge}
-                  className="rounded-full border border-[#e0e8ff] bg-[#f0f4ff] px-3 py-1 text-[11px] font-medium text-[#3b5bdb]"
+          {/* Share bar */}
+          <div className="mt-6 flex items-center gap-3 rounded-xl border border-hairline bg-mist p-3">
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
+              {passportUrl}
+            </span>
+            <div className="flex shrink-0 gap-2">
+              <CopyLink url={passportUrl} />
+              <a
+                href={passportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full border border-signal/30 bg-signalDim px-4 py-2 text-[13px] font-medium text-signal transition-colors hover:bg-signal/15"
+              >
+                Open
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Product data fields */}
+        {leaves.length > 0 && (
+          <div className="overflow-hidden rounded-2xl border border-hairline bg-paper shadow-sm">
+            <div className="border-b border-hairline px-6 py-4">
+              <h2 className="text-[15px] font-semibold text-ink">Product Data</h2>
+              <p className="mt-0.5 text-[13px] text-muted">
+                Standardised fields · IDTA 02006 Digital Nameplate
+              </p>
+            </div>
+            <div className="divide-y divide-hairline">
+              {leaves.map((leaf, i) => (
+                <div
+                  key={`${leaf.path.join("/")}-${i}`}
+                  className="flex items-baseline justify-between gap-6 px-6 py-3"
                 >
-                  {badge}
-                </span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted">
+                    {leaf.path.at(-1)}
+                  </span>
+                  <span className="min-w-0 break-words text-right text-[13px] text-ink">
+                    {leaf.value}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
         )}
-      </main>
 
-      {/* Footer */}
-      <footer className="border-t border-[#e8e8e8] px-6 py-6 text-center">
-        <p className="text-[12px] text-[#aaa]">
-          Powered by{" "}
+        {/* Verification strip */}
+        {dpp && (
+          <div className="rounded-xl border border-hairline bg-paper px-6 py-4">
+            <div className="flex items-center gap-2">
+              <div
+                className={`h-2 w-2 rounded-full ${
+                  dpp.validationReport.valid ? "bg-ok" : "bg-warn"
+                }`}
+              />
+              <p className="text-[13px] font-medium text-ink">
+                {dpp.validationReport.valid
+                  ? "Template validation passed"
+                  : "Template validation — warnings present"}
+              </p>
+            </div>
+            <p className="mt-2 break-all font-mono text-[10px] text-muted">
+              SHA-256 {dpp.artifactSha256}
+            </p>
+          </div>
+        )}
+
+        {/* Footer */}
+        <p className="pb-6 text-center text-[12px] text-muted">
+          Generated by{" "}
           <a
             href="https://mia-dpp.vercel.app"
-            className="font-medium text-[#3b5bdb]"
-            target="_blank"
-            rel="noopener noreferrer"
+            className="text-signal underline underline-offset-2"
           >
             MIA
           </a>{" "}
-          -- Mittelstand Integration Agent
+          · EU ESPR Digital Product Passport · IDTA 02006
         </p>
-      </footer>
+      </main>
     </div>
   );
 }

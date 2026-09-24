@@ -93,14 +93,9 @@ export default function Workspace() {
   const [panelOpen, setPanelOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // ── Deploy state ──────────────────────────────────────────────────────────
-  const [deployStatus, setDeployStatus] = useState<"idle" | "deploying" | "deployed" | "error">("idle");
-  const [deployResult, setDeployResult] = useState<{
-    passport_url: string;
-    qr_code_png_b64: string;
-    shell_ids: string[];
-  } | null>(null);
-  const [deployError, setDeployError] = useState("");
+  // ── Passport publish state ─────────────────────────────────────────────────
+  const [passportUrl, setPassportUrl] = useState<string | null>(null);
+  const [qrCodeB64, setQrCodeB64] = useState<string | null>(null);
 
   // ── Onboarding ────────────────────────────────────────────────────────────
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -424,6 +419,8 @@ export default function Workspace() {
     setMappingResult(product.mappingResult);
     setCoverageReport(product.coverageReport);
     setDpp(null);
+    setPassportUrl(null);
+    setQrCodeB64(null);
     setTab("mappings");
     setPanelOpen(true);
   }
@@ -553,17 +550,16 @@ export default function Workspace() {
   }
 
   async function savePassportRecord(overrides: {
-    status?: "draft" | "deployed";
+    status?: string;
     qr_code_b64?: string;
     passport_url?: string;
-    basyx_shell_id?: string;
     aas_json?: unknown;
-  } = {}) {
+  } = {}): Promise<Record<string, unknown> | null> {
     const tid = threadId;
     const pname = productName;
-    if (!tid || !pname) return;
+    if (!tid || !pname) return null;
     try {
-      await fetch("/api/passports", {
+      const res = await fetch("/api/passports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -573,7 +569,11 @@ export default function Workspace() {
           ...overrides,
         }),
       });
-    } catch { /* non-blocking — silently ignore */ }
+      if (res.ok) return await res.json() as Record<string, unknown>;
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   async function generate(
@@ -597,7 +597,19 @@ export default function Workspace() {
       }
       const dppResult = await response.json();
       setDpp(dppResult);
-      void savePassportRecord({ status: "draft", aas_json: dppResult });
+
+      // Save to DB, get passport ID, generate QR
+      const record = await savePassportRecord({ status: "published", aas_json: dppResult });
+      if (record?.id) {
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://mia-dpp.vercel.app";
+        const url = `${baseUrl}/passport/${String(record.id)}`;
+        const QRCode = (await import("qrcode")).default;
+        const qrDataUrl = await QRCode.toDataURL(url, { width: 300, margin: 2 });
+        const qrB64 = qrDataUrl.replace("data:image/png;base64,", "");
+        void savePassportRecord({ passport_url: url, qr_code_b64: qrB64 });
+        setPassportUrl(url);
+        setQrCodeB64(qrB64);
+      }
     } catch {
       setMessages((previous) => [
         ...previous,
@@ -607,47 +619,6 @@ export default function Workspace() {
             "The Python backend could not build the passport. Check that it is running and try again.",
         },
       ]);
-    }
-  }
-
-  async function deployPassport() {
-    if (!threadId || deployStatus === "deploying") return;
-    setDeployStatus("deploying");
-    setDeployError("");
-    try {
-      const res = await fetch(`${API_URL}/api/workspaces/${threadId}/deploy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          basyx_url: "https://v3.admin-shell.io",
-          passport_base_url: process.env.NEXT_PUBLIC_BASE_URL ?? "https://mia-dpp.vercel.app",
-        }),
-      });
-      const body = (await res.json()) as {
-        passport_url?: string;
-        qr_code_png_b64?: string;
-        shell_ids?: string[];
-        detail?: string;
-      };
-      if (!res.ok) {
-        throw new Error(body.detail ?? `Deploy failed: ${res.status}`);
-      }
-      const result = {
-        passport_url: body.passport_url ?? "",
-        qr_code_png_b64: body.qr_code_png_b64 ?? "",
-        shell_ids: body.shell_ids ?? [],
-      };
-      setDeployResult(result);
-      setDeployStatus("deployed");
-      void savePassportRecord({
-        status: "deployed",
-        qr_code_b64: result.qr_code_png_b64,
-        passport_url: result.passport_url,
-        basyx_shell_id: result.shell_ids[0] ?? null,
-      });
-    } catch (error) {
-      setDeployError(error instanceof Error ? error.message : "Deployment failed.");
-      setDeployStatus("error");
     }
   }
 
@@ -1180,62 +1151,39 @@ export default function Workspace() {
 
                       {dpp && <DppView dpp={dpp} />}
 
-                      {dpp && (
+                      {dpp && passportUrl && qrCodeB64 && (
                         <div className="rounded-xl border border-hairline bg-paper p-4">
-                          {deployStatus !== "deployed" ? (
-                            <>
-                              <p className="text-[13px] font-semibold text-ink">Deploy to BaSyx</p>
-                              <p className="mt-1 text-[12px] leading-relaxed text-muted">
-                                Upload your passport to a live AAS server and get a shareable URL and QR code.
-                              </p>
-                              <button
-                                onClick={() => void deployPassport()}
-                                disabled={!threadId || deployStatus === "deploying"}
-                                className="mt-3 rounded-full bg-ink px-4 py-1.5 text-[12px] font-medium text-white transition-all hover:shadow-md disabled:opacity-30"
-                              >
-                                {deployStatus === "deploying" ? "Deploying..." : "Deploy Passport"}
-                              </button>
-                              {deployStatus === "error" && (
-                                <p className="mt-2 text-[11px] text-warn">{deployError}</p>
-                              )}
-                            </>
-                          ) : deployResult ? (
-                            <>
-                              <div className="flex items-center gap-2">
-                                <div className="h-2 w-2 rounded-full bg-ok" />
-                                <p className="text-[13px] font-semibold text-ink">Passport deployed</p>
-                              </div>
-                              {deployResult.qr_code_png_b64 && (
-                                <div className="mt-4 flex justify-center">
-                                  <img
-                                    src={`data:image/png;base64,${deployResult.qr_code_png_b64}`}
-                                    alt="Passport QR Code"
-                                    className="h-48 w-48"
-                                    style={{ imageRendering: "pixelated" }}
-                                  />
-                                </div>
-                              )}
-                              <p className="mt-3 break-all font-mono text-[11px] text-muted">
-                                {deployResult.passport_url}
-                              </p>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <button
-                                  onClick={() => void navigator.clipboard.writeText(deployResult.passport_url)}
-                                  className="rounded-full border border-hairline bg-mist px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-paper"
-                                >
-                                  Copy link
-                                </button>
-                                <a
-                                  href={deployResult.passport_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="rounded-full border border-signal/30 bg-signalDim px-3 py-1.5 text-[12px] font-medium text-signal transition-colors hover:bg-signal/15"
-                                >
-                                  Open passport
-                                </a>
-                              </div>
-                            </>
-                          ) : null}
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full bg-ok" />
+                            <p className="text-[13px] font-semibold text-ink">Passport published</p>
+                          </div>
+                          <div className="mt-4 flex justify-center">
+                            <img
+                              src={`data:image/png;base64,${qrCodeB64}`}
+                              alt="Passport QR Code"
+                              className="h-48 w-48 rounded-xl border border-hairline"
+                              style={{ imageRendering: "pixelated" }}
+                            />
+                          </div>
+                          <p className="mt-3 break-all font-mono text-[11px] text-muted">
+                            {passportUrl}
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => void navigator.clipboard.writeText(passportUrl)}
+                              className="rounded-full border border-hairline bg-mist px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-paper"
+                            >
+                              Copy link
+                            </button>
+                            <a
+                              href={passportUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-full border border-signal/30 bg-signalDim px-3 py-1.5 text-[12px] font-medium text-signal transition-colors hover:bg-signal/15"
+                            >
+                              Open passport
+                            </a>
+                          </div>
                         </div>
                       )}
                     </div>

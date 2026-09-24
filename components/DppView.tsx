@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import type { DppPackage, Severity } from "@/lib/types";
 
 type JsonObject = Record<string, unknown>;
@@ -104,21 +103,9 @@ function severityTone(severity: Severity): string {
 }
 
 export function DppView({ dpp }: { dpp: DppPackage }) {
-  const [showJson, setShowJson] = useState(false);
-  const json = JSON.stringify(dpp.environment, null, 2);
   const leaves = artifactLeaves(dpp);
   const gapCount = dpp.gapReport.gaps.length;
   const findingCount = dpp.validationReport.findings.length;
-
-  function download() {
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${dpp.passportId.replace(/[:]/g, "_")}.environment.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
 
   return (
     <div className="mt-5 overflow-hidden rounded-2xl border border-hairline bg-paper">
@@ -287,33 +274,14 @@ export function DppView({ dpp }: { dpp: DppPackage }) {
         </details>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-hairline p-4">
-        <button
-          onClick={download}
-          className="rounded-full bg-signal px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-88"
-        >
-          Download AAS environment
-        </button>
-        <button
-          onClick={() => setShowJson((shown) => !shown)}
-          className="rounded-full border border-hairline px-4 py-2 text-[13px] font-medium transition-colors hover:bg-mist"
-        >
-          {showJson ? "Hide" : "View"} environment JSON
-        </button>
-        <span className="ml-auto font-mono text-[11px] text-muted">
-          {leaves.length} leaf value{leaves.length === 1 ? "" : "s"}
+      <div className="flex items-center justify-between border-t border-hairline px-5 py-3">
+        <span className="font-mono text-[10px] text-muted">
+          SHA-256 {dpp.artifactSha256}
+        </span>
+        <span className="font-mono text-[11px] text-muted">
+          {leaves.length} field{leaves.length === 1 ? "" : "s"}
         </span>
       </div>
-
-      <div className="border-t border-hairline px-5 py-3 font-mono text-[10px] text-muted">
-        SHA-256 {dpp.artifactSha256}
-      </div>
-
-      {showJson && (
-        <pre className="scroll-quiet max-h-72 overflow-auto border-t border-hairline bg-mist p-4 font-mono text-[11px] leading-relaxed">
-          {json}
-        </pre>
-      )}
     </div>
   );
 }
