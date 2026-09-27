@@ -9,6 +9,7 @@ services:
     environment:
       MIA_THREAD_STORE_PATH: /data/mia-agent.sqlite3
       MIA_WORKSPACE_ROOT: /data/workspaces
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
     volumes:
       - mia-data:/data
     healthcheck:

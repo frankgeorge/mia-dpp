@@ -1,33 +1,19 @@
-"""Typed conversation, workflow-state, and trace contracts for MIA agent."""
+"""Typed conversation and state contracts for MIA document-extraction agent."""
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
 
-from pydantic import AwareDatetime, Field, computed_field
+from pydantic import AwareDatetime, Field
 
 from mia_dpp.domain.base import WireModel
-from mia_dpp.domain.discovery import CompanyCandidate, ProductCandidate, ProductSourceCandidate
-from mia_dpp.domain.evidence import AcquiredSource, EvidenceRecord, ProductKnowledgePackage
-from mia_dpp.domain.mappings import (
-    CoverageReport,
-    MappingResult,
-    SemanticReviewItem,
-)
-from mia_dpp.domain.targets import TemplateIndex
-from mia_dpp.tools.mapping.coverage import coverage
 
 
 class AgentStatus(StrEnum):
-    """Current point at which an MIA agent job can continue or must pause."""
+    """Current state of an MIA extraction session."""
 
     RUNNING = "running"
-    AWAITING_COMPANY = "awaiting_company"
-    AWAITING_PRODUCT = "awaiting_product"
-    AWAITING_REVIEW = "awaiting_review"
-    AWAITING_INPUT = "awaiting_input"
-    AWAITING_OPTIONAL_CHOICE = "awaiting_optional_choice"
+    NEEDS_INPUT = "needs_input"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -38,34 +24,8 @@ class TraceStatus(StrEnum):
     FAILED = "failed"
 
 
-class ProductStatus(StrEnum):
-    QUEUED = "queued"
-    IN_PROGRESS = "in_progress"
-    AWAITING_REVIEW = "awaiting_review"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class HumanRequestKind(StrEnum):
-    MAPPING_REVIEW = "mapping_review"
-    REQUIREMENT_VALUE = "requirement_value"
-
-
-class HumanRequest(WireModel):
-    """Trusted pause request created by the agent but answerable only through the API."""
-
-    kind: HumanRequestKind
-    product_id: str
-    summary: str
-    requirement_id: str | None = None
-
-
 class AgentTraceEvent(WireModel):
-    """Safe activity record shown by the frontend.
-
-    Tools append these events to ``MiaState`` when work starts, completes, or
-    fails. They summarize observable actions and never contain hidden reasoning.
-    """
+    """Safe activity record shown by the frontend activity page."""
 
     id: str
     thread_id: str
@@ -82,148 +42,56 @@ class AgentTraceEvent(WireModel):
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
-class ProductWork(WireModel):
-    """All trusted working data accumulated for one selected product.
+class ExtractedField(WireModel):
+    """One field extracted from a document and mapped to an IDTA 02006 name."""
 
-    Agent tools update its sources, evidence resolution, pending reviews, and
-    artifact identity as the autonomous loop progresses.
-    """
+    idta_field: str
+    value: str
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    source_excerpt: str = ""
 
-    product_id: str
-    status: ProductStatus = ProductStatus.QUEUED
-    candidate: ProductCandidate | None = None
-    source_candidates: tuple[ProductSourceCandidate, ...] = ()
-    product_name: str | None = None
-    source_urls: tuple[str, ...] = ()
-    source_artifact_ids: tuple[str, ...] = ()
-    acquired_sources: tuple[AcquiredSource, ...] = ()
-    evidence: tuple[EvidenceRecord, ...] = ()
-    mapping_result: MappingResult | None = None
-    template_index: TemplateIndex | None = None
-    pending_reviews: tuple[SemanticReviewItem, ...] = ()
-    mapping_cycle_id: str | None = None
-    confirmed_mapping_cycle_ids: tuple[str, ...] = ()
-    aas_artifact_sha256: str | None = None
-    artifact_ids: tuple[str, ...] = ()
 
-    def knowledge_package(self) -> ProductKnowledgePackage | None:
-        """Build the source-neutral mapping input from canonical product evidence."""
+class ExtractionOutput(WireModel):
+    """Structured output returned by the PydanticAI extraction agent."""
 
-        if not self.evidence:
-            return None
-        return ProductKnowledgePackage(
-            product_id=self.product_id,
-            product_name=self.product_name
-            or (self.candidate.name if self.candidate else self.product_id),
-            source_artifact_ids=self.source_artifact_ids,
-            acquired_sources=self.acquired_sources,
-            evidence=self.evidence,
-        )
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def coverage_report(self) -> CoverageReport | None:
-        """Derive coverage from the current evidence, mappings, and template index."""
-
-        package = self.knowledge_package()
-        if package is None or self.mapping_result is None or self.template_index is None:
-            return None
-        return coverage(package, self.template_index, mapping_result=self.mapping_result)
+    reply: str = Field(min_length=1, max_length=4000)
+    extracted_fields: list[ExtractedField] = Field(default_factory=list)
+    missing_required: list[str] = Field(default_factory=list)
+    missing_optional: list[str] = Field(default_factory=list)
 
 
 class MiaState(WireModel):
-    """Trusted workflow state for one DPP job/thread.
-
-    Tools mutate this state as companies, products, evidence, reviews, and
-    artifacts are discovered. PydanticAI message history is stored separately:
-    it records the conversation, while this model records the job's facts.
-    """
+    """Trusted workflow state for one DPP extraction session."""
 
     thread_id: str
-    user_goal: str = ""
-    company_candidates: tuple[CompanyCandidate, ...] = ()
-    selected_company: CompanyCandidate | None = None
-    product_candidates: tuple[ProductCandidate, ...] = ()
-    selected_product_ids: tuple[str, ...] = ()
-    current_product_id: str | None = None
-    product_queue: tuple[str, ...] = ()
-    products: dict[str, ProductWork] = Field(default_factory=dict)
-    target_submodels: tuple[str, ...] = ("digital_nameplate", "technical_data")
+    company_name: str | None = None
+    company_website: str | None = None
+    document_filename: str | None = None
+    extracted_fields: dict[str, str] = Field(default_factory=dict)
     status: AgentStatus = AgentStatus.RUNNING
-    pending_human_request: HumanRequest | None = None
-
-
-class AgentRunOutput(WireModel):
-    """Validated model output returned after one autonomous tool loop.
-
-    PydanticAI produces this after tool calls stop; the runtime combines it with
-    trusted state rather than asking the model to recreate workflow data.
-    """
-
-    reply: str = Field(min_length=1, max_length=4000)
-    status: AgentStatus
-    decision_summary: str = Field(min_length=1, max_length=500)
 
 
 class AgentRequest(WireModel):
-    """HTTP-safe input containing only a thread ID and the new user message."""
+    """HTTP-safe input for one agent turn."""
 
     thread_id: str | None = Field(default=None, min_length=8, max_length=128)
     message: str = Field(min_length=1, max_length=4096)
-
-
-class AgentReviewDecision(WireModel):
-    """One row in a complete authoritative review submission."""
-
-    review_id: str
-    decision: Literal[
-        "keep",
-        "change_target",
-        "unmapped",
-        "irrelevant",
-        "reject",
-        "approve",
-        "correct",
-    ] = "keep"
-    corrected_requirement_id: str | None = None
-    corrected_value: str | None = Field(default=None, max_length=4096)
-    comment: str | None = Field(default=None, max_length=1000)
-
-
-class AgentReviewRequest(WireModel):
-    """Batch of review decisions for one product in one trusted thread."""
-
-    thread_id: str = Field(min_length=8, max_length=128)
-    product_id: str
-    mapping_cycle_id: str | None = None
-    decisions: tuple[AgentReviewDecision, ...] = Field(min_length=1)
-
-
-class AgentValueRequest(WireModel):
-    """Trusted human value submitted for a deferred requirement request."""
-
-    thread_id: str = Field(min_length=8, max_length=128)
-    product_id: str
-    requirement_id: str
-    value: str = Field(min_length=1, max_length=4096)
+    document_text: str | None = Field(default=None, max_length=200_000)
+    document_filename: str | None = Field(default=None, max_length=256)
+    document_type: str | None = Field(default=None, max_length=32)
+    company_name: str | None = Field(default=None, max_length=256)
+    company_website: str | None = Field(default=None, max_length=512)
 
 
 class AgentResponse(WireModel):
-    """Structured MIA agent result consumed by the workspace.
-
-    It combines conversational text with trusted candidate, product, review,
-    and trace state so the frontend never needs to infer workflow from prose.
-    """
+    """Structured MIA agent result consumed by the workspace."""
 
     thread_id: str
     reply: str
     status: AgentStatus
-    decision_summary: str
-    company_candidates: tuple[CompanyCandidate, ...] = ()
-    selected_company: CompanyCandidate | None = None
-    product_candidates: tuple[ProductCandidate, ...] = ()
-    selected_product_ids: tuple[str, ...] = ()
-    current_product: ProductWork | None = None
-    pending_human_request: HumanRequest | None = None
+    extracted_fields: list[ExtractedField] = Field(default_factory=list)
+    missing_required: list[str] = Field(default_factory=list)
+    missing_optional: list[str] = Field(default_factory=list)
+    dpp_ready: bool = False
     trace_events: tuple[AgentTraceEvent, ...] = ()
     artifact_count: int = 0

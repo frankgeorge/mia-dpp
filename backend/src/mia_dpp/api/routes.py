@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import uuid
 from importlib.metadata import version
 
 import httpx
@@ -13,6 +15,7 @@ from mia_dpp import __version__
 from mia_dpp.aas.build import build_dpp
 from mia_dpp.aas.models import AasArtifact, DppPackage, ValidationReport
 from mia_dpp.aas.qr import passport_qr_png_b64
+from mia_dpp.aas.requirements import build_template_index
 from mia_dpp.aas.templates import (
     STANDARDS_REPOSITORY_COMMIT,
     TemplateRepositoryError,
@@ -20,30 +23,32 @@ from mia_dpp.aas.templates import (
 from mia_dpp.agent.models import (
     AgentRequest,
     AgentResponse,
-    AgentReviewRequest,
     AgentTraceEvent,
-    AgentValueRequest,
 )
 from mia_dpp.api.schemas import (
     DeployRequest,
     DeployResponse,
     DppBuildRequest,
+    GenerateRequest,
+    GenerateResponse,
     HealthResponse,
 )
 from mia_dpp.canonical import sha256_json
-from mia_dpp.domain.targets import TemplateSummary
+from mia_dpp.domain.mappings import (
+    FieldMapping,
+    MappingAssessment,
+    MappingBasis,
+    MappingOrigin,
+    MappingStatus,
+    MappingTarget,
+)
+from mia_dpp.domain.targets import RequirementKind, TemplateSummary
 from mia_dpp.errors import DeploymentError, MiaError
 from mia_dpp.integrations.basyx import BasyxAasRepository
 from mia_dpp.mia import Mia
 from mia_dpp.store import ArtifactKind, WorkspaceArtifact
 from mia_dpp.tools.mapping.models import (
     MappingKnowledgeEntry,
-)
-from mia_dpp.tools.search import SearchUnavailableError
-from mia_dpp.tools.web.models import (
-    ExtractionDependencyError,
-    PageLoadError,
-    ProductUrlRejectedError,
 )
 
 router = APIRouter()
@@ -77,7 +82,7 @@ async def health(http_request: Request) -> HealthResponse:
 
 @router.get("/api/templates", response_model=tuple[TemplateSummary, ...])
 async def template_catalog(http_request: Request) -> tuple[TemplateSummary, ...]:
-    """Expose the two pinned templates currently used to prove generic loading."""
+    """Expose the pinned templates currently used."""
 
     try:
         templates = _application(http_request).templates
@@ -91,18 +96,10 @@ async def agent_message(
     payload: AgentRequest,
     http_request: Request,
 ) -> AgentResponse:
-    """Run one checkpointed autonomous turn for a trusted thread."""
+    """Run one document-extraction agent turn for a trusted thread."""
 
     try:
         return await _application(http_request).message(payload)
-    except ProductUrlRejectedError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except ExtractionDependencyError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except PageLoadError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except SearchUnavailableError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
     except (
         UnexpectedModelBehavior,
         httpx.HTTPError,
@@ -114,32 +111,121 @@ async def agent_message(
         raise HTTPException(status_code=502, detail=f"agent failed: {error}") from error
 
 
-@router.post("/api/agent/review", response_model=AgentResponse)
-async def agent_review(
-    payload: AgentReviewRequest,
+@router.post("/api/agent/generate", response_model=GenerateResponse)
+async def generate_from_fields(
+    payload: GenerateRequest,
     http_request: Request,
-) -> AgentResponse:
-    """Resume an interrupt with trusted mapping-review decisions."""
+) -> GenerateResponse:
+    """Build a DPP from simple extracted fields — no FieldMapping objects required.
+
+    Converts {idta_field: value} pairs to proper FieldMapping objects by looking up
+    each field name in the IDTA 02006 Digital Nameplate template requirements.
+    """
 
     try:
-        return await _application(http_request).review(payload)
-    except (KeyError, TypeError, ValueError) as error:
+        templates = _application(http_request).templates
+        template = templates.load("digital_nameplate")
+        index = build_template_index([template])
+    except TemplateRepositoryError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    # Build requirements index by id_short for fast lookup
+    req_by_id_short = {
+        req.id_short: req
+        for req in index.requirements
+        if req.id_short and req.kind is RequirementKind.VALUE and req.semantic_id is not None
+    }
+
+    # Convert simple {field: value} dict to FieldMapping objects
+    mappings: list[FieldMapping] = []
+    for field_name, raw_value in payload.fields.items():
+        value = str(raw_value).strip()
+        if not value:
+            continue
+        req = req_by_id_short.get(field_name)
+        if req is None or req.semantic_id is None:
+            continue
+
+        field_hash = hashlib.sha256(f"{field_name}:{value}".encode()).hexdigest()
+        evidence_id = f"doc-{field_hash[:24]}"
+        mapping_id = f"map-{field_hash[24:48]}"
+
+        mappings.append(
+            FieldMapping(
+                id=mapping_id,
+                evidence_id=evidence_id,
+                source_field=field_name,
+                source_value=value,
+                target=MappingTarget(
+                    template_key=req.template_key,
+                    template_release=req.template_release,
+                    template_path=req.template_path,
+                    instance_path=req.template_path,
+                    id_short=req.id_short,
+                    semantic_id=req.semantic_id,
+                ),
+                assessment=MappingAssessment(
+                    basis=MappingBasis.HUMAN,
+                    review_required=False,
+                    reason="Extracted from uploaded document by MIA",
+                ),
+                reasoning="Agent extracted this field from the document text.",
+                status=MappingStatus.AUTO,
+                mapping_origin=MappingOrigin.HUMAN,
+                human_reviewed=False,
+            )
+        )
+
+    if not mappings:
         raise HTTPException(
             status_code=422,
-            detail=f"review could not be applied: {error}",
-        ) from error
+            detail="No fields matched IDTA 02006 template requirements. "
+            "Ensure field names match exactly (e.g. ManufacturerName, Street).",
+        )
 
-
-@router.post("/api/agent/value", response_model=AgentResponse)
-async def agent_value(payload: AgentValueRequest, http_request: Request) -> AgentResponse:
-    """Resume an interrupt with a trusted human-supplied requirement value."""
     try:
-        return await _application(http_request).provide_value(payload)
-    except (KeyError, TypeError, ValueError) as error:
-        raise HTTPException(
-            status_code=422,
-            detail=f"human value could not be applied: {error}",
-        ) from error
+        package = build_dpp(
+            payload.product_name,
+            mappings,
+            repository=_application(http_request).templates,
+            evidence=(),
+        )
+    except TemplateRepositoryError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except MiaError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    thread_id = payload.thread_id or f"thread-{uuid.uuid4().hex}"
+    store = _application(http_request).store
+
+    # Persist AAS + validation artifacts
+    try:
+        aas_artifact = store.write_json(
+            thread_id,
+            ArtifactKind.AAS,
+            "aas.json",
+            package.environment,
+            created_by="generate_from_fields",
+        )
+        store.write_json(
+            thread_id,
+            ArtifactKind.VALIDATION,
+            "validation.json",
+            package.validation_report.model_dump(mode="json"),
+            created_by="generate_from_fields",
+            derived_from=(aas_artifact.id,),
+        )
+    except (ValueError, OSError):
+        pass  # Non-blocking
+
+    return GenerateResponse(
+        thread_id=thread_id,
+        passport_id=package.passport_id,
+        artifact_sha256=package.artifact_sha256,
+        deployable=package.deployable,
+        validation_valid=package.validation_report.valid,
+        dpp_json=package.environment,
+    )
 
 
 @router.get(
@@ -263,7 +349,7 @@ async def create_dpp(payload: DppBuildRequest, http_request: Request) -> DppPack
                 derived_from=(aas_artifact.id,),
             )
         except (ValueError, OSError):
-            pass  # Non-blocking — artifact persistence failure does not fail the response
+            pass  # Non-blocking
 
     return package
 
@@ -281,7 +367,6 @@ async def deploy_workspace(
 
     store = _application(http_request).store
 
-    # Locate the most recent AAS artifact and its paired validation artifact
     try:
         all_artifacts = store.list_artifacts(thread_id)
     except ValueError as error:
@@ -293,22 +378,17 @@ async def deploy_workspace(
             status_code=404,
             detail="No AAS artifact found for this workspace. Generate a passport first.",
         )
-    # Most recent AAS artifact is last in insertion order
     latest_aas = aas_artifacts[-1]
 
-    # Find the validation artifact derived from this AAS artifact
     validation_artifacts = [
         a
         for a in all_artifacts
         if a.kind is ArtifactKind.VALIDATION and latest_aas.id in a.derived_from
     ]
 
-    # Read the stored environment JSON
     _, aas_bytes = store.read_artifact(thread_id, latest_aas.id)
     environment: dict = json.loads(aas_bytes)
 
-    # Reconstruct the AasArtifact — environment is the full AAS environment dict
-    # Extract submodel: first entry in assetAdministrationShells references submodels
     submodels = environment.get("submodels", [])
     submodel: dict = submodels[0] if submodels else {}
 
@@ -321,14 +401,11 @@ async def deploy_workspace(
         compiler_version=version("aas-core3.0"),
     )
 
-    # Load validation report if available, otherwise construct a minimal passing one
     validation: ValidationReport | None = None
     if validation_artifacts:
         _, val_bytes = store.read_artifact(thread_id, validation_artifacts[-1].id)
         try:
             validation = ValidationReport.model_validate_json(val_bytes)
-            # The stored sha256 may reference the artifact sha256 recorded at build time;
-            # update it to match the reconstructed artifact so the deploy guard passes
             if validation.artifact_sha256 != digest:
                 validation = ValidationReport(
                     valid=validation.valid,
@@ -347,7 +424,6 @@ async def deploy_workspace(
             detail="The AAS artifact did not pass validation and cannot be deployed.",
         )
 
-    # Deploy to BaSyx
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             repo = BasyxAasRepository(client, base_url=payload.basyx_url)
@@ -359,13 +435,11 @@ async def deploy_workspace(
             status_code=502, detail=f"BaSyx server unreachable: {error}"
         ) from error
 
-    # Build the public passport URL using the first shell ID
     first_shell_id = result.shell_ids[0] if result.shell_ids else ""
     encoded_id = BasyxAasRepository.encode_identifier(first_shell_id)
     base = (payload.passport_base_url or "https://mia-dpp.vercel.app").rstrip("/")
     passport_url = f"{base}/passport/{encoded_id}"
 
-    # Generate QR code
     qr_b64 = passport_qr_png_b64(passport_url)
 
     return DeployResponse(

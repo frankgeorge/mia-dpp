@@ -6,7 +6,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     MIA_STANDARDS_ROOT=/app/standards/idta-submodel-templates \
     MIA_THREAD_STORE_PATH=/data/mia-agent.sqlite3 \
     MIA_WORKSPACE_ROOT=/data/workspaces
@@ -24,7 +23,6 @@ WORKDIR /app
 
 COPY backend/pyproject.toml backend/uv.lock ./backend/
 RUN uv sync --project backend --no-dev --no-install-project
-RUN /app/backend/.venv/bin/python -m playwright install --with-deps --only-shell chromium
 
 COPY backend/src ./backend/src
 RUN uv sync --project backend --no-dev

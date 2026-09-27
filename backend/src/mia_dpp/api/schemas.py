@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
+
 from mia_dpp.domain.base import WireModel
 from mia_dpp.domain.evidence import EvidenceRecord
 from mia_dpp.domain.mappings import FieldMapping
@@ -14,6 +16,29 @@ class DppBuildRequest(WireModel):
     mappings: tuple[FieldMapping, ...]
     evidence: tuple[EvidenceRecord, ...] = ()
     thread_id: str | None = None
+
+
+class GenerateRequest(WireModel):
+    """Simple DPP generation from extracted key-value pairs.
+
+    Fields is a dict of IDTA 02006 id_short names to their values,
+    e.g. {"ManufacturerName": "AFRISO-EURO-INDEX GmbH", "Street": "Lindenstraße 20"}.
+    """
+
+    product_name: str = Field(min_length=1, max_length=512)
+    fields: dict[str, str]
+    thread_id: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class GenerateResponse(WireModel):
+    """Result of generating a DPP from simple extracted fields."""
+
+    thread_id: str
+    passport_id: str
+    artifact_sha256: str
+    deployable: bool
+    validation_valid: bool
+    dpp_json: dict
 
 
 class HealthResponse(WireModel):

@@ -10,7 +10,7 @@ export async function GET() {
 
   const rows = await sql`
     SELECT id, thread_id, product_name, submodel, status,
-           qr_code_b64, passport_url, basyx_shell_id, created_at, updated_at
+           qr_code_b64, passport_url, basyx_shell_id, product_image_url, created_at, updated_at
     FROM passports
     WHERE user_id = ${userId}
     ORDER BY updated_at DESC
@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     passport_url = null,
     basyx_shell_id = null,
     aas_json = null,
+    product_image_url = null,
   } = body;
 
   if (!thread_id || !product_name) {
@@ -42,17 +43,18 @@ export async function POST(req: Request) {
 
   const rows = await sql`
     INSERT INTO passports (user_id, thread_id, product_name, submodel, status,
-                           qr_code_b64, passport_url, basyx_shell_id, aas_json)
+                           qr_code_b64, passport_url, basyx_shell_id, aas_json, product_image_url)
     VALUES (${userId}, ${thread_id}, ${product_name}, ${submodel}, ${status},
-            ${qr_code_b64}, ${passport_url}, ${basyx_shell_id}, ${aas_json})
+            ${qr_code_b64}, ${passport_url}, ${basyx_shell_id}, ${aas_json}, ${product_image_url})
     ON CONFLICT (thread_id) DO UPDATE SET
-      product_name   = EXCLUDED.product_name,
-      status         = EXCLUDED.status,
-      qr_code_b64    = COALESCE(EXCLUDED.qr_code_b64, passports.qr_code_b64),
-      passport_url   = COALESCE(EXCLUDED.passport_url, passports.passport_url),
-      basyx_shell_id = COALESCE(EXCLUDED.basyx_shell_id, passports.basyx_shell_id),
-      aas_json       = COALESCE(EXCLUDED.aas_json, passports.aas_json),
-      updated_at     = NOW()
+      product_name      = EXCLUDED.product_name,
+      status            = EXCLUDED.status,
+      qr_code_b64       = COALESCE(EXCLUDED.qr_code_b64, passports.qr_code_b64),
+      passport_url      = COALESCE(EXCLUDED.passport_url, passports.passport_url),
+      basyx_shell_id    = COALESCE(EXCLUDED.basyx_shell_id, passports.basyx_shell_id),
+      aas_json          = COALESCE(EXCLUDED.aas_json, passports.aas_json),
+      product_image_url = COALESCE(EXCLUDED.product_image_url, passports.product_image_url),
+      updated_at        = NOW()
     RETURNING *
   `;
 

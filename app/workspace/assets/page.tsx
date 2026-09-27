@@ -12,6 +12,7 @@ interface Passport {
   qr_code_b64: string | null;
   passport_url: string | null;
   basyx_shell_id: string | null;
+  product_image_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,7 +44,7 @@ export default function AssetsPage() {
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-[22px] font-semibold tracking-tight text-ink">My Assets</h1>
+            <h1 className="text-[22px] font-semibold tracking-tight text-ink">Passports</h1>
             {!loading && passports.length > 0 && (
               <p className="mt-1 text-[13px] text-muted">
                 {passports.length} passport{passports.length !== 1 ? "s" : ""}
@@ -151,15 +152,25 @@ function PassportCard({
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-hairline bg-paper transition-shadow hover:shadow-sm">
-      {/* QR or placeholder */}
-      <div className="flex h-44 items-center justify-center border-b border-hairline bg-mist">
-        {deployed ? (
+      {/* Product image + QR overlay, or placeholder */}
+      <div className="relative flex h-44 items-center justify-center border-b border-hairline bg-mist">
+        {passport.product_image_url && (
           <img
-            src={`data:image/png;base64,${passport.qr_code_b64}`}
-            alt={`QR code for ${passport.product_name}`}
-            className="h-36 w-36 rounded-lg"
+            src={passport.product_image_url}
+            alt={passport.product_name}
+            className="h-full w-full object-contain p-4"
+            onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
           />
-        ) : (
+        )}
+        {deployed ? (
+          <div className={`${passport.product_image_url ? "absolute bottom-2 right-2" : ""}`}>
+            <img
+              src={`data:image/png;base64,${passport.qr_code_b64}`}
+              alt={`QR code for ${passport.product_name}`}
+              className={passport.product_image_url ? "h-16 w-16 rounded-md shadow-md" : "h-36 w-36 rounded-lg"}
+            />
+          </div>
+        ) : !passport.product_image_url && (
           <div className="flex flex-col items-center gap-2 text-muted">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1" />

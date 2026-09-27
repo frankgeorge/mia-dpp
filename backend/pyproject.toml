@@ -9,7 +9,6 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "aas-core3.0==1.1.4",
   "beautifulsoup4>=4.12,<5",
-  "crawl4ai==0.9.3",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "pydantic>=2.11,<3",
@@ -17,7 +16,6 @@ dependencies = [
   "python-dotenv>=1,<2",
   "uvicorn[standard]>=0.34,<1",
   "pydantic-ai-slim[openai]==2.43.0",
-  "ddgs==9.16.0",
   "segno>=1.6,<2",
 ]
 
@@ -67,5 +65,5 @@ mypy_path = "src"
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["crawl4ai.*", "lxml.*", "pdf2aas.*"]
+module = ["lxml.*", "pdf2aas.*"]
 ignore_missing_imports = true

@@ -294,15 +294,14 @@ export interface AgentReviewDecision {
   comment?: string | null;
 }
 
-export type AgentStatus =
-  | "running"
-  | "awaiting_company"
-  | "awaiting_product"
-  | "awaiting_review"
-  | "awaiting_input"
-  | "awaiting_optional_choice"
-  | "completed"
-  | "failed";
+export type AgentStatus = "running" | "needs_input" | "completed" | "failed";
+
+export interface ExtractedField {
+  idtaField: string;
+  value: string;
+  confidence: number;
+  sourceExcerpt: string;
+}
 
 export interface CompanyCandidate {
   id: string;
@@ -397,13 +396,10 @@ export interface AgentResponse {
   threadId: string;
   reply: string;
   status: AgentStatus;
-  decisionSummary: string;
-  companyCandidates: CompanyCandidate[];
-  selectedCompany: CompanyCandidate | null;
-  productCandidates: ProductCandidate[];
-  selectedProductIds: string[];
-  currentProduct: AgentProductWork | null;
+  extractedFields: ExtractedField[];
+  missingRequired: string[];
+  missingOptional: string[];
+  dppReady: boolean;
   traceEvents: AgentTraceEvent[];
-  pendingHumanRequest: HumanRequest | null;
   artifactCount: number;
 }

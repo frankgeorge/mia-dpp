@@ -21,8 +21,6 @@ from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 from mia_dpp.agent.models import (
     AgentTraceEvent,
-    HumanRequest,
-    HumanRequestKind,
     MiaState,
     TraceStatus,
 )
@@ -75,19 +73,11 @@ class SessionSnapshot:
 
 
 @dataclass(frozen=True)
-class PendingCall:
-    """One unconsumed external result expected from a trusted human action."""
+class _PendingCall:
+    """Kept for DB schema compatibility — no longer used by the extraction agent."""
 
     call_id: str
     session_id: str
-    request: HumanRequest
-
-
-@dataclass(frozen=True)
-class ResolvedCall(PendingCall):
-    """A trusted result persisted before the model continuation starts."""
-
-    result: dict[str, Any]
 
 
 class Store:
@@ -121,115 +111,13 @@ class Store:
             decision_summary=row[3],
         )
 
-    def save(
-        self,
-        snapshot: SessionSnapshot,
-        *,
-        deferred_calls: list[tuple[str, HumanRequest]] | None = None,
-        completed_call_ids: tuple[str, ...] = (),
-    ) -> None:
-        """Atomically save a turn and its deferred-call state transitions."""
+    def save(self, snapshot: SessionSnapshot) -> None:
+        """Persist session state and message history for one agent turn."""
 
         session_id = snapshot.state.thread_id
         self._validate_id(session_id, "session")
         with self._connect() as connection:
             self._save_session(connection, snapshot)
-            self._insert_deferred(connection, session_id, deferred_calls or [])
-            for call_id in completed_call_ids:
-                changed = connection.execute(
-                    "UPDATE deferred_calls SET status='completed' "
-                    "WHERE call_id=? AND session_id=? AND status='resolved'",
-                    (call_id, session_id),
-                ).rowcount
-                if changed != 1:
-                    raise ValueError("resolved deferred call could not be completed")
-
-    def pending(self, session_id: str) -> tuple[PendingCall, ...]:
-        self._validate_id(session_id, "session")
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT call_id, request_json FROM deferred_calls "
-                "WHERE session_id = ? AND status = 'pending' ORDER BY created_at, call_id",
-                (session_id,),
-            ).fetchall()
-        return tuple(
-            PendingCall(
-                call_id=row[0],
-                session_id=session_id,
-                request=HumanRequest.model_validate_json(row[1]),
-            )
-            for row in rows
-        )
-
-    def resolve(
-        self,
-        snapshot: SessionSnapshot,
-        call_id: str,
-        *,
-        expected_kind: HumanRequestKind,
-        result: dict[str, Any],
-    ) -> ResolvedCall:
-        """Persist a trusted result and updated state before model continuation."""
-
-        session_id = snapshot.state.thread_id
-        self._validate_id(session_id, "session")
-        self._validate_call_id(call_id)
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT request_json, status FROM deferred_calls "
-                "WHERE call_id = ? AND session_id = ?",
-                (call_id, session_id),
-            ).fetchone()
-            if row is None:
-                raise ValueError("unknown deferred call for this session")
-            if row[1] != "pending":
-                raise ValueError("deferred call has already been consumed")
-            request = HumanRequest.model_validate_json(row[0])
-            if request.kind is not expected_kind:
-                raise ValueError("deferred call does not accept this human action")
-            payload = json.dumps(result, sort_keys=True, separators=(",", ":"))
-            changed = connection.execute(
-                "UPDATE deferred_calls SET status='resolved', resolved_at=?, result_sha256=?, "
-                "result_json=? "
-                "WHERE call_id=? AND session_id=? AND status='pending'",
-                (
-                    datetime.now(UTC).isoformat(),
-                    hashlib.sha256(payload.encode()).hexdigest(),
-                    payload,
-                    call_id,
-                    session_id,
-                ),
-            ).rowcount
-            if changed != 1:
-                raise ValueError("deferred call was consumed concurrently")
-            self._save_session(connection, snapshot)
-        return ResolvedCall(
-            call_id=call_id,
-            session_id=session_id,
-            request=request,
-            result=result,
-        )
-
-    def resolved(self, session_id: str) -> tuple[ResolvedCall, ...]:
-        """Return trusted results whose model continuation has not completed."""
-
-        self._validate_id(session_id, "session")
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT call_id, request_json, result_json FROM deferred_calls "
-                "WHERE session_id=? AND status='resolved' ORDER BY resolved_at, call_id",
-                (session_id,),
-            ).fetchall()
-        return tuple(
-            ResolvedCall(
-                call_id=row[0],
-                session_id=session_id,
-                request=HumanRequest.model_validate_json(row[1]),
-                result=json.loads(row[2]),
-            )
-            for row in rows
-        )
 
     def add_event(
         self,
@@ -612,28 +500,6 @@ class Store:
                 datetime.now(UTC).isoformat(),
             ),
         )
-
-    @classmethod
-    def _insert_deferred(
-        cls,
-        connection: sqlite3.Connection,
-        session_id: str,
-        calls: list[tuple[str, HumanRequest]],
-    ) -> None:
-        for call_id, request in calls:
-            cls._validate_call_id(call_id)
-            connection.execute(
-                "INSERT INTO deferred_calls"
-                "(call_id, session_id, kind, request_json, status, created_at) "
-                "VALUES (?, ?, ?, ?, 'pending', ?)",
-                (
-                    call_id,
-                    session_id,
-                    request.kind.value,
-                    request.model_dump_json(),
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
 
     @staticmethod
     def _validate_id(value: str, label: str) -> None:

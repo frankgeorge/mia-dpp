@@ -11,12 +11,32 @@ const DATA_OPTIONS = [
   { id: "unsure", label: "Not sure yet" },
 ];
 
+export const COMPANY_STORAGE_KEY = "mia.company.v1";
+
+export interface CompanyProfile {
+  name: string;
+  website: string;
+  description: string;
+}
+
+export function getCompanyProfile(): CompanyProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(COMPANY_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as CompanyProfile) : null;
+  } catch {
+    return null;
+  }
+}
+
 interface Props {
   onClose: () => void;
 }
 
 export function OnboardingModal({ onClose }: Props) {
   const [step, setStep] = useState(1);
+  const [companyName, setCompanyName] = useState("");
+  const [companyWebsite, setCompanyWebsite] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
 
@@ -28,6 +48,12 @@ export function OnboardingModal({ onClose }: Props) {
 
   function finish() {
     if (typeof window !== "undefined") {
+      const profile: CompanyProfile = {
+        name: companyName.trim(),
+        website: companyWebsite.trim(),
+        description: productDescription.trim(),
+      };
+      localStorage.setItem(COMPANY_STORAGE_KEY, JSON.stringify(profile));
       localStorage.setItem("mia.onboarded.v1", "1");
     }
     onClose();
@@ -54,31 +80,59 @@ export function OnboardingModal({ onClose }: Props) {
           ))}
         </div>
 
-        {/* Step 1 */}
+        {/* Step 1 — Company identity */}
         {step === 1 && (
           <div>
             <h2 className="text-[22px] font-semibold tracking-tight text-ink">
               Welcome to MIA
             </h2>
             <p className="mt-2 text-[14px] text-muted">
-              Let&rsquo;s set up your workspace in 2 minutes.
+              Tell us about your company so MIA knows who it&rsquo;s creating passports for.
             </p>
-            <div className="mt-6">
-              <label className="mb-2 block text-[13px] font-medium text-ink">
-                Describe what your company makes
-              </label>
-              <textarea
-                value={productDescription}
-                onChange={(e) => setProductDescription(e.target.value)}
-                rows={3}
-                placeholder="e.g. electric motors for industrial pumps"
-                className="w-full resize-none rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
-              />
+            <div className="mt-6 space-y-4">
+              <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-ink">
+                  Company name <span className="text-signal">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="e.g. AFRISO-EURO-INDEX GmbH"
+                  className="w-full rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-ink">
+                  Company website
+                  <span className="ml-2 text-[12px] font-normal text-muted">(optional — helps MIA skip web searches)</span>
+                </label>
+                <input
+                  type="url"
+                  value={companyWebsite}
+                  onChange={(e) => setCompanyWebsite(e.target.value)}
+                  placeholder="https://www.yourcompany.com"
+                  className="w-full rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-ink">
+                  What does your company make?
+                </label>
+                <textarea
+                  value={productDescription}
+                  onChange={(e) => setProductDescription(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. electronic pressure measurement instruments for industrial applications"
+                  className="w-full resize-none rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
+                />
+              </div>
             </div>
             <div className="mt-6 flex justify-end">
               <button
                 onClick={() => setStep(2)}
-                className="rounded-full bg-ink px-6 py-2.5 text-[14px] font-medium text-white transition-all hover:-translate-y-px hover:shadow-md"
+                disabled={!companyName.trim()}
+                className="rounded-full bg-ink px-6 py-2.5 text-[14px] font-medium text-white transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-40"
               >
                 Next
                 <span className="ml-1.5">&#x2192;</span>
@@ -87,7 +141,7 @@ export function OnboardingModal({ onClose }: Props) {
           </div>
         )}
 
-        {/* Step 2 */}
+        {/* Step 2 — Data sources */}
         {step === 2 && (
           <div>
             <h2 className="text-[22px] font-semibold tracking-tight text-ink">
@@ -150,7 +204,7 @@ export function OnboardingModal({ onClose }: Props) {
           </div>
         )}
 
-        {/* Step 3 */}
+        {/* Step 3 — Confirmation */}
         {step === 3 && (
           <div>
             <div className="mb-4 grid h-12 w-12 place-items-center rounded-full bg-ok/10">
@@ -161,14 +215,26 @@ export function OnboardingModal({ onClose }: Props) {
             <h2 className="text-[22px] font-semibold tracking-tight text-ink">
               MIA is ready to help
             </h2>
-            {productDescription && (
-              <p className="mt-2 text-[14px] text-muted">
-                You make: <span className="text-ink">{productDescription}</span>
-              </p>
-            )}
+            <div className="mt-3 space-y-1">
+              {companyName && (
+                <p className="text-[14px] text-muted">
+                  Company: <span className="font-medium text-ink">{companyName}</span>
+                </p>
+              )}
+              {companyWebsite && (
+                <p className="text-[14px] text-muted">
+                  Website: <span className="font-medium text-ink">{companyWebsite}</span>
+                </p>
+              )}
+              {productDescription && (
+                <p className="text-[14px] text-muted">
+                  Products: <span className="text-ink">{productDescription}</span>
+                </p>
+              )}
+            </div>
             {selectedLabels.length > 0 && (
               <div className="mt-4">
-                <p className="text-[13px] font-medium text-muted">Data sources you selected:</p>
+                <p className="text-[13px] font-medium text-muted">Data sources:</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {selectedLabels.map((label) => (
                     <span
@@ -182,7 +248,7 @@ export function OnboardingModal({ onClose }: Props) {
               </div>
             )}
             <p className="mt-5 text-[13px] leading-relaxed text-muted">
-              MIA will ask you for access to each source as it needs it. You can connect sources anytime from the Data Sources page.
+              MIA will use this to skip company searches and go straight to extracting product specs and mapping DPP fields.
             </p>
             <div className="mt-6 flex items-center justify-between">
               <button
