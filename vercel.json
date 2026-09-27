@@ -12,23 +12,15 @@
     }
   },
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/health",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/(.*)",
-      "destination": {
-        "service": "frontend"
-      }
-    }
+    { "source": "/api/passports", "destination": { "service": "frontend" } },
+    { "source": "/api/passports/(.*)", "destination": { "service": "frontend" } },
+    { "source": "/api/upload", "destination": { "service": "frontend" } },
+    { "source": "/api/upload-image", "destination": { "service": "frontend" } },
+    { "source": "/api/fetch-og-image", "destination": { "service": "frontend" } },
+    { "source": "/api/email/(.*)", "destination": { "service": "frontend" } },
+    { "source": "/api/session/(.*)", "destination": { "service": "frontend" } },
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/health", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }
