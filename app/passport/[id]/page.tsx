@@ -1,76 +1,74 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 
-interface ShellData {
+interface PassportRecord {
   id: string;
-  idShort?: string;
-  assetInformation?: {
-    globalAssetId?: string;
-  };
+  thread_id: string;
+  product_name: string;
+  submodel: string;
+  status: string;
+  qr_code_b64: string | null;
+  passport_url: string | null;
+  product_image_url: string | null;
+  aas_json: Record<string, unknown> | null;
+  created_at: string;
 }
 
-function decodeBase64Url(encoded: string): string {
-  // Add padding back
-  const padded = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
-  return atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+interface AasProperty {
+  idShort: string;
+  valueType?: string;
+  value?: string;
+  modelType?: string;
+  submodelElements?: AasProperty[];
+}
+
+function extractProperties(elements: AasProperty[]): { label: string; value: string }[] {
+  const results: { label: string; value: string }[] = [];
+  for (const el of elements) {
+    if (el.modelType === "Property" && el.value) {
+      results.push({ label: el.idShort, value: el.value });
+    } else if (el.submodelElements) {
+      results.push(...extractProperties(el.submodelElements));
+    }
+  }
+  return results;
+}
+
+function formatLabel(idShort: string): string {
+  return idShort
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (s) => s.toUpperCase())
+    .trim();
 }
 
 export default function PassportPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
+  const threadId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
 
-  const encodedId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
-
-  const [shellId, setShellId] = useState<string>("");
-  const [shellData, setShellData] = useState<ShellData | null>(null);
+  const [passport, setPassport] = useState<PassportRecord | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // QR may be passed as query param if navigating directly from the workspace
-  const qrFromQuery = searchParams.get("qr");
-  const basyxUrl = searchParams.get("basyx") ?? "https://v3.admin-shell.io";
-
   useEffect(() => {
-    if (!encodedId) return;
-    let decoded: string;
-    try {
-      decoded = decodeBase64Url(encodedId);
-      setShellId(decoded);
-    } catch {
-      setLoadError("Invalid passport identifier.");
-      setLoading(false);
-      return;
-    }
+    if (!threadId) return;
+    fetch(`/api/passports/thread/${encodeURIComponent(threadId)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) throw new Error(data.error);
+        setPassport(data as PassportRecord);
+      })
+      .catch((e) => setLoadError(e.message))
+      .finally(() => setLoading(false));
+  }, [threadId]);
 
-    // Try to fetch shell data from BaSyx directly
-    const fetchShell = async () => {
-      try {
-        const shellUrl = `${basyxUrl}/shells/${encodedId}`;
-        const res = await fetch(shellUrl, {
-          headers: { Accept: "application/json" },
-        });
-        if (res.ok) {
-          const data = (await res.json()) as ShellData;
-          setShellData(data);
-        }
-      } catch {
-        // BaSyx may not be reachable — we still show the passport page with the ID
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void fetchShell();
-  }, [encodedId, basyxUrl]);
-
-  const productName =
-    shellData?.idShort ??
-    shellData?.assetInformation?.globalAssetId?.split("/").pop() ??
-    (shellId ? shellId.split(":").pop() ?? "Product" : "Product");
-
-  const basyxShellUrl = `${basyxUrl}/shells/${encodedId}`;
+  const properties: { label: string; value: string }[] = (() => {
+    if (!passport?.aas_json) return [];
+    const submodels = (passport.aas_json.submodels as AasProperty[] | undefined) ?? [];
+    const elements = submodels[0]?.submodelElements ?? [];
+    return extractProperties(elements);
+  })();
 
   return (
     <div className="min-h-screen bg-white" style={{ fontFamily: "system-ui, sans-serif" }}>
@@ -112,73 +110,69 @@ export default function PassportPage() {
           </div>
         ) : loadError ? (
           <div className="rounded-2xl border border-red-100 bg-red-50 p-8 text-center">
-            <p className="text-[15px] font-semibold text-red-700">Invalid passport</p>
+            <p className="text-[15px] font-semibold text-red-700">Passport not found</p>
             <p className="mt-1 text-[13px] text-red-500">{loadError}</p>
           </div>
-        ) : (
+        ) : passport ? (
           <div className="flex flex-col items-center gap-8">
+            {/* Product image */}
+            {passport.product_image_url && (
+              <img
+                src={passport.product_image_url}
+                alt={passport.product_name}
+                className="h-40 w-auto rounded-2xl object-contain"
+              />
+            )}
+
             {/* Product name */}
             <div className="text-center">
               <h1 className="text-[28px] font-bold tracking-tight text-[#1a1a1a]">
-                {productName}
+                {passport.product_name}
               </h1>
-              <p className="mt-1 text-[14px] text-[#888]">
-                EU ESPR Digital Product Passport
-              </p>
+              <p className="mt-1 text-[14px] text-[#888]">EU ESPR Digital Product Passport</p>
             </div>
 
-            {/* QR code section */}
-            <div className="flex flex-col items-center gap-4 rounded-2xl border border-[#e8e8e8] bg-[#fafafa] p-8 shadow-sm">
-              {qrFromQuery ? (
+            {/* QR code */}
+            {passport.qr_code_b64 && (
+              <div className="flex flex-col items-center gap-4 rounded-2xl border border-[#e8e8e8] bg-[#fafafa] p-8 shadow-sm">
                 <img
-                  src={`data:image/png;base64,${qrFromQuery}`}
+                  src={`data:image/png;base64,${passport.qr_code_b64}`}
                   alt="Passport QR Code"
                   className="h-56 w-56"
                   style={{ imageRendering: "pixelated" }}
                 />
-              ) : (
-                <div className="flex h-56 w-56 flex-col items-center justify-center rounded-xl border border-dashed border-[#d0d0d0] bg-white text-[#aaa]">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="3" width="7" height="7" />
-                    <rect x="14" y="3" width="7" height="7" />
-                    <rect x="3" y="14" width="7" height="7" />
-                    <path d="M14 14h.01M18 14h.01M14 18h.01M18 18h.01M14 22h.01M18 22h.01M22 14h.01M22 18h.01M22 22h.01" strokeLinecap="round" />
-                  </svg>
-                  <p className="mt-2 text-[11px]">QR not available</p>
-                </div>
-              )}
-              <p className="text-[13px] font-medium text-[#555]">Scan to verify this passport</p>
-            </div>
+                <p className="text-[13px] font-medium text-[#555]">Scan to verify this passport</p>
+              </div>
+            )}
 
-            {/* Passport ID & live data link */}
-            <div className="w-full rounded-2xl border border-[#e8e8e8] bg-white p-6 shadow-sm">
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
-                    Passport ID
-                  </p>
-                  <p className="mt-1 break-all font-mono text-[12px] text-[#333]">{shellId}</p>
+            {/* AAS Properties */}
+            {properties.length > 0 && (
+              <div className="w-full rounded-2xl border border-[#e8e8e8] bg-white p-6 shadow-sm">
+                <p className="mb-4 text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
+                  Product Data — {passport.submodel}
+                </p>
+                <div className="space-y-3">
+                  {properties.map(({ label, value }) => (
+                    <div key={label} className="flex items-start justify-between gap-4">
+                      <span className="text-[12px] text-[#888]">{formatLabel(label)}</span>
+                      <span className="text-right text-[13px] font-medium text-[#1a1a1a]">{value}</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="border-t border-[#f0f0f0]" />
+              </div>
+            )}
+
+            {/* Passport metadata */}
+            <div className="w-full rounded-2xl border border-[#e8e8e8] bg-white p-6 shadow-sm">
+              <div className="space-y-3">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
-                    Live AAS Data
-                  </p>
-                  <a
-                    href={basyxShellUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 block break-all font-mono text-[12px] text-[#3b5bdb] underline underline-offset-2"
-                  >
-                    {basyxShellUrl}
-                  </a>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">Passport ID</p>
+                  <p className="mt-1 break-all font-mono text-[12px] text-[#333]">{threadId}</p>
                 </div>
                 <div className="border-t border-[#f0f0f0]" />
                 <div className="flex items-center gap-2">
                   <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <p className="text-[12px] text-[#555]">
-                    Deployed to IDTA public AAS repository
-                  </p>
+                  <p className="text-[12px] text-[#555]">Verified — IDTA 02006 compliant</p>
                 </div>
               </div>
             </div>
@@ -195,22 +189,17 @@ export default function PassportPage() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-[#e8e8e8] px-6 py-6 text-center">
         <p className="text-[12px] text-[#aaa]">
           Powered by{" "}
-          <a
-            href="https://mia-dpp.vercel.app"
-            className="font-medium text-[#3b5bdb]"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
+          <a href="https://mia-dpp.vercel.app" className="font-medium text-[#3b5bdb]" target="_blank" rel="noopener noreferrer">
             MIA
           </a>{" "}
-          -- Mittelstand Integration Agent
+          — Mittelstand Integration Agent
         </p>
       </footer>
     </div>

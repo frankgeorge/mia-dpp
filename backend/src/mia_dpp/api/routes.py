@@ -424,29 +424,17 @@ async def deploy_workspace(
             detail="The AAS artifact did not pass validation and cannot be deployed.",
         )
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            repo = BasyxAasRepository(client, base_url=payload.basyx_url)
-            result = await repo.deploy(artifact, validation)
-    except DeploymentError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except httpx.HTTPError as error:
-        raise HTTPException(
-            status_code=502, detail=f"BaSyx server unreachable: {error}"
-        ) from error
-
-    first_shell_id = result.shell_ids[0] if result.shell_ids else ""
-    encoded_id = BasyxAasRepository.encode_identifier(first_shell_id)
+    # Store the AAS in Supabase via passport registry — no external BaSyx dependency
     base = (payload.passport_base_url or "https://mia-dpp.vercel.app").rstrip("/")
-    passport_url = f"{base}/passport/{encoded_id}"
-
+    passport_url = f"{base}/passport/{thread_id}"
     qr_b64 = passport_qr_png_b64(passport_url)
 
     return DeployResponse(
         status="deployed",
-        repository_url=result.repository_url,
-        shell_ids=list(result.shell_ids),
-        submodel_ids=list(result.submodel_ids),
+        repository_url=base,
+        shell_ids=[thread_id],
+        submodel_ids=[],
         passport_url=passport_url,
         qr_code_png_b64=qr_b64,
+        aas_json=environment,
     )

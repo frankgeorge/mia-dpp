@@ -60,3 +60,4 @@ class DeployResponse(WireModel):
     submodel_ids: list[str]
     passport_url: str
     qr_code_png_b64: str
+    aas_json: dict | None = None

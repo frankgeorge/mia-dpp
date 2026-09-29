@@ -13,6 +13,7 @@
   },
   "rewrites": [
     { "source": "/api/passports", "destination": { "service": "frontend" } },
+    { "source": "/api/passports/thread/(.*)", "destination": { "service": "frontend" } },
     { "source": "/api/passports/(.*)", "destination": { "service": "frontend" } },
     { "source": "/api/upload", "destination": { "service": "frontend" } },
     { "source": "/api/upload-image", "destination": { "service": "frontend" } },

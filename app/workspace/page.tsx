@@ -357,6 +357,7 @@ export default function Workspace() {
         passport_url?: string;
         qr_code_png_b64?: string;
         shell_ids?: string[];
+        aas_json?: Record<string, unknown>;
         detail?: string;
       };
       if (!res.ok) {
@@ -369,12 +370,13 @@ export default function Workspace() {
       };
       setDeployResult(result);
       setDeployStatus("deployed");
-      // Save to Supabase registry
+      // Save to Supabase registry including the AAS JSON for self-hosted passport page
       void savePassportRecord({
         status: "deployed",
         qr_code_b64: result.qr_code_png_b64,
         passport_url: result.passport_url,
         basyx_shell_id: result.shell_ids[0] ?? null,
+        aas_json: body.aas_json ?? null,
       });
     } catch (error) {
       setDeployError(error instanceof Error ? error.message : "Deployment failed.");
@@ -387,6 +389,7 @@ export default function Workspace() {
     qr_code_b64?: string;
     passport_url?: string;
     basyx_shell_id?: string | null;
+    aas_json?: Record<string, unknown> | null;
   } = {}) {
     const tid = threadId;
     const profile = getCompanyProfile();
