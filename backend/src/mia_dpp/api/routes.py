@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import date
 from importlib.metadata import version
 
 import httpx
@@ -111,49 +112,39 @@ async def agent_message(
         raise HTTPException(status_code=502, detail=f"agent failed: {error}") from error
 
 
-@router.post("/api/agent/generate", response_model=GenerateResponse)
-async def generate_from_fields(
-    payload: GenerateRequest,
-    http_request: Request,
-) -> GenerateResponse:
-    """Build a DPP from simple extracted fields — no FieldMapping objects required.
-
-    Converts {idta_field: value} pairs to proper FieldMapping objects by looking up
-    each field name in the IDTA 02006 Digital Nameplate template requirements.
-    """
+def _fields_to_mappings(
+    fields: dict[str, str],
+    template_key: str,
+    templates: object,
+) -> list[FieldMapping]:
+    """Convert a {field: value} dict to FieldMapping objects for a given template."""
+    from mia_dpp.aas.requirements import build_template_index
 
     try:
-        templates = _application(http_request).templates
-        template = templates.load("digital_nameplate")
-        index = build_template_index([template])
-    except TemplateRepositoryError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+        template = templates.load(template_key)  # type: ignore[attr-defined]
+    except TemplateRepositoryError:
+        return []
 
-    # Build requirements index by id_short for fast lookup
+    index = build_template_index([template])
     req_by_id_short = {
         req.id_short: req
         for req in index.requirements
         if req.id_short and req.kind is RequirementKind.VALUE and req.semantic_id is not None
     }
 
-    # Convert simple {field: value} dict to FieldMapping objects
     mappings: list[FieldMapping] = []
-    for field_name, raw_value in payload.fields.items():
+    for field_name, raw_value in fields.items():
         value = str(raw_value).strip()
         if not value:
             continue
         req = req_by_id_short.get(field_name)
         if req is None or req.semantic_id is None:
             continue
-
         field_hash = hashlib.sha256(f"{field_name}:{value}".encode()).hexdigest()
-        evidence_id = f"doc-{field_hash[:24]}"
-        mapping_id = f"map-{field_hash[24:48]}"
-
         mappings.append(
             FieldMapping(
-                id=mapping_id,
-                evidence_id=evidence_id,
+                id=f"map-{field_hash[24:48]}",
+                evidence_id=f"doc-{field_hash[:24]}",
                 source_field=field_name,
                 source_value=value,
                 target=MappingTarget(
@@ -175,19 +166,49 @@ async def generate_from_fields(
                 human_reviewed=False,
             )
         )
+    return mappings
 
-    if not mappings:
+
+@router.post("/api/agent/generate", response_model=GenerateResponse)
+async def generate_from_fields(
+    payload: GenerateRequest,
+    http_request: Request,
+) -> GenerateResponse:
+    """Build a DPP from simple extracted fields — no FieldMapping objects required.
+
+    When submodel_fields is provided, builds a multi-submodel AAS environment.
+    Falls back to single digital_nameplate from fields for backward compatibility.
+    """
+
+    mia_app = _application(http_request)
+    templates = mia_app.templates
+
+    # Determine which fields to use for digital_nameplate (primary, required)
+    dn_fields: dict[str, str] = {}
+    if payload.submodel_fields and "digital_nameplate" in payload.submodel_fields:
+        dn_fields = payload.submodel_fields["digital_nameplate"]
+    elif payload.fields:
+        dn_fields = payload.fields
+
+    if not dn_fields:
         raise HTTPException(
             status_code=422,
-            detail="No fields matched IDTA 02006 template requirements. "
-            "Ensure field names match exactly (e.g. ManufacturerName, Street).",
+            detail="No digital_nameplate fields provided. At least ManufacturerName is required.",
+        )
+
+    # Build primary digital_nameplate package
+    dn_mappings = _fields_to_mappings(dn_fields, "digital_nameplate", templates)
+    if not dn_mappings:
+        raise HTTPException(
+            status_code=422,
+            detail="No fields matched IDTA 02006 Digital Nameplate template requirements.",
         )
 
     try:
         package = build_dpp(
             payload.product_name,
-            mappings,
-            repository=_application(http_request).templates,
+            dn_mappings,
+            repository=templates,
             evidence=(),
         )
     except TemplateRepositoryError as error:
@@ -195,8 +216,49 @@ async def generate_from_fields(
     except MiaError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
+    # Merge additional submodels when submodel_fields is provided
+    merged_env = dict(package.environment)
+    if payload.submodel_fields:
+        from mia_dpp.aas.compiler import AasCompiler
+        from mia_dpp.domain.evidence import EvidenceRecord, EvidenceStatus, SourceLocation
+
+        # Auto-inject passportIssueDate into dpp_metadata at generation time
+        if "dpp_metadata" in payload.submodel_fields:
+            dpp_meta = dict(payload.submodel_fields["dpp_metadata"])
+            if "passportIssueDate" not in dpp_meta:
+                dpp_meta["passportIssueDate"] = date.today().isoformat()
+            payload.submodel_fields["dpp_metadata"] = dpp_meta
+
+        extra_submodels: list[dict] = []
+        additional_keys = [
+            k for k in ("dpp_metadata", "technical_data", "carbon_footprint",
+                        "handover_documentation", "maintenance_instructions")
+            if k in payload.submodel_fields and payload.submodel_fields[k]
+        ]
+        for sm_key in additional_keys:
+            sm_fields = payload.submodel_fields[sm_key]
+            sm_mappings = _fields_to_mappings(sm_fields, sm_key, templates)
+            if not sm_mappings:
+                continue
+            try:
+                from mia_dpp.aas.build import build_dpp as _build
+                sm_package = _build(
+                    payload.product_name,
+                    sm_mappings,
+                    repository=templates,
+                    evidence=(),
+                )
+                extra_submodels.append(sm_package.submodel)
+            except (TemplateRepositoryError, MiaError):
+                # Non-blocking — skip submodels that fail to build
+                pass
+
+        if extra_submodels:
+            merged_env = dict(package.environment)
+            merged_env["submodels"] = list(package.environment.get("submodels", [])) + extra_submodels
+
     thread_id = payload.thread_id or f"thread-{uuid.uuid4().hex}"
-    store = _application(http_request).store
+    store = mia_app.store
 
     # Persist AAS + validation artifacts
     try:
@@ -204,7 +266,7 @@ async def generate_from_fields(
             thread_id,
             ArtifactKind.AAS,
             "aas.json",
-            package.environment,
+            merged_env,
             created_by="generate_from_fields",
         )
         store.write_json(
@@ -224,7 +286,7 @@ async def generate_from_fields(
         artifact_sha256=package.artifact_sha256,
         deployable=package.deployable,
         validation_valid=package.validation_report.valid,
-        dpp_json=package.environment,
+        dpp_json=merged_env,
     )
 
 
