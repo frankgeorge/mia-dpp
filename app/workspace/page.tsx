@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import type {
   AgentResponse,
@@ -21,16 +22,40 @@ function getGreeting() {
   return "Good evening";
 }
 
-export default function Workspace() {
+const SESSION_KEY = "mia.workspace.session.v1";
+
+function loadSession() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveSession(data: Record<string, unknown>) {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* non-blocking */ }
+}
+
+function WorkspaceInner() {
   const { user } = useUser();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const searchParams = useSearchParams();
+  const threadParam = searchParams.get("thread");
+
+  // If ?thread= is in URL, restore that session; if no param, start fresh
+  const saved = typeof window !== "undefined"
+    ? (threadParam
+        ? (loadSession()?.threadId === threadParam ? loadSession() : null)
+        : (!threadParam ? null : loadSession()))
+    : null;
+
+  const [messages, setMessages] = useState<ChatMessage[]>(saved?.messages ?? []);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(saved?.threadId ?? null);
   const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
-  const [extractedFields, setExtractedFields] = useState<Record<string, string>>({});
-  const [missingRequired, setMissingRequired] = useState<string[]>([]);
-  const [dppReady, setDppReady] = useState(false);
+  const [extractedFields, setExtractedFields] = useState<Record<string, string>>(saved?.extractedFields ?? {});
+  const [missingRequired, setMissingRequired] = useState<string[]>(saved?.missingRequired ?? []);
+  const [dppReady, setDppReady] = useState<boolean>(saved?.dppReady ?? false);
   const endRef = useRef<HTMLDivElement>(null);
 
   // ── Deploy state ──────────────────────────────────────────────────────────
@@ -61,6 +86,13 @@ export default function Workspace() {
       if (!onboarded) setShowOnboarding(true);
     }
   }, []);
+
+  // ── Persist session to sessionStorage so navigation doesn't lose context ──
+  useEffect(() => {
+    if (messages.length > 0 || threadId) {
+      saveSession({ messages, threadId, extractedFields, missingRequired, dppReady });
+    }
+  }, [messages, threadId, extractedFields, missingRequired, dppReady]);
 
   // ── Supplier outreach state ───────────────────────────────────────────────
   const [supplierEmail, setSupplierEmail] = useState("");
@@ -847,5 +879,13 @@ export default function Workspace() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function Workspace() {
+  return (
+    <Suspense>
+      <WorkspaceInner />
+    </Suspense>
   );
 }

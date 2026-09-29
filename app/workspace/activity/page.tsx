@@ -3,31 +3,16 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { AgentActivity } from "@/components/AgentActivity";
-import { EvidencePanel } from "@/components/EvidencePanel";
-import { CoveragePanel } from "@/components/CoveragePanel";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
-import { IntegrationGraph } from "@/components/IntegrationGraph";
-import type {
-  AgentTraceEvent,
-  EvidenceRecord,
-  FieldMapping,
-  MappingResult,
-  CoverageReport,
-  WorkspaceArtifact,
-  MappingKnowledgeEntry,
-} from "@/lib/types";
+import type { AgentTraceEvent, WorkspaceArtifact } from "@/lib/types";
 
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
 
-type Tab = "process" | "mappings" | "evidence" | "coverage" | "data" | "graph";
+type Tab = "process" | "data";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "process", label: "Agent Process" },
-  { id: "mappings", label: "Mappings" },
-  { id: "evidence", label: "Evidence" },
-  { id: "coverage", label: "Coverage" },
   { id: "data", label: "Artifacts" },
-  { id: "graph", label: "Knowledge Graph" },
 ];
 
 function ActivityContent() {
@@ -36,26 +21,19 @@ function ActivityContent() {
 
   const [tab, setTab] = useState<Tab>("process");
   const [events, setEvents] = useState<AgentTraceEvent[]>([]);
-  const [evidence, setEvidence] = useState<EvidenceRecord[]>([]);
-  const [mappings, setMappings] = useState<FieldMapping[]>([]);
-  const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
-  const [coverageReport, setCoverageReport] = useState<CoverageReport | null>(null);
   const [artifacts, setArtifacts] = useState<WorkspaceArtifact[]>([]);
-  const [mappingKnowledge, setMappingKnowledge] = useState<MappingKnowledgeEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!threadId) return;
     setLoading(true);
     try {
-      const [traceRes, artifactsRes, knowledgeRes] = await Promise.all([
+      const [traceRes, artifactsRes] = await Promise.all([
         fetch(`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/trace`),
         fetch(`${API_URL}/api/workspaces/${encodeURIComponent(threadId)}/artifacts`),
-        fetch(`${API_URL}/api/mapping-knowledge`),
       ]);
       if (traceRes.ok) setEvents((await traceRes.json()) as AgentTraceEvent[]);
       if (artifactsRes.ok) setArtifacts((await artifactsRes.json()) as WorkspaceArtifact[]);
-      if (knowledgeRes.ok) setMappingKnowledge((await knowledgeRes.json()) as MappingKnowledgeEntry[]);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -108,14 +86,8 @@ function ActivityContent() {
             }`}
           >
             {t.label}
-            {t.id === "evidence" && evidence.length > 0 && (
-              <span className="ml-1 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">{evidence.length}</span>
-            )}
-            {t.id === "data" && artifacts.length > 0 && (
+              {t.id === "data" && artifacts.length > 0 && (
               <span className="ml-1 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">{artifacts.length}</span>
-            )}
-            {t.id === "graph" && mappingKnowledge.length > 0 && (
-              <span className="ml-1 rounded-full bg-mist px-1.5 py-0.5 font-mono text-[10px] text-ink">{mappingKnowledge.length}</span>
             )}
             {tab === t.id && (
               <span className="absolute inset-x-2 -bottom-px h-[2px] rounded-t-full bg-signal" />
@@ -136,33 +108,8 @@ function ActivityContent() {
           </div>
         ) : tab === "process" ? (
           <AgentActivity events={events} />
-        ) : tab === "mappings" ? (
-          <div className="space-y-3">
-            {mappings.length === 0 ? (
-              <p className="text-[13px] text-muted">No mappings recorded for this session yet.</p>
-            ) : (
-              mappings.map((m) => (
-                <div key={m.id} className="rounded-xl border border-hairline bg-paper p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[13px] font-medium text-ink">{m.sourceField}</span>
-                    <span className={`text-[11px] font-medium ${m.status === "approved" ? "text-ok" : m.status === "rejected" ? "text-warn" : "text-muted"}`}>
-                      {m.status}
-                    </span>
-                  </div>
-                  <p className="mt-1 font-mono text-[11px] text-muted">{m.target.templatePath.join(" › ")}</p>
-                  <p className="mt-1 text-[12px] text-ink">{m.sourceValue}</p>
-                </div>
-              ))
-            )}
-          </div>
-        ) : tab === "evidence" ? (
-          <EvidencePanel evidence={evidence} mappingResult={mappingResult} />
-        ) : tab === "coverage" ? (
-          <CoveragePanel report={coverageReport} evidence={evidence} mappingResult={mappingResult} />
-        ) : tab === "data" ? (
-          <WorkspaceExplorer apiUrl={API_URL} threadId={threadId} artifacts={artifacts} />
         ) : (
-          <IntegrationGraph entries={mappingKnowledge} />
+          <WorkspaceExplorer apiUrl={API_URL} threadId={threadId} artifacts={artifacts} />
         )}
       </div>
     </div>
