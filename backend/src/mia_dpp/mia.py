@@ -8,6 +8,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
+from pydantic_ai.settings import ModelSettings
 
 from mia_dpp.aas.templates import OfficialTemplateRepository
 from mia_dpp.agent.models import (
@@ -86,7 +87,11 @@ class Mia:
                 name="mia-extractor",
                 output_type=ExtractionOutput,
                 instructions=AGENT_INSTRUCTIONS,
-                retries=2,
+                retries=1,
+                model_settings=ModelSettings(
+                    temperature=0,
+                    max_tokens=2048,
+                ),
             )
 
     @property

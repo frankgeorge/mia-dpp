@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     openrouter_api_key: SecretStr | None = None
     agent_model: str = Field(
-        default="deepseek/deepseek-v3.2",
+        default="anthropic/claude-3.5-haiku",
         validation_alias="MIA_AGENT_MODEL",
     )
     thread_store_path: Path = Field(

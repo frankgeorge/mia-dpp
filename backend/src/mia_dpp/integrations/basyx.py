@@ -50,6 +50,9 @@ class BasyxAasRepository:
 
     async def _post(self, collection: str, value: dict[str, Any]) -> None:
         response = await self._client.post(f"{self._base_url}/{collection}", json=value)
+        # 409 Conflict means the resource already exists — treat as success (idempotent deploy)
+        if response.status_code == 409:
+            return
         response.raise_for_status()
 
     @staticmethod
