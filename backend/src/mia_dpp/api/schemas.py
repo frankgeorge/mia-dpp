@@ -21,12 +21,13 @@ class DppBuildRequest(WireModel):
 class GenerateRequest(WireModel):
     """Simple DPP generation from extracted key-value pairs.
 
-    Fields is a dict of IDTA 02006 id_short names to their values,
-    e.g. {"ManufacturerName": "AFRISO-EURO-INDEX GmbH", "Street": "Lindenstraße 20"}.
+    Fields is a dict of IDTA 02006 id_short names to their values.
+    submodel_fields is a per-submodel dict for multi-submodel passports.
     """
 
     product_name: str = Field(min_length=1, max_length=512)
-    fields: dict[str, str]
+    fields: dict[str, str] = Field(default_factory=dict)
+    submodel_fields: dict[str, dict[str, str]] | None = None
     thread_id: str | None = Field(default=None, min_length=8, max_length=128)
 
 

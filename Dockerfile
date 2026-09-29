@@ -29,6 +29,10 @@ RUN uv sync --project backend --no-dev
 
 COPY ["standards/idta-submodel-templates/published/Digital nameplate/3/0/1/IDTA 02006-3-0-1_Template_Digital Nameplate.json", "/app/standards/idta-submodel-templates/published/Digital nameplate/3/0/1/IDTA 02006-3-0-1_Template_Digital Nameplate.json"]
 COPY ["standards/idta-submodel-templates/published/Technical_Data/2/0/1/IDTA 02003_2-0-1_Template_TechnicalData.json", "/app/standards/idta-submodel-templates/published/Technical_Data/2/0/1/IDTA 02003_2-0-1_Template_TechnicalData.json"]
+COPY ["standards/idta-submodel-templates/published/Digital Product Passport/Digital Product Passport Part-1/1/0/1/IDTA 02099-1_Template Digital Product Passport - Part 1.json", "/app/standards/idta-submodel-templates/published/Digital Product Passport/Digital Product Passport Part-1/1/0/1/IDTA 02099-1_Template Digital Product Passport - Part 1.json"]
+COPY ["standards/idta-submodel-templates/published/Carbon Footprint/1/0/1/IDTA 02023-1-0-1 _Template_CarbonFootprint.json", "/app/standards/idta-submodel-templates/published/Carbon Footprint/1/0/1/IDTA 02023-1-0-1 _Template_CarbonFootprint.json"]
+COPY ["standards/idta-submodel-templates/published/Handover Documentation/2/0/1/IDTA 02004-2-0-1_Template_HandoverDocumentation.json", "/app/standards/idta-submodel-templates/published/Handover Documentation/2/0/1/IDTA 02004-2-0-1_Template_HandoverDocumentation.json"]
+COPY ["standards/idta-submodel-templates/published/Maintenance Instructions/1/0/IDTA_02018_Template_MaintenanceInstructions.json", "/app/standards/idta-submodel-templates/published/Maintenance Instructions/1/0/IDTA_02018_Template_MaintenanceInstructions.json"]
 
 USER mia
 

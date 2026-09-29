@@ -18,6 +18,8 @@
     { "source": "/api/upload", "destination": { "service": "frontend" } },
     { "source": "/api/upload-image", "destination": { "service": "frontend" } },
     { "source": "/api/fetch-og-image", "destination": { "service": "frontend" } },
+    { "source": "/api/fetch-url", "destination": { "service": "frontend" } },
+    { "source": "/api/passports/backfill-qr", "destination": { "service": "frontend" } },
     { "source": "/api/email/(.*)", "destination": { "service": "frontend" } },
     { "source": "/api/session/(.*)", "destination": { "service": "frontend" } },
     { "source": "/api/(.*)", "destination": { "service": "backend" } },

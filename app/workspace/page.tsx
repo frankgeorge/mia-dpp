@@ -6,6 +6,7 @@ import { useUser } from "@clerk/nextjs";
 import type {
   AgentResponse,
   AgentTraceEvent,
+  BulkExtractResponse,
   ChatMessage,
   ExtractedField,
   SubmodelStatusValue,
@@ -366,6 +367,75 @@ function WorkspaceInner() {
     return body as AgentResponse;
   }
 
+  async function callBulkExtract(payload: Record<string, unknown>): Promise<BulkExtractResponse> {
+    const res = await fetch(`${API_URL}/api/agent/extract-all`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await res.json()) as BulkExtractResponse | { detail?: string };
+    if (!res.ok) {
+      throw new Error("detail" in body && body.detail ? body.detail : `Backend returned ${res.status}`);
+    }
+    return body as BulkExtractResponse;
+  }
+
+  function applyBulkResponse(data: BulkExtractResponse, tid: string) {
+    setThreadId(tid);
+
+    if (data.submodelStatus && Object.keys(data.submodelStatus).length > 0) {
+      setSubmodelStatus(data.submodelStatus as Record<string, SubmodelStatusValue>);
+    }
+
+    if (data.extractedFields.length > 0) {
+      setExtractedFields((prev) => {
+        const next = { ...prev };
+        for (const f of data.extractedFields) {
+          next[f.idtaField] = f.value;
+          // Auto-fetch product image on first URIOfTheProduct
+          if (f.idtaField === "URIOfTheProduct" && !prev["URIOfTheProduct"] && !productImageUrl) {
+            void fetchAndUseProductUrl(f.value);
+          }
+        }
+        return next;
+      });
+    }
+
+    if (Object.keys(data.submodelFields).length > 0) {
+      setSubmodelFields((prev) => ({ ...prev, ...data.submodelFields }));
+    }
+
+    setDppReady(data.dppReady);
+
+    // Build a summary message listing which submodels got data
+    const filledSubmodels = SUBMODEL_SEQUENCE.filter(
+      (sm) => data.submodelFields[sm] && Object.keys(data.submodelFields[sm]).length > 0
+    );
+    const completedSubmodelLabels = SUBMODEL_SEQUENCE.filter(
+      (sm) => data.submodelStatus?.[sm] === "complete"
+    ).map((sm) => SUBMODEL_LABELS[sm as SubmodelKey]);
+
+    if (filledSubmodels.length > 0) {
+      const filledLabels = filledSubmodels.map((sm) => SUBMODEL_LABELS[sm as SubmodelKey]).join(", ");
+      let summary = `I scanned the document across all sections and found data for: **${filledLabels}**.`;
+      if (completedSubmodelLabels.length > 0) {
+        summary += `\n\n✓ Complete: ${completedSubmodelLabels.join(", ")}`;
+      }
+      const stillMissing = SUBMODEL_SEQUENCE.filter(
+        (sm) => data.submodelStatus?.[sm] === "in_progress" || data.submodelStatus?.[sm] === "pending"
+      ).map((sm) => SUBMODEL_LABELS[sm as SubmodelKey]);
+      if (stillMissing.length > 0) {
+        summary += `\n\nStill need more info for: ${stillMissing.join(", ")}. You can add data for each section or skip ones that don't apply.`;
+      }
+      setMessages((prev) => [...prev, { role: "assistant" as const, content: summary }]);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant" as const, content: "I couldn't extract any recognisable product data from this document. Try uploading a datasheet, specification sheet, or product manual." },
+      ]);
+    }
+  }
+
   async function skipSubmodel() {
     if (busy) return;
     const sm = currentSubmodel;
@@ -483,19 +553,15 @@ function WorkspaceInner() {
       }
 
       const profile = getCompanyProfile();
-      const smLabel = SUBMODEL_LABELS[currentSubmodel];
-      const data = await callAgent({
+      const bulkData = await callBulkExtract({
         threadId: tid,
-        message: `Extract ${smLabel} fields from this product page.`,
         documentText: fetched.text,
         documentFilename: fetched.title || url,
         documentType: "webpage",
-        currentSubmodel,
         companyName: profile?.name || undefined,
         companyWebsite: profile?.website || undefined,
       });
-      applyAgentResponse(data);
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+      applyBulkResponse(bulkData, tid);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not fetch the URL";
       setMessages((prev) => [
@@ -537,19 +603,15 @@ function WorkspaceInner() {
       }
 
       try {
-        const smLabel = SUBMODEL_LABELS[currentSubmodel];
-        const agentData = await callAgent({
+        const bulkData = await callBulkExtract({
           threadId: tid,
-          message: `Extract ${smLabel} fields from this document.`,
           documentText: data.text,
           documentFilename: data.fileName,
           documentType: data.fileType,
-          currentSubmodel,
           companyName: profile?.name || undefined,
           companyWebsite: profile?.website || undefined,
         });
-        applyAgentResponse(agentData);
-        setMessages((prev) => [...prev, { role: "assistant", content: agentData.reply }]);
+        applyBulkResponse(bulkData, tid);
       } catch (agentErr) {
         const msg = agentErr instanceof Error ? agentErr.message : "unknown error";
         setMessages((prev) => [...prev, { role: "assistant", content: `Could not process the file: ${msg}` }]);
@@ -643,8 +705,13 @@ function WorkspaceInner() {
         aas_json: body.aas_json ?? null,
       });
     } catch (error) {
-      setDeployError(error instanceof Error ? error.message : "Deployment failed.");
+      const msg = error instanceof Error ? error.message : "Deployment failed.";
+      setDeployError(msg);
       setDeployStatus("error");
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant" as const, content: `Passport deployment failed: ${msg}. Check the error card below or try again.` },
+      ]);
     }
   }
 

@@ -392,6 +392,28 @@ export interface WorkspaceArtifact {
   downloadable: boolean;
 }
 
+export const SUBMODEL_SEQUENCE = [
+  "dpp_metadata",
+  "digital_nameplate",
+  "technical_data",
+  "carbon_footprint",
+  "handover_documentation",
+  "maintenance_instructions",
+] as const;
+
+export type SubmodelKey = typeof SUBMODEL_SEQUENCE[number];
+
+export const SUBMODEL_LABELS: Record<SubmodelKey, string> = {
+  dpp_metadata: "DPP Metadata",
+  digital_nameplate: "Digital Nameplate",
+  technical_data: "Technical Data",
+  carbon_footprint: "Carbon Footprint",
+  handover_documentation: "Handover Documentation",
+  maintenance_instructions: "Maintenance Instructions",
+};
+
+export type SubmodelStatusValue = "pending" | "in_progress" | "complete" | "skipped";
+
 export interface AgentResponse {
   threadId: string;
   reply: string;
@@ -402,4 +424,20 @@ export interface AgentResponse {
   dppReady: boolean;
   traceEvents: AgentTraceEvent[];
   artifactCount: number;
+  // Multi-submodel progress
+  currentSubmodel: string;
+  submodelStatus: Record<string, SubmodelStatusValue>;
+  submodelProgress: number;
+  allSubmodelsDone: boolean;
+}
+
+export interface BulkExtractResponse {
+  threadId: string;
+  extractedFields: ExtractedField[];
+  submodelFields: Record<string, Record<string, string>>;
+  submodelStatus: Record<string, SubmodelStatusValue>;
+  submodelProgress: number;
+  allSubmodelsDone: boolean;
+  dppReady: boolean;
+  missingRequired: Record<string, string[]>;
 }

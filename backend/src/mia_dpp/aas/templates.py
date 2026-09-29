@@ -46,8 +46,65 @@ TECHNICAL_DATA = TemplateRelease(
     metamodel_version="3.0",
 )
 
+DPP_METADATA = TemplateRelease(
+    key="dpp_metadata",
+    family="Digital Product Passport",
+    release="1.0.1",
+    repository_commit=STANDARDS_REPOSITORY_COMMIT,
+    source_path=(
+        "published/Digital Product Passport/Digital Product Passport Part-1/1/0/1/"
+        "IDTA 02099-1_Template Digital Product Passport - Part 1.json"
+    ),
+    source_sha256="541cfd526ead764b6209eed96bf991d65c8e286a45be5ca3a6513e1a66ea5721",
+    metamodel_version="3.0",
+)
+
+CARBON_FOOTPRINT = TemplateRelease(
+    key="carbon_footprint",
+    family="Carbon Footprint",
+    release="1.0.1",
+    repository_commit=STANDARDS_REPOSITORY_COMMIT,
+    source_path=(
+        "published/Carbon Footprint/1/0/1/IDTA 02023-1-0-1 _Template_CarbonFootprint.json"
+    ),
+    source_sha256="d0edb5f39d339408f9f6c0571a6f85f2f4c32ffff4a70af9a2a1c088dab92e4d",
+    metamodel_version="3.0",
+)
+
+HANDOVER_DOCUMENTATION = TemplateRelease(
+    key="handover_documentation",
+    family="Handover Documentation",
+    release="2.0.1",
+    repository_commit=STANDARDS_REPOSITORY_COMMIT,
+    source_path=(
+        "published/Handover Documentation/2/0/1/IDTA 02004-2-0-1_Template_HandoverDocumentation.json"
+    ),
+    source_sha256="068ba24e4427facd9169dfc8163de46c4805b663cbd061dedd20dba669604689",
+    metamodel_version="3.0",
+)
+
+MAINTENANCE_INSTRUCTIONS = TemplateRelease(
+    key="maintenance_instructions",
+    family="Maintenance Instructions",
+    release="1.0.0",
+    repository_commit=STANDARDS_REPOSITORY_COMMIT,
+    source_path=(
+        "published/Maintenance Instructions/1/0/IDTA_02018_Template_MaintenanceInstructions.json"
+    ),
+    source_sha256="8b2bc9644126b40f8f365009a43f5ce9866e3ff30755232000cb145b0a2f472b",
+    metamodel_version="3.0",
+)
+
 TEMPLATE_RELEASES: Mapping[str, TemplateRelease] = {
-    release.key: release for release in (DIGITAL_NAMEPLATE, TECHNICAL_DATA)
+    release.key: release
+    for release in (
+        DPP_METADATA,
+        DIGITAL_NAMEPLATE,
+        TECHNICAL_DATA,
+        CARBON_FOOTPRINT,
+        HANDOVER_DOCUMENTATION,
+        MAINTENANCE_INSTRUCTIONS,
+    )
 }
 
 _ARBITRARY_SEMANTIC_ID = "https://admin-shell.io/SMT/General/Arbitrary"

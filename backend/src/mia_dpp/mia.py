@@ -15,8 +15,11 @@ from mia_dpp.agent.models import (
     AgentRequest,
     AgentResponse,
     AgentStatus,
+    BulkExtractRequest,
+    BulkExtractResponse,
     ExtractionOutput,
     MiaState,
+    SUBMODEL_LABELS,
     SUBMODEL_REQUIRED,
     SUBMODEL_SEQUENCE,
     SubmodelStatus,
@@ -241,6 +244,101 @@ class Mia:
             submodel_status=dict(state.submodel_status),
             submodel_progress=progress,
             all_submodels_done=all_done,
+        )
+
+    async def extract_all_submodels(self, request: BulkExtractRequest) -> BulkExtractResponse:
+        """Extract fields from a document for all submodels in one sequential pass."""
+
+        thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
+        snapshot = self.store.load(thread_id)
+        state = snapshot.state if snapshot is not None else MiaState(thread_id=thread_id)
+        history = snapshot.history if snapshot is not None else []
+
+        if request.company_name:
+            state.company_name = request.company_name
+        if request.company_website:
+            state.company_website = request.company_website
+        if request.document_filename:
+            state.document_filename = request.document_filename
+
+        all_extracted: list = []
+        missing_required: dict[str, list[str]] = {}
+
+        for submodel_key in SUBMODEL_SEQUENCE:
+            agent = self._agents.get(submodel_key)
+            if agent is None:
+                continue
+
+            sm_label = SUBMODEL_LABELS.get(submodel_key, submodel_key)
+
+            # Mark as in_progress if pending
+            if state.submodel_status.get(submodel_key) == SubmodelStatus.PENDING:
+                state.submodel_status[submodel_key] = SubmodelStatus.IN_PROGRESS
+
+            agent_req = AgentRequest(
+                thread_id=thread_id,
+                message=f"Extract {sm_label} fields from this document.",
+                document_text=request.document_text,
+                document_filename=request.document_filename,
+                document_type=request.document_type,
+                company_name=request.company_name,
+                company_website=request.company_website,
+                current_submodel=submodel_key,
+            )
+            prompt = self._build_prompt(agent_req, state, submodel_key)
+
+            try:
+                result = await agent.run(prompt)
+                output = result.output
+
+                if submodel_key not in state.submodel_fields:
+                    state.submodel_fields[submodel_key] = {}
+                for field in output.extracted_fields:
+                    state.submodel_fields[submodel_key][field.idta_field] = field.value
+                    state.extracted_fields[field.idta_field] = field.value
+
+                all_extracted.extend(output.extracted_fields)
+
+            except Exception:
+                # Non-fatal — skip this submodel if extraction fails
+                pass
+
+            # Assess completion for this submodel
+            required = SUBMODEL_REQUIRED.get(submodel_key, ())
+            sm_fields = state.submodel_fields.get(submodel_key, {})
+            missing = [f for f in required if f not in sm_fields]
+            missing_required[submodel_key] = missing
+
+            if required and not missing:
+                state.submodel_status[submodel_key] = SubmodelStatus.COMPLETE
+            else:
+                state.submodel_status[submodel_key] = SubmodelStatus.IN_PROGRESS
+
+        all_done = all(
+            state.submodel_status.get(sm) in (SubmodelStatus.COMPLETE, SubmodelStatus.SKIPPED)
+            for sm in SUBMODEL_SEQUENCE
+        )
+        dpp_ready = state.submodel_status.get("digital_nameplate") == SubmodelStatus.COMPLETE
+        progress = _compute_progress(state)
+
+        self.store.save(
+            SessionSnapshot(
+                state=state,
+                history=history,
+                reply="Bulk extraction completed",
+                decision_summary=f"Extracted {len(all_extracted)} fields across all submodels",
+            )
+        )
+
+        return BulkExtractResponse(
+            thread_id=thread_id,
+            extracted_fields=all_extracted,
+            submodel_fields=dict(state.submodel_fields),
+            submodel_status=dict(state.submodel_status),
+            submodel_progress=progress,
+            all_submodels_done=all_done,
+            dpp_ready=dpp_ready,
+            missing_required=missing_required,
         )
 
     @staticmethod

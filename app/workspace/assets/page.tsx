@@ -23,13 +23,19 @@ export default function AssetsPage() {
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/passports")
-      .then((r) => r.json())
-      .then((data) => {
-        setPassports(Array.isArray(data) ? data : []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    // Backfill QR codes for any deployed passports missing them, then load list
+    const load = () =>
+      fetch("/api/passports")
+        .then((r) => r.json())
+        .then((data) => {
+          setPassports(Array.isArray(data) ? data : []);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+
+    fetch("/api/passports/backfill-qr", { method: "POST" })
+      .catch(() => {})
+      .finally(() => void load());
   }, []);
 
   function copyLink(url: string, id: string) {

@@ -25,6 +25,8 @@ from mia_dpp.agent.models import (
     AgentRequest,
     AgentResponse,
     AgentTraceEvent,
+    BulkExtractRequest,
+    BulkExtractResponse,
 )
 from mia_dpp.api.schemas import (
     DeployRequest,
@@ -112,6 +114,26 @@ async def agent_message(
         raise HTTPException(status_code=502, detail=f"agent failed: {error}") from error
 
 
+@router.post("/api/agent/extract-all", response_model=BulkExtractResponse)
+async def extract_all_submodels(
+    payload: BulkExtractRequest,
+    http_request: Request,
+) -> BulkExtractResponse:
+    """Extract fields from a document for all 6 IDTA submodels in one pass."""
+
+    try:
+        return await _application(http_request).extract_all_submodels(payload)
+    except (
+        UnexpectedModelBehavior,
+        httpx.HTTPError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        raise HTTPException(status_code=502, detail=f"bulk extraction failed: {error}") from error
+
+
 def _fields_to_mappings(
     fields: dict[str, str],
     template_key: str,
@@ -185,9 +207,9 @@ async def generate_from_fields(
 
     # Determine which fields to use for digital_nameplate (primary, required)
     dn_fields: dict[str, str] = {}
-    if payload.submodel_fields and "digital_nameplate" in payload.submodel_fields:
+    if payload.submodel_fields and payload.submodel_fields.get("digital_nameplate"):
         dn_fields = payload.submodel_fields["digital_nameplate"]
-    elif payload.fields:
+    if not dn_fields and payload.fields:
         dn_fields = payload.fields
 
     if not dn_fields:

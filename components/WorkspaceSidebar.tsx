@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -56,14 +57,14 @@ const CONNECTOR_ITEMS = [
   },
 ];
 
-const BOTTOM_ITEMS: { label: string; href: string; exact: boolean; icon: React.ReactNode }[] = [];
-
 function NavItem({
   item,
   pathname,
+  onClick,
 }: {
   item: { label: string; href: string; exact: boolean; icon: React.ReactNode };
   pathname: string;
+  onClick?: () => void;
 }) {
   const isActive = item.exact
     ? pathname === item.href
@@ -72,6 +73,7 @@ function NavItem({
   return (
     <Link
       href={item.href}
+      onClick={onClick}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors ${
         isActive
           ? "bg-mist text-ink"
@@ -86,54 +88,95 @@ function NavItem({
 
 export function WorkspaceSidebar() {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  const close = () => setOpen(false);
 
   return (
-    <aside className="fixed left-0 top-0 z-30 flex h-full w-[240px] flex-col border-r border-hairline bg-paper">
-      {/* Logo */}
-      <div className="flex h-14 shrink-0 items-center gap-2.5 px-4 border-b border-hairline">
-        <Link href="/workspace" className="flex items-center gap-2.5">
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-ink shadow-sm">
-            <span className="h-1.5 w-1.5 rounded-[1px] bg-white" />
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight text-ink">MIA</span>
-        </Link>
-      </div>
+    <>
+      {/* Mobile hamburger — fixed, only visible on mobile */}
+      <button
+        onClick={() => setOpen(true)}
+        className="fixed left-4 top-3.5 z-40 flex h-8 w-8 items-center justify-center rounded-lg border border-hairline bg-paper text-ink shadow-sm md:hidden"
+        aria-label="Open menu"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
 
-      {/* Nav */}
-      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-3">
-        {NAV_ITEMS.map((item) => (
-          <NavItem key={item.href} item={item} pathname={pathname} />
-        ))}
+      {/* Mobile backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] md:hidden"
+          onClick={close}
+          aria-hidden="true"
+        />
+      )}
 
-        {/* Connectors section */}
-        <div className="mt-4 mb-1 px-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted/70">
-            Connectors
-          </span>
-        </div>
-        {CONNECTOR_ITEMS.map((item) => (
-          <NavItem key={item.href} item={item} pathname={pathname} />
-        ))}
-
-      </nav>
-
-      {/* User area */}
-      <div className="shrink-0 border-t border-hairline px-4 py-3">
-        <div className="flex items-center gap-3">
-          <UserButton />
-          <span className="flex-1 truncate text-[13px] text-muted">Account</span>
-          <Link
-            href="/settings"
-            title="Settings"
-            className="shrink-0 rounded-md p-1.5 text-muted transition-colors hover:bg-mist hover:text-ink"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
+      {/* Sidebar — always visible on desktop, slides in on mobile */}
+      <aside
+        className={[
+          "fixed left-0 top-0 z-50 flex h-full w-[240px] flex-col border-r border-hairline bg-paper",
+          "transition-transform duration-200 ease-out",
+          "md:translate-x-0",
+          open ? "translate-x-0 shadow-xl" : "-translate-x-full md:translate-x-0",
+        ].join(" ")}
+      >
+        {/* Logo + mobile close */}
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-hairline px-4">
+          <Link href="/workspace" onClick={close} className="flex items-center gap-2.5">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-ink shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-[1px] bg-white" />
+            </span>
+            <span className="text-[15px] font-semibold tracking-tight text-ink">MIA</span>
           </Link>
+          <button
+            onClick={close}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-mist hover:text-ink md:hidden"
+            aria-label="Close menu"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
-      </div>
-    </aside>
+
+        {/* Nav */}
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-3">
+          {NAV_ITEMS.map((item) => (
+            <NavItem key={item.href} item={item} pathname={pathname} onClick={close} />
+          ))}
+
+          <div className="mb-1 mt-4 px-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted/70">
+              Connectors
+            </span>
+          </div>
+          {CONNECTOR_ITEMS.map((item) => (
+            <NavItem key={item.href} item={item} pathname={pathname} onClick={close} />
+          ))}
+        </nav>
+
+        {/* User area */}
+        <div className="shrink-0 border-t border-hairline px-4 py-3">
+          <div className="flex items-center gap-3">
+            <UserButton />
+            <span className="flex-1 truncate text-[13px] text-muted">Account</span>
+            <Link
+              href="/settings"
+              onClick={close}
+              title="Settings"
+              className="shrink-0 rounded-md p-1.5 text-muted transition-colors hover:bg-mist hover:text-ink"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </Link>
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }
