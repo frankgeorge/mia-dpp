@@ -591,6 +591,8 @@ function WorkspaceInner() {
       const body = (await res.json()) as { threadId?: string; detail?: string; [key: string]: unknown };
       if (!res.ok) throw new Error(body.detail ?? `Backend returned ${res.status}`);
       if (!threadId) setThreadId(tid);
+      // Save as draft immediately so it shows in Assets even before deploy completes
+      void savePassportRecord({ threadId: tid, status: "draft" });
       void deployPassport(tid);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "unknown error";
@@ -633,6 +635,7 @@ function WorkspaceInner() {
       setDeployResult(result);
       setDeployStatus("deployed");
       void savePassportRecord({
+        threadId: deployThreadId,
         status: "deployed",
         qr_code_b64: result.qr_code_png_b64,
         passport_url: result.passport_url,
@@ -646,13 +649,14 @@ function WorkspaceInner() {
   }
 
   async function savePassportRecord(overrides: {
+    threadId?: string;
     status?: "draft" | "deployed";
     qr_code_b64?: string;
     passport_url?: string;
     basyx_shell_id?: string | null;
     aas_json?: Record<string, unknown> | null;
   } = {}) {
-    const tid = threadId;
+    const tid = overrides.threadId ?? threadId;
     const profile = getCompanyProfile();
     const pname = extractedFields["ManufacturerProductDesignation"] || profile?.name || "Product";
     if (!tid) return;
@@ -1232,8 +1236,8 @@ function WorkspaceInner() {
                       </svg>
                       {uploadStatus === "uploading" ? "Reading…" : "Add file"}
                     </button>
-                    {/* Skip button — only shown when not on last submodel and not deploying */}
-                    {deployStatus === "idle" && SUBMODEL_SEQUENCE.indexOf(currentSubmodel) < SUBMODEL_SEQUENCE.length - 1 && (
+                    {/* Skip button — shown when not all done and not deploying */}
+                    {deployStatus === "idle" && !allSubmodelsDone && (
                       <button
                         type="button"
                         onClick={() => void skipSubmodel()}
