@@ -41,17 +41,15 @@ function WorkspaceInner() {
   const searchParams = useSearchParams();
   const threadParam = searchParams.get("thread");
 
-  // If ?thread= is in URL, restore that session; if no param, start fresh
+  // Restore from sessionStorage if thread matches, otherwise start fresh
   const saved = typeof window !== "undefined"
-    ? (threadParam
-        ? (loadSession()?.threadId === threadParam ? loadSession() : null)
-        : (!threadParam ? null : loadSession()))
+    ? (loadSession()?.threadId === (threadParam ?? undefined) ? loadSession() : (!threadParam ? null : loadSession()?.threadId === threadParam ? loadSession() : null))
     : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>(saved?.messages ?? []);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(saved?.threadId ?? null);
+  const [threadId, setThreadId] = useState<string | null>(threadParam ?? saved?.threadId ?? null);
   const [agentStatus, setAgentStatus] = useState<AgentResponse["status"]>("completed");
   const [extractedFields, setExtractedFields] = useState<Record<string, string>>(saved?.extractedFields ?? {});
   const [missingRequired, setMissingRequired] = useState<string[]>(saved?.missingRequired ?? []);
@@ -59,12 +57,12 @@ function WorkspaceInner() {
   const endRef = useRef<HTMLDivElement>(null);
 
   // ── Deploy state ──────────────────────────────────────────────────────────
-  const [deployStatus, setDeployStatus] = useState<"idle" | "deploying" | "deployed" | "error">("idle");
+  const [deployStatus, setDeployStatus] = useState<"idle" | "deploying" | "deployed" | "error">(saved?.deployStatus ?? "idle");
   const [deployResult, setDeployResult] = useState<{
     passport_url: string;
     qr_code_png_b64: string;
     shell_ids: string[];
-  } | null>(null);
+  } | null>(saved?.deployResult ?? null);
   const [deployError, setDeployError] = useState("");
 
   // ── File upload state ─────────────────────────────────────────────────────
@@ -87,12 +85,47 @@ function WorkspaceInner() {
     }
   }, []);
 
+  // ── Restore from Supabase when ?thread= doesn't match current session ──────
+  useEffect(() => {
+    if (!threadParam || saved?.threadId === threadParam) return;
+    // Session storage doesn't have this thread — load passport record from Supabase
+    fetch(`/api/passports/thread/${encodeURIComponent(threadParam)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) return;
+        setThreadId(data.thread_id);
+        if (data.status === "deployed" && data.passport_url) {
+          setDeployStatus("deployed");
+          setDeployResult({
+            passport_url: data.passport_url,
+            qr_code_png_b64: data.qr_code_b64 ?? "",
+            shell_ids: [data.thread_id],
+          });
+          setDppReady(true);
+        }
+        if (data.product_image_url) setProductImageUrl(data.product_image_url);
+        // Restore product name as a minimal extracted field so UI shows it
+        if (data.product_name) {
+          setExtractedFields((prev) => ({
+            ...prev,
+            ManufacturerProductDesignation: prev.ManufacturerProductDesignation || data.product_name,
+          }));
+        }
+        setMessages([{
+          role: "assistant",
+          content: `Welcome back! I've restored your passport for **${data.product_name}**. You can continue editing by sending a message or uploading a new document.`,
+        }]);
+      })
+      .catch(() => { /* silent */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadParam]);
+
   // ── Persist session to sessionStorage so navigation doesn't lose context ──
   useEffect(() => {
     if (messages.length > 0 || threadId) {
-      saveSession({ messages, threadId, extractedFields, missingRequired, dppReady });
+      saveSession({ messages, threadId, extractedFields, missingRequired, dppReady, deployStatus, deployResult });
     }
-  }, [messages, threadId, extractedFields, missingRequired, dppReady]);
+  }, [messages, threadId, extractedFields, missingRequired, dppReady, deployStatus, deployResult]);
 
   // ── Supplier outreach state ───────────────────────────────────────────────
   const [supplierEmail, setSupplierEmail] = useState("");

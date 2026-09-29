@@ -33,6 +33,19 @@ const NAV_ITEMS = [
 
 const CONNECTOR_ITEMS = [
   {
+    label: "Asset Administration Shell",
+    href: "/workspace/aas",
+    exact: false,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+        <path d="M7 8h2m2 0h2m2 0h2" strokeDasharray="1 2" />
+        <path d="M7 11h10" />
+      </svg>
+    ),
+  },
+  {
     label: "Data Sources",
     href: "/workspace/data-sources",
     exact: false,
