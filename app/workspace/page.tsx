@@ -8,12 +8,24 @@ import type {
   AgentTraceEvent,
   ChatMessage,
   ExtractedField,
+  SubmodelStatusValue,
+  SubmodelKey,
 } from "@/lib/types";
+import { SUBMODEL_SEQUENCE, SUBMODEL_LABELS } from "@/lib/types";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { OnboardingModal, getCompanyProfile } from "@/components/OnboardingModal";
 
 const API_URL = process.env.NEXT_PUBLIC_MIA_API_URL ?? "";
 
+// Per-submodel minimum required fields (mirrors backend SUBMODEL_REQUIRED)
+const SUBMODEL_REQUIRED: Record<string, string[]> = {
+  dpp_metadata: ["uniqueProductIdentifier", "economicOperatorId"],
+  digital_nameplate: ["ManufacturerName", "ManufacturerProductDesignation", "OrderCodeOfManufacturer", "URIOfTheProduct"],
+  technical_data: ["GeneralInformation"],
+  carbon_footprint: ["PCFCO2eq", "ReferenceValueForCalculation", "QuantityOfMeasureForCalculation"],
+  handover_documentation: ["Title", "OrganizationOfficialName"],
+  maintenance_instructions: ["MaintenanceFreeAsset"],
+};
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -22,7 +34,7 @@ function getGreeting() {
   return "Good evening";
 }
 
-const SESSION_KEY = "mia.workspace.session.v1";
+const SESSION_KEY = "mia.workspace.session.v2";
 
 function loadSession() {
   if (typeof window === "undefined") return null;
@@ -36,14 +48,25 @@ function saveSession(data: Record<string, unknown>) {
   try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* non-blocking */ }
 }
 
+// Status dot color helper
+function statusColor(status: SubmodelStatusValue | undefined) {
+  switch (status) {
+    case "complete": return "bg-ok";
+    case "in_progress": return "bg-signal animate-pulse";
+    case "skipped": return "bg-muted";
+    default: return "bg-muted/30";
+  }
+}
+
 function WorkspaceInner() {
   const { user } = useUser();
   const searchParams = useSearchParams();
   const threadParam = searchParams.get("thread");
 
-  // Restore from sessionStorage if thread matches, otherwise start fresh
   const saved = typeof window !== "undefined"
-    ? (loadSession()?.threadId === (threadParam ?? undefined) ? loadSession() : (!threadParam ? null : loadSession()?.threadId === threadParam ? loadSession() : null))
+    ? (threadParam
+        ? (loadSession()?.threadId === threadParam ? loadSession() : null)
+        : loadSession())
     : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>(saved?.messages ?? []);
@@ -55,6 +78,23 @@ function WorkspaceInner() {
   const [missingRequired, setMissingRequired] = useState<string[]>(saved?.missingRequired ?? []);
   const [dppReady, setDppReady] = useState<boolean>(saved?.dppReady ?? false);
   const endRef = useRef<HTMLDivElement>(null);
+
+  // ── Multi-submodel state ──────────────────────────────────────────────────
+  const [currentSubmodel, setCurrentSubmodel] = useState<SubmodelKey>(
+    saved?.currentSubmodel ?? SUBMODEL_SEQUENCE[0]
+  );
+  const [submodelStatus, setSubmodelStatus] = useState<Record<string, SubmodelStatusValue>>(
+    saved?.submodelStatus ?? Object.fromEntries(SUBMODEL_SEQUENCE.map((k) => [k, "pending"]))
+  );
+  const [submodelFields, setSubmodelFields] = useState<Record<string, Record<string, string>>>(
+    saved?.submodelFields ?? {}
+  );
+  const [pdfLinks, setPdfLinks] = useState<string[]>(saved?.pdfLinks ?? []);
+
+  // ── Edit state ────────────────────────────────────────────────────────────
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [manuallyEditedFields, setManuallyEditedFields] = useState<Set<string>>(new Set());
 
   // ── Deploy state ──────────────────────────────────────────────────────────
   const [deployStatus, setDeployStatus] = useState<"idle" | "deploying" | "deployed" | "error">(saved?.deployStatus ?? "idle");
@@ -71,7 +111,7 @@ function WorkspaceInner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Product image state ───────────────────────────────────────────────────
-  const [productImageUrl, setProductImageUrl] = useState<string | null>(null);
+  const [productImageUrl, setProductImageUrl] = useState<string | null>(saved?.productImageUrl ?? null);
   const [imageSource, setImageSource] = useState<"og" | "upload" | null>(null);
   const [imageSearchedUrl, setImageSearchedUrl] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -87,8 +127,7 @@ function WorkspaceInner() {
 
   // ── Restore from Supabase when ?thread= doesn't match current session ──────
   useEffect(() => {
-    if (!threadParam || saved?.threadId === threadParam) return;
-    // Session storage doesn't have this thread — load passport record from Supabase
+    if (!threadParam) return;
     fetch(`/api/passports/thread/${encodeURIComponent(threadParam)}`)
       .then((r) => r.json())
       .then((data) => {
@@ -104,7 +143,6 @@ function WorkspaceInner() {
           setDppReady(true);
         }
         if (data.product_image_url) setProductImageUrl(data.product_image_url);
-        // Restore product name as a minimal extracted field so UI shows it
         if (data.product_name) {
           setExtractedFields((prev) => ({
             ...prev,
@@ -113,30 +151,33 @@ function WorkspaceInner() {
         }
         setMessages([{
           role: "assistant",
-          content: `Welcome back! I've restored your passport for **${data.product_name}**. You can continue editing by sending a message or uploading a new document.`,
+          content: `Welcome back! I've restored your passport for **${data.product_name}**. You can continue editing or upload a new document.`,
         }]);
       })
       .catch(() => { /* silent */ });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadParam]);
 
-  // ── Persist session to sessionStorage so navigation doesn't lose context ──
+  // ── Persist session to sessionStorage ─────────────────────────────────────
   useEffect(() => {
     if (messages.length > 0 || threadId) {
-      saveSession({ messages, threadId, extractedFields, missingRequired, dppReady, deployStatus, deployResult });
+      saveSession({
+        messages, threadId, extractedFields, missingRequired, dppReady,
+        deployStatus, deployResult, productImageUrl,
+        currentSubmodel, submodelStatus, submodelFields, pdfLinks,
+      });
     }
-  }, [messages, threadId, extractedFields, missingRequired, dppReady, deployStatus, deployResult]);
+  }, [messages, threadId, extractedFields, missingRequired, dppReady,
+      deployStatus, deployResult, productImageUrl,
+      currentSubmodel, submodelStatus, submodelFields, pdfLinks]);
 
   // ── Supplier outreach state ───────────────────────────────────────────────
   const [supplierEmail, setSupplierEmail] = useState("");
-  const [outreachStatus, setOutreachStatus] = useState<
-    "idle" | "sending" | "sent" | "responded" | "error"
-  >("idle");
+  const [outreachStatus, setOutreachStatus] = useState<"idle" | "sending" | "sent" | "responded" | "error">("idle");
   const [outreachToken, setOutreachToken] = useState<string | null>(null);
   const [outreachError, setOutreachError] = useState("");
   const outreachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Poll for supplier response every 10s after email is sent
   useEffect(() => {
     if (outreachStatus !== "sent" || !outreachToken) return;
     outreachPollRef.current = setInterval(async () => {
@@ -147,9 +188,7 @@ function WorkspaceInner() {
           if (data.responded && data.response) {
             setOutreachStatus("responded");
             clearInterval(outreachPollRef.current!);
-            const filled = Object.entries(data.response)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join(", ");
+            const filled = Object.entries(data.response).map(([k, v]) => `${k}: ${v}`).join(", ");
             void send(`Supplier provided missing data -- ${filled}`);
           }
         }
@@ -202,43 +241,99 @@ function WorkspaceInner() {
   function applyAgentResponse(data: AgentResponse) {
     setThreadId(data.threadId);
     setAgentStatus(data.status);
-    setMissingRequired(data.missingRequired);
     setDppReady(data.dppReady);
+
+    const sm = (data.currentSubmodel || currentSubmodel) as SubmodelKey;
+
+    // Update submodel status from backend
+    if (data.submodelStatus && Object.keys(data.submodelStatus).length > 0) {
+      setSubmodelStatus(data.submodelStatus as Record<string, SubmodelStatusValue>);
+    }
+
+    // Use backend missing fields directly — no client-side fallback computation
+    setMissingRequired(data.missingRequired);
+
     if (data.extractedFields.length > 0) {
       setExtractedFields((prev) => {
         const next = { ...prev };
         for (const f of data.extractedFields) {
           next[f.idtaField] = f.value;
         }
-        // Auto-fetch OG image when URIOfTheProduct first appears
+        // Auto-fetch product image when URIOfTheProduct first appears
         const uri = next["URIOfTheProduct"];
-        if (uri && !prev["URIOfTheProduct"]) {
-          void fetchOgImage(uri);
+        if (uri && !prev["URIOfTheProduct"] && !productImageUrl) {
+          void fetchAndUseProductUrl(uri);
         }
         return next;
       });
-    }
-  }
 
-  async function fetchOgImage(url: string) {
-    if (imageSearchedUrl === url) return; // already tried
-    setImageSearchedUrl(url);
-    try {
-      const res = await fetch(`/api/fetch-og-image?url=${encodeURIComponent(url)}`);
-      const data = (await res.json()) as { imageUrl: string | null };
-      if (data.imageUrl) {
-        setProductImageUrl(data.imageUrl);
-        setImageSource("og");
-        // Add a chat message so the user sees it naturally
+      // Also store per-submodel fields
+      setSubmodelFields((prev) => {
+        const smKey = sm;
+        const smPrev = prev[smKey] ?? {};
+        const smNext = { ...smPrev };
+        for (const f of data.extractedFields) {
+          smNext[f.idtaField] = f.value;
+        }
+        return { ...prev, [smKey]: smNext };
+      });
+    }
+
+    // If current submodel is complete, auto-advance to next and inject a chat message
+    if (data.submodelStatus?.[sm] === "complete") {
+      const idx = SUBMODEL_SEQUENCE.indexOf(sm);
+      if (idx >= 0 && idx < SUBMODEL_SEQUENCE.length - 1) {
+        const nextSM = SUBMODEL_SEQUENCE[idx + 1] as SubmodelKey;
+        setCurrentSubmodel(nextSM);
+        setSubmodelStatus((prev) => ({ ...prev, [nextSM]: "in_progress" }));
+        // Inject transition message into chat
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant" as const,
-            content: `I found a product image from the website. If you'd like a different image, use the upload button below.`,
+            content: `**${SUBMODEL_LABELS[sm]} ✓** — all required fields collected.\n\nNow let's work on **${SUBMODEL_LABELS[nextSM]}**. Paste the product URL, upload a document, or type the information directly.`,
+          },
+        ]);
+      } else if (data.allSubmodelsDone) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: `**All submodels complete!** You're ready to generate your Digital Product Passport. Click **Generate passport** above.`,
           },
         ]);
       }
-    } catch { /* silent — image is optional */ }
+    }
+
+    // Update currentSubmodel from backend only if we haven't already advanced
+    if (data.currentSubmodel && data.submodelStatus?.[sm] !== "complete") {
+      setCurrentSubmodel(data.currentSubmodel as SubmodelKey);
+    }
+  }
+
+  async function fetchAndUseProductUrl(url: string) {
+    if (imageSearchedUrl === url) return;
+    setImageSearchedUrl(url);
+    try {
+      const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(url)}`);
+      const data = (await res.json()) as {
+        productImageUrl?: string | null;
+        pdfLinks?: string[];
+        text?: string;
+        error?: string;
+      };
+      if (data.productImageUrl) {
+        setProductImageUrl(data.productImageUrl);
+        setImageSource("og");
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant" as const, content: "I found a product image from the website. Use the upload button if you'd like a different one." },
+        ]);
+      }
+      if (data.pdfLinks?.length) {
+        setPdfLinks(data.pdfLinks);
+      }
+    } catch { /* silent — optional */ }
   }
 
   async function uploadProductImage(file: File) {
@@ -271,9 +366,56 @@ function WorkspaceInner() {
     return body as AgentResponse;
   }
 
+  async function skipSubmodel() {
+    if (busy) return;
+    const sm = currentSubmodel;
+    setSubmodelStatus((prev) => ({ ...prev, [sm]: "skipped" }));
+    const idx = SUBMODEL_SEQUENCE.indexOf(sm);
+    const nextSM = idx < SUBMODEL_SEQUENCE.length - 1 ? SUBMODEL_SEQUENCE[idx + 1] : null;
+
+    setBusy(true);
+    const tid = activeThread();
+    const profile = getCompanyProfile();
+    try {
+      const data = await callAgent({
+        threadId: tid,
+        message: `Skip ${SUBMODEL_LABELS[sm]} submodel`,
+        currentSubmodel: sm,
+        action: "skip",
+        companyName: profile?.name || undefined,
+        companyWebsite: profile?.website || undefined,
+      });
+      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+      if (data.submodelStatus && Object.keys(data.submodelStatus).length > 0) {
+        setSubmodelStatus(data.submodelStatus as Record<string, SubmodelStatusValue>);
+      }
+      if (nextSM) {
+        setCurrentSubmodel(nextSM);
+        setSubmodelStatus((prev) => ({ ...prev, [nextSM]: "in_progress" }));
+      }
+    } catch {
+      if (nextSM) {
+        setCurrentSubmodel(nextSM);
+        setSubmodelStatus((prev) => ({ ...prev, [nextSM]: "in_progress" }));
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant" as const, content: `Skipped ${SUBMODEL_LABELS[sm]}. Let's move on to **${SUBMODEL_LABELS[nextSM]}**.` },
+        ]);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function send(text: string) {
     const t = text.trim();
     if (!t || busy) return;
+
+    // If the user pastes a URL, fetch and extract it instead of sending as plain text
+    if (/^https?:\/\//i.test(t)) {
+      void ingestWebsite(t);
+      return;
+    }
 
     const profile = getCompanyProfile();
     const next: ChatMessage[] = [...messages, { role: "user", content: t }];
@@ -282,10 +424,16 @@ function WorkspaceInner() {
     const tid = activeThread();
     setBusy(true);
 
+    // Mark current submodel as in_progress if pending
+    if (submodelStatus[currentSubmodel] === "pending") {
+      setSubmodelStatus((prev) => ({ ...prev, [currentSubmodel]: "in_progress" }));
+    }
+
     try {
       const data = await callAgent({
         threadId: tid,
         message: t,
+        currentSubmodel,
         companyName: profile?.name || undefined,
         companyWebsite: profile?.website || undefined,
       });
@@ -294,19 +442,69 @@ function WorkspaceInner() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "That request didn't go through. Check your connection and send it again." },
+        { role: "assistant", content: "That request didn't go through. Check your connection and try again." },
       ]);
     } finally {
       setBusy(false);
     }
   }
 
-  async function ingestWebsite() {
-    const url = input.trim();
+  async function ingestWebsite(url: string) {
     if (!url || busy) return;
-    // In the document-first flow, we just send the URL as a chat message
-    // The agent will note it as context even though it cannot scrape it
-    void send(`Product URL for reference: ${url}`);
+    setInput("");
+    setBusy(true);
+    setMessages((prev) => [...prev, { role: "user", content: url }]);
+    const tid = activeThread();
+
+    if (submodelStatus[currentSubmodel] === "pending") {
+      setSubmodelStatus((prev) => ({ ...prev, [currentSubmodel]: "in_progress" }));
+    }
+
+    try {
+      const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(url)}`);
+      const fetched = (await res.json()) as {
+        text?: string;
+        title?: string;
+        error?: string;
+        productImageUrl?: string | null;
+        pdfLinks?: string[];
+      };
+      if (!res.ok || !fetched.text) {
+        throw new Error(fetched.error ?? "Could not fetch the page");
+      }
+
+      // Use product image and PDF links from fetch
+      if (fetched.productImageUrl && !productImageUrl) {
+        setProductImageUrl(fetched.productImageUrl);
+        setImageSource("og");
+      }
+      if (fetched.pdfLinks?.length) {
+        setPdfLinks(fetched.pdfLinks);
+      }
+
+      const profile = getCompanyProfile();
+      const smLabel = SUBMODEL_LABELS[currentSubmodel];
+      const data = await callAgent({
+        threadId: tid,
+        message: `Extract ${smLabel} fields from this product page.`,
+        documentText: fetched.text,
+        documentFilename: fetched.title || url,
+        documentType: "webpage",
+        currentSubmodel,
+        companyName: profile?.name || undefined,
+        companyWebsite: profile?.website || undefined,
+      });
+      applyAgentResponse(data);
+      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not fetch the URL";
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Could not read that page: ${msg}. Try uploading a document instead.` },
+      ]);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadFile(file: File) {
@@ -325,9 +523,7 @@ function WorkspaceInner() {
         truncated?: boolean;
         error?: string;
       };
-      if (!res.ok || data.error) {
-        throw new Error(data.error ?? `Upload failed (${res.status})`);
-      }
+      if (!res.ok || data.error) throw new Error(data.error ?? `Upload failed (${res.status})`);
       setUploadStatus("idle");
 
       const displayText = `${data.fileName} (${data.fileType}, ${data.sizeKb} KB)${data.truncated ? " — large file, first 40 000 chars extracted" : ""}`;
@@ -336,13 +532,19 @@ function WorkspaceInner() {
       setBusy(true);
       setMessages((prev) => [...prev, { role: "user", content: displayText }]);
 
+      if (submodelStatus[currentSubmodel] === "pending") {
+        setSubmodelStatus((prev) => ({ ...prev, [currentSubmodel]: "in_progress" }));
+      }
+
       try {
+        const smLabel = SUBMODEL_LABELS[currentSubmodel];
         const agentData = await callAgent({
           threadId: tid,
-          message: "Extract all IDTA 02006 Digital Nameplate fields from this document.",
+          message: `Extract ${smLabel} fields from this document.`,
           documentText: data.text,
           documentFilename: data.fileName,
           documentType: data.fileType,
+          currentSubmodel,
           companyName: profile?.name || undefined,
           companyWebsite: profile?.website || undefined,
         });
@@ -367,7 +569,6 @@ function WorkspaceInner() {
   }
 
   async function generate() {
-    if (!dppReady && Object.keys(extractedFields).length === 0) return;
     const profile = getCompanyProfile();
     const productName =
       extractedFields["ManufacturerProductDesignation"] ||
@@ -383,14 +584,12 @@ function WorkspaceInner() {
         body: JSON.stringify({
           productName,
           fields: extractedFields,
+          submodelFields: Object.keys(submodelFields).length > 0 ? submodelFields : undefined,
           threadId: tid,
         }),
       });
       const body = (await res.json()) as { threadId?: string; detail?: string; [key: string]: unknown };
-      if (!res.ok) {
-        throw new Error(body.detail ?? `Backend returned ${res.status}`);
-      }
-      // DPP generated — now deploy to BaSyx
+      if (!res.ok) throw new Error(body.detail ?? `Backend returned ${res.status}`);
       if (!threadId) setThreadId(tid);
       void deployPassport(tid);
     } catch (err) {
@@ -425,9 +624,7 @@ function WorkspaceInner() {
         aas_json?: Record<string, unknown>;
         detail?: string;
       };
-      if (!res.ok) {
-        throw new Error(body.detail ?? `Deploy failed: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(body.detail ?? `Deploy failed: ${res.status}`);
       const result = {
         passport_url: body.passport_url ?? "",
         qr_code_png_b64: body.qr_code_png_b64 ?? "",
@@ -435,7 +632,6 @@ function WorkspaceInner() {
       };
       setDeployResult(result);
       setDeployStatus("deployed");
-      // Save to Supabase registry including the AAS JSON for self-hosted passport page
       void savePassportRecord({
         status: "deployed",
         qr_code_b64: result.qr_code_png_b64,
@@ -475,6 +671,38 @@ function WorkspaceInner() {
     } catch { /* non-blocking */ }
   }
 
+  function startEditField(field: string, value: string) {
+    setEditingField(field);
+    setEditingValue(value);
+  }
+
+  function commitFieldEdit() {
+    if (!editingField) return;
+    const trimmed = editingValue.trim();
+    setEditingField(null);
+    if (!trimmed) return;
+    const sm = currentSubmodel;
+    setExtractedFields((prev) => {
+      const next = { ...prev, [editingField!]: trimmed };
+      const required = SUBMODEL_REQUIRED[sm] ?? [];
+      const missing = required.filter((f) => !next[f]);
+      setMissingRequired(missing);
+      setDppReady(missing.length === 0 || (submodelStatus["digital_nameplate"] === "complete"));
+      return next;
+    });
+    setSubmodelFields((prev) => {
+      const smPrev = prev[sm] ?? {};
+      return { ...prev, [sm]: { ...smPrev, [editingField!]: trimmed } };
+    });
+    setManuallyEditedFields((prev) => new Set(prev).add(editingField!));
+  }
+
+  // Determine how many submodels are complete/skipped
+  const completedSubmodels = SUBMODEL_SEQUENCE.filter(
+    (k) => submodelStatus[k] === "complete" || submodelStatus[k] === "skipped"
+  ).length;
+  const allSubmodelsDone = completedSubmodels === SUBMODEL_SEQUENCE.length;
+
   const productName = extractedFields["ManufacturerProductDesignation"] ||
     extractedFields["ManufacturerArticleNumber"] || "";
   const hasChat = messages.length > 0;
@@ -509,7 +737,7 @@ function WorkspaceInner() {
       <div className="flex h-full flex-col">
         {/* Top bar */}
         {hasChat && (
-          <header className="shrink-0 flex h-14 items-center justify-between border-b border-hairline bg-paper px-6">
+          <header className="shrink-0 flex h-14 items-center justify-between border-b border-hairline bg-paper pl-14 pr-6 md:pl-6">
             <span className="text-[14px] font-medium text-ink truncate">
               {productName || "New passport"}
             </span>
@@ -524,7 +752,7 @@ function WorkspaceInner() {
                   Agent activity →
                 </a>
               )}
-              {dppReady && deployStatus === "idle" && (
+              {allSubmodelsDone && deployStatus === "idle" && (
                 <button
                   onClick={() => void generate()}
                   disabled={busy}
@@ -537,12 +765,63 @@ function WorkspaceInner() {
           </header>
         )}
 
+        {/* Submodel progress strip */}
+        {hasChat && (
+          <div className="shrink-0 border-b border-hairline bg-paper px-4 py-2 overflow-x-auto scroll-quiet">
+            <div className="flex items-center gap-0.5 min-w-max pl-10 md:pl-0 mx-auto max-w-4xl">
+              {SUBMODEL_SEQUENCE.map((key, idx) => {
+                const status = submodelStatus[key] ?? "pending";
+                const isCurrent = key === currentSubmodel;
+                return (
+                  <div key={key} className="flex items-center">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (key === currentSubmodel) return;
+                        setCurrentSubmodel(key as SubmodelKey);
+                        if (submodelStatus[key] === "pending") {
+                          setSubmodelStatus((prev) => ({ ...prev, [key]: "in_progress" }));
+                        }
+                        setMessages((prev) => [
+                          ...prev,
+                          {
+                            role: "assistant" as const,
+                            content: `Switched to **${SUBMODEL_LABELS[key as SubmodelKey]}**. Share any information you have for this section, or upload a document.`,
+                          },
+                        ]);
+                      }}
+                      className={[
+                        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all",
+                        !isCurrent && !busy ? "cursor-pointer hover:bg-mist" : "",
+                        isCurrent
+                          ? "bg-signal/10 text-signal border border-signal/20"
+                          : status === "complete"
+                          ? "text-ok"
+                          : status === "skipped"
+                          ? "text-muted line-through"
+                          : "text-muted/50",
+                      ].join(" ")}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${statusColor(status as SubmodelStatusValue)}`} />
+                      {SUBMODEL_LABELS[key as SubmodelKey]}
+                    </button>
+                    {idx < SUBMODEL_SEQUENCE.length - 1 && (
+                      <span className="mx-0.5 text-[10px] text-muted/30">›</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex min-h-0 flex-1">
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="scroll-quiet flex-1 overflow-y-auto">
               {!hasChat ? (
                 /* ── Empty / hero state ── */
-                <div className="flex min-h-full flex-col items-center justify-center px-6 py-16 animate-rise">
+                <div className="flex min-h-full flex-col items-center justify-center px-6 pt-20 pb-16 md:py-16 animate-rise">
                   <div className="w-full max-w-xl">
                     <h1 className="text-[28px] font-semibold tracking-tight text-ink">
                       {getGreeting()}{firstName ? `, ${firstName}` : ""}.
@@ -591,10 +870,8 @@ function WorkspaceInner() {
                         </svg>
                         {uploadStatus === "uploading" ? "Reading file…" : "Add data source"}
                       </button>
-                      <span className="text-[12px] text-muted">PDF, Excel, CSV, DOCX</span>
-                      {uploadError && (
-                        <span className="text-[12px] text-red-500">{uploadError}</span>
-                      )}
+                      <span className="text-[12px] text-muted">PDF, Excel, CSV, DOCX · or paste a product URL</span>
+                      {uploadError && <span className="text-[12px] text-red-500">{uploadError}</span>}
                     </div>
 
                     <div className="mt-8">
@@ -638,11 +915,36 @@ function WorkspaceInner() {
                       </div>
                     ))}
 
-                    {/* ── Missing required fields card ─────────────── */}
-                    {missingRequired.length > 0 && !busy && (
+                    {/* ── PDF links found on product page ──────────────── */}
+                    {pdfLinks.length > 0 && !busy && (
+                      <div className="rounded-xl border border-hairline bg-paper p-4">
+                        <p className="text-[12px] font-semibold text-ink mb-2">Found documents</p>
+                        <div className="space-y-1.5">
+                          {pdfLinks.map((url, i) => (
+                            <a
+                              key={i}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-[12px] text-signal hover:underline"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                                <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                              </svg>
+                              <span className="truncate">{url.split("/").pop() || url}</span>
+                            </a>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted">Upload a PDF to extract data from it →</p>
+                      </div>
+                    )}
+
+                    {/* ── Missing fields summary — shown only after all submodels done ── */}
+                    {allSubmodelsDone && missingRequired.length > 0 && !busy && deployStatus === "idle" && (
                       <div className="rounded-xl border border-warn/20 bg-warn/[0.04] p-4 space-y-3">
                         <div>
-                          <p className="text-[13px] font-semibold text-warn">Missing required fields</p>
+                          <p className="text-[13px] font-semibold text-warn">Some fields couldn't be found</p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {missingRequired.map((g) => (
                               <span key={g} className="rounded-full border border-warn/20 bg-paper px-2.5 py-0.5 font-mono text-[11px] text-ink">
@@ -651,7 +953,7 @@ function WorkspaceInner() {
                             ))}
                           </div>
                           <p className="mt-2 text-[12px] text-muted">
-                            Type the missing values in the chat, or send a data request to your supplier below.
+                            You can still generate the passport with what's been collected, or request the missing data from your supplier.
                           </p>
                         </div>
                         {outreachStatus === "idle" || outreachStatus === "error" ? (
@@ -668,7 +970,7 @@ function WorkspaceInner() {
                               disabled={!supplierEmail || missingRequired.length === 0}
                               className="rounded-full bg-ink px-4 py-2 text-[12px] font-medium text-white disabled:opacity-30"
                             >
-                              Send email
+                              Request from supplier
                             </button>
                           </div>
                         ) : outreachStatus === "sending" ? (
@@ -686,7 +988,7 @@ function WorkspaceInner() {
                     )}
 
                     {/* ── Product image card ───────────────────────────── */}
-                    {(productImageUrl || (Object.keys(extractedFields).length > 0 && !busy)) && (
+                    {(productImageUrl || (hasExtracted && !busy)) && (
                       <div className="rounded-xl border border-hairline bg-paper p-4">
                         <p className="text-[12px] font-semibold text-ink mb-3">Product image</p>
                         {productImageUrl ? (
@@ -699,9 +1001,7 @@ function WorkspaceInner() {
                             />
                             <div className="flex flex-col gap-2">
                               <p className="text-[12px] text-muted">
-                                {imageSource === "og"
-                                  ? "Extracted from product page"
-                                  : "Uploaded by you"}
+                                {imageSource === "og" ? "Extracted from product page" : "Uploaded by you"}
                               </p>
                               <button
                                 onClick={() => imageInputRef.current?.click()}
@@ -725,12 +1025,12 @@ function WorkspaceInner() {
                       </div>
                     )}
 
-                    {/* ── DPP ready — Generate button ────────────────── */}
-                    {dppReady && deployStatus === "idle" && !busy && (
+                    {/* ── All submodels done — Generate button ────────── */}
+                    {allSubmodelsDone && deployStatus === "idle" && !busy && (
                       <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4">
-                        <p className="text-[13px] font-semibold text-ok">All required fields found</p>
+                        <p className="text-[13px] font-semibold text-ok">All submodels complete</p>
                         <p className="mt-1 text-[12px] text-muted">
-                          MIA has all the data needed to generate your Digital Product Passport.
+                          MIA has collected data across all {SUBMODEL_SEQUENCE.length} IDTA submodels.
                         </p>
                         <button
                           onClick={() => void generate()}
@@ -738,6 +1038,41 @@ function WorkspaceInner() {
                         >
                           Generate passport →
                         </button>
+                      </div>
+                    )}
+
+                    {/* ── Digital Nameplate ready (early generate) ──── */}
+                    {!allSubmodelsDone && dppReady && deployStatus === "idle" && !busy && (
+                      <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4">
+                        <p className="text-[13px] font-semibold text-ok">Digital Nameplate ready</p>
+                        <p className="mt-1 text-[12px] text-muted">
+                          You can generate a passport now with Digital Nameplate data, or continue adding more submodels.
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => void generate()}
+                            className="rounded-full border border-hairline px-4 py-1.5 text-[13px] font-medium text-ink hover:bg-mist"
+                          >
+                            Generate now
+                          </button>
+                          <button
+                            onClick={() => {
+                              const idx = SUBMODEL_SEQUENCE.indexOf(currentSubmodel);
+                              if (idx < SUBMODEL_SEQUENCE.length - 1) {
+                                const next = SUBMODEL_SEQUENCE[idx + 1];
+                                setCurrentSubmodel(next);
+                                setSubmodelStatus((prev) => ({ ...prev, [next]: "in_progress" }));
+                                setMessages((prev) => [
+                                  ...prev,
+                                  { role: "assistant" as const, content: `Let's continue with **${SUBMODEL_LABELS[next]}**. What information do you have for this section?` },
+                                ]);
+                              }
+                            }}
+                            className="rounded-full bg-signal px-4 py-1.5 text-[13px] font-medium text-white hover:bg-signal/90"
+                          >
+                            Continue to {SUBMODEL_LABELS[SUBMODEL_SEQUENCE[SUBMODEL_SEQUENCE.indexOf(currentSubmodel) + 1] ?? currentSubmodel]}
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -815,17 +1150,44 @@ function WorkspaceInner() {
                       </div>
                     )}
 
-                    {/* ── Extracted fields preview ──────────────────── */}
+                    {/* ── Extracted fields — click any value to edit ── */}
                     {hasExtracted && !busy && deployStatus === "idle" && (
                       <div className="rounded-xl border border-hairline bg-mist p-4">
-                        <p className="text-[12px] font-semibold uppercase tracking-wider text-muted mb-3">
-                          Extracted fields ({Object.keys(extractedFields).length})
-                        </p>
-                        <div className="space-y-1.5">
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-[12px] font-semibold uppercase tracking-wider text-muted">
+                            Extracted fields ({Object.keys(extractedFields).length})
+                          </p>
+                          <p className="text-[11px] text-muted">Click a value to edit</p>
+                        </div>
+                        <div className="space-y-1">
                           {Object.entries(extractedFields).map(([field, value]) => (
-                            <div key={field} className="flex gap-2">
-                              <span className="shrink-0 font-mono text-[11px] text-muted w-48">{field}</span>
-                              <span className="text-[12px] text-ink">{value}</span>
+                            <div key={field} className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-paper/70 group">
+                              <span className="shrink-0 font-mono text-[11px] text-muted w-48 flex items-center gap-1">
+                                {field}
+                                {manuallyEditedFields.has(field) && (
+                                  <span className="h-1.5 w-1.5 rounded-full bg-signal" title="Manually edited" />
+                                )}
+                              </span>
+                              {editingField === field ? (
+                                <input
+                                  autoFocus
+                                  value={editingValue}
+                                  onChange={(e) => setEditingValue(e.target.value)}
+                                  onBlur={commitFieldEdit}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") commitFieldEdit();
+                                    if (e.key === "Escape") setEditingField(null);
+                                  }}
+                                  className="flex-1 rounded border border-signal/40 bg-paper px-2 py-0.5 text-[12px] text-ink focus:outline-none focus:ring-2 focus:ring-signal/20"
+                                />
+                              ) : (
+                                <button
+                                  onClick={() => startEditField(field, value)}
+                                  className="flex-1 text-left text-[12px] text-ink hover:text-signal"
+                                >
+                                  {value}
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -870,6 +1232,18 @@ function WorkspaceInner() {
                       </svg>
                       {uploadStatus === "uploading" ? "Reading…" : "Add file"}
                     </button>
+                    {/* Skip button — only shown when not on last submodel and not deploying */}
+                    {deployStatus === "idle" && SUBMODEL_SEQUENCE.indexOf(currentSubmodel) < SUBMODEL_SEQUENCE.length - 1 && (
+                      <button
+                        type="button"
+                        onClick={() => void skipSubmodel()}
+                        disabled={busy}
+                        title={`Skip ${SUBMODEL_LABELS[currentSubmodel]}`}
+                        className="flex items-center gap-1 rounded-xl border border-hairline bg-paper px-3 py-1.5 text-[12px] font-medium text-muted transition-colors hover:border-warn/30 hover:text-warn disabled:opacity-30"
+                      >
+                        Skip {SUBMODEL_LABELS[currentSubmodel]} →
+                      </button>
+                    )}
                   </div>
                   {uploadError && (
                     <p className="text-[12px] text-red-500">{uploadError}</p>
@@ -885,7 +1259,7 @@ function WorkspaceInner() {
                         }
                       }}
                       rows={1}
-                      placeholder="Provide missing values or ask MIA..."
+                      placeholder={`Provide ${SUBMODEL_LABELS[currentSubmodel]} data or paste a URL…`}
                       className="max-h-32 flex-1 resize-none bg-transparent px-4 py-2.5 text-[14px] leading-relaxed text-ink placeholder:text-muted focus:outline-none"
                     />
                     <button

@@ -17,42 +17,21 @@ from mia_dpp.agent.models import (
     AgentStatus,
     ExtractionOutput,
     MiaState,
+    SUBMODEL_REQUIRED,
+    SUBMODEL_SEQUENCE,
+    SubmodelStatus,
     TraceStatus,
 )
-from mia_dpp.agent.prompts import AGENT_INSTRUCTIONS
+from mia_dpp.agent.prompts import SUBMODEL_PROMPTS
 from mia_dpp.config import Settings
 from mia_dpp.store import SessionSnapshot, Store
-
-# IDTA 02006 Digital Nameplate required fields (matches template id_short + address fields)
-REQUIRED_FIELDS: tuple[str, ...] = (
-    "ManufacturerName",
-    "ManufacturerProductDesignation",
-    "OrderCodeOfManufacturer",
-    "URIOfTheProduct",
-    "Street",
-    "ZipCode",
-    "CityTown",
-    "NationalCode",
-)
-
-# Optional fields to track
-OPTIONAL_FIELDS: tuple[str, ...] = (
-    "ProductArticleNumberOfManufacturer",
-    "SerialNumber",
-    "YearOfConstruction",
-    "HardwareVersion",
-    "SoftwareVersion",
-    "CountryOfOrigin",
-    "Phone",
-    "Fax",
-)
 
 
 class Mia:
     """Compose MIA and run document-extraction DPP agent sessions.
 
-    The agent reads document text supplied by the frontend, extracts IDTA 02006
-    Digital Nameplate fields using the LLM, and returns a structured response.
+    The agent reads document text supplied by the frontend, extracts IDTA fields
+    for the current submodel using the LLM, and returns a structured response.
     It never searches the web or invents product data.
     """
 
@@ -80,25 +59,27 @@ class Mia:
                 ),
             )
 
-        self._agent: Agent[None, ExtractionOutput] | None = None
+        self._agents: dict[str, Agent[None, ExtractionOutput]] = {}
+        self._model = agent_model
+
         if agent_model is not None:
-            self._agent = Agent(
-                agent_model,
-                name="mia-extractor",
-                output_type=ExtractionOutput,
-                instructions=AGENT_INSTRUCTIONS,
-                retries=1,
-                model_settings=ModelSettings(
-                    temperature=0,
-                    max_tokens=2048,
-                ),
-            )
+            for submodel_key, instructions in SUBMODEL_PROMPTS.items():
+                self._agents[submodel_key] = Agent(
+                    agent_model,
+                    name=f"mia-{submodel_key}",
+                    output_type=ExtractionOutput,
+                    instructions=instructions,
+                    retries=2,
+                    model_settings=ModelSettings(
+                        temperature=0,
+                        max_tokens=4096,
+                    ),
+                )
 
     @property
     def configured(self) -> bool:
         """Return whether an autonomous model is available."""
-
-        return self._agent is not None
+        return bool(self._agents)
 
     async def message(self, request: AgentRequest) -> AgentResponse:
         """Load session, run extraction agent, persist results, return response."""
@@ -117,7 +98,49 @@ class Mia:
         if request.document_filename:
             state.document_filename = request.document_filename
 
-        if self._agent is None:
+        # Update current submodel from request (frontend drives the sequence)
+        current_submodel = request.current_submodel
+        if current_submodel not in SUBMODEL_SEQUENCE:
+            current_submodel = state.current_submodel
+
+        # Handle skip action — mark current as skipped, advance
+        if request.action == "skip":
+            state.submodel_status[current_submodel] = SubmodelStatus.SKIPPED
+            idx = list(SUBMODEL_SEQUENCE).index(current_submodel)
+            if idx < len(SUBMODEL_SEQUENCE) - 1:
+                current_submodel = SUBMODEL_SEQUENCE[idx + 1]
+            state.current_submodel = current_submodel
+            all_done = all(
+                state.submodel_status.get(sm) in (SubmodelStatus.COMPLETE, SubmodelStatus.SKIPPED)
+                for sm in SUBMODEL_SEQUENCE
+            )
+            progress = _compute_progress(state)
+            self.store.save(
+                SessionSnapshot(
+                    state=state,
+                    history=history,
+                    reply="Skipped",
+                    decision_summary="submodel skipped",
+                )
+            )
+            return AgentResponse(
+                thread_id=thread_id,
+                reply=f"Understood — skipping that submodel. Let's move on to {_label(current_submodel)}.",
+                status=AgentStatus.NEEDS_INPUT,
+                current_submodel=current_submodel,
+                submodel_status=dict(state.submodel_status),
+                submodel_progress=progress,
+                all_submodels_done=all_done,
+                trace_events=self.store.list_events(thread_id, trace_offset),
+            )
+
+        # Mark current submodel as in_progress
+        if state.submodel_status.get(current_submodel) == SubmodelStatus.PENDING:
+            state.submodel_status[current_submodel] = SubmodelStatus.IN_PROGRESS
+        state.current_submodel = current_submodel
+
+        agent = self._agents.get(current_submodel)
+        if agent is None:
             self.store.add_event(
                 thread_id,
                 "run.configuration_required",
@@ -127,44 +150,71 @@ class Mia:
                 thread_id=thread_id,
                 reply="Configure OPENROUTER_API_KEY to use the MIA agent.",
                 status=AgentStatus.FAILED,
+                current_submodel=current_submodel,
+                submodel_status=dict(state.submodel_status),
+                submodel_progress=_compute_progress(state),
                 trace_events=self.store.list_events(thread_id, trace_offset),
             )
 
         self.store.add_event(
             thread_id,
             "run.started",
-            "MIA started document extraction.",
+            f"MIA started extraction for {current_submodel}.",
             status=TraceStatus.STARTED,
             input_summary=(request.document_filename or request.message)[:200],
         )
 
-        prompt = self._build_prompt(request, state)
-        result = await self._agent.run(prompt, message_history=history)
+        prompt = self._build_prompt(request, state, current_submodel)
+        result = await agent.run(prompt, message_history=history)
         output = result.output
 
-        # Merge extracted fields into persistent session state
+        # Merge extracted fields into flat dict (backward compat)
         for field in output.extracted_fields:
             state.extracted_fields[field.idta_field] = field.value
 
-        # Compute missing fields against the full session state
-        missing_required = [f for f in REQUIRED_FIELDS if f not in state.extracted_fields]
-        missing_optional = [f for f in OPTIONAL_FIELDS if f not in state.extracted_fields]
-        dpp_ready = len(missing_required) == 0
+        # Also store per-submodel fields
+        if current_submodel not in state.submodel_fields:
+            state.submodel_fields[current_submodel] = {}
+        for field in output.extracted_fields:
+            state.submodel_fields[current_submodel][field.idta_field] = field.value
 
-        state.status = AgentStatus.COMPLETED if dpp_ready else AgentStatus.NEEDS_INPUT
+        # Check if current submodel is complete (all required fields found)
+        required = SUBMODEL_REQUIRED.get(current_submodel, ())
+        sm_fields = state.submodel_fields.get(current_submodel, {})
+        submodel_complete = all(f in sm_fields for f in required)
+        if submodel_complete:
+            state.submodel_status[current_submodel] = SubmodelStatus.COMPLETE
+
+        # Compute missing fields for this submodel
+        missing_required = [f for f in required if f not in sm_fields]
+        all_optional = [
+            f for f in state.extracted_fields
+            if f not in required
+        ]
+
+        # Check if all submodels are done
+        all_done = all(
+            state.submodel_status.get(sm) in (SubmodelStatus.COMPLETE, SubmodelStatus.SKIPPED)
+            for sm in SUBMODEL_SEQUENCE
+        )
+        dpp_ready = state.submodel_status.get("digital_nameplate") == SubmodelStatus.COMPLETE
+
+        state.status = AgentStatus.COMPLETED if all_done else AgentStatus.NEEDS_INPUT
+        progress = _compute_progress(state)
 
         self.store.add_event(
             thread_id,
             "run.completed",
             (
-                f"Extracted {len(output.extracted_fields)} field(s). "
+                f"Extracted {len(output.extracted_fields)} field(s) for {current_submodel}. "
                 f"Missing required: {len(missing_required)}."
             ),
             status=TraceStatus.COMPLETED,
             metadata={
                 "extracted": len(output.extracted_fields),
-                "missingRequired": len(missing_required),
-                "dppReady": dpp_ready,
+                "submodel": current_submodel,
+                "submodelComplete": submodel_complete,
+                "allDone": all_done,
             },
         )
 
@@ -173,7 +223,7 @@ class Mia:
                 state=state,
                 history=result.all_messages(),
                 reply=output.reply,
-                decision_summary=f"{len(output.extracted_fields)} fields extracted",
+                decision_summary=f"{len(output.extracted_fields)} fields extracted for {current_submodel}",
             )
         )
 
@@ -183,19 +233,23 @@ class Mia:
             status=state.status,
             extracted_fields=output.extracted_fields,
             missing_required=missing_required,
-            missing_optional=missing_optional,
+            missing_optional=all_optional,
             dpp_ready=dpp_ready,
             trace_events=self.store.list_events(thread_id, trace_offset),
             artifact_count=len(self.store.list_artifacts(thread_id)),
+            current_submodel=current_submodel,
+            submodel_status=dict(state.submodel_status),
+            submodel_progress=progress,
+            all_submodels_done=all_done,
         )
 
     @staticmethod
-    def _build_prompt(request: AgentRequest, state: MiaState) -> str:
+    def _build_prompt(request: AgentRequest, state: MiaState, current_submodel: str) -> str:
         """Assemble the agent prompt from document text and session context."""
 
         parts: list[str] = []
 
-        # Prepend known company context so agent never needs to look it up
+        # Prepend known company context
         if state.company_name or state.company_website:
             parts.append(
                 "MANUFACTURER CONTEXT (already known — do NOT search for or ask about this):"
@@ -214,10 +268,11 @@ class Mia:
             parts.append(request.document_text)
             parts.append("")
 
-        # Show fields already confirmed in this session
-        if state.extracted_fields:
-            parts.append("FIELDS ALREADY EXTRACTED in this session:")
-            for field, value in state.extracted_fields.items():
+        # Show fields already confirmed for this submodel in this session
+        sm_fields = state.submodel_fields.get(current_submodel, {})
+        if sm_fields:
+            parts.append(f"FIELDS ALREADY EXTRACTED for {current_submodel}:")
+            for field, value in sm_fields.items():
                 parts.append(f"  {field}: {value}")
             parts.append("")
 
@@ -225,3 +280,17 @@ class Mia:
         parts.append(request.message)
 
         return "\n".join(parts)
+
+
+def _compute_progress(state: MiaState) -> float:
+    """Return 0.0–1.0 progress across all submodels."""
+    done = sum(
+        1 for sm in SUBMODEL_SEQUENCE
+        if state.submodel_status.get(sm) in (SubmodelStatus.COMPLETE, SubmodelStatus.SKIPPED)
+    )
+    return done / len(SUBMODEL_SEQUENCE)
+
+
+def _label(submodel_key: str) -> str:
+    from mia_dpp.agent.models import SUBMODEL_LABELS
+    return SUBMODEL_LABELS.get(submodel_key, submodel_key)
