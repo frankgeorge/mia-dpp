@@ -17,6 +17,7 @@ from mia_dpp.agent.models import (
     AgentStatus,
     BulkExtractRequest,
     BulkExtractResponse,
+    CombinedExtractionOutput,
     ExtractionOutput,
     MiaState,
     SUBMODEL_LABELS,
@@ -25,7 +26,7 @@ from mia_dpp.agent.models import (
     SubmodelStatus,
     TraceStatus,
 )
-from mia_dpp.agent.prompts import SUBMODEL_PROMPTS
+from mia_dpp.agent.prompts import COMBINED_EXTRACTION_PROMPT, SUBMODEL_PROMPTS
 from mia_dpp.config import Settings
 from mia_dpp.store import SessionSnapshot, Store
 
@@ -63,6 +64,7 @@ class Mia:
             )
 
         self._agents: dict[str, Agent[None, ExtractionOutput]] = {}
+        self._combined_agent: Agent[None, CombinedExtractionOutput] | None = None
         self._model = agent_model
 
         if agent_model is not None:
@@ -78,6 +80,17 @@ class Mia:
                         max_tokens=4096,
                     ),
                 )
+            self._combined_agent = Agent(
+                agent_model,
+                name="mia-combined",
+                output_type=CombinedExtractionOutput,
+                instructions=COMBINED_EXTRACTION_PROMPT,
+                retries=2,
+                model_settings=ModelSettings(
+                    temperature=0,
+                    max_tokens=8192,
+                ),
+            )
 
     @property
     def configured(self) -> bool:
@@ -247,7 +260,10 @@ class Mia:
         )
 
     async def extract_all_submodels(self, request: BulkExtractRequest) -> BulkExtractResponse:
-        """Extract fields from a document for all submodels in one sequential pass."""
+        """Extract fields from a document for all submodels in a single LLM call."""
+
+        if self._combined_agent is None:
+            raise ValueError("OPENROUTER_API_KEY not configured.")
 
         thread_id = request.thread_id or f"thread-{uuid.uuid4().hex}"
         snapshot = self.store.load(thread_id)
@@ -261,58 +277,59 @@ class Mia:
         if request.document_filename:
             state.document_filename = request.document_filename
 
+        # Build prompt with document text and known context
+        parts: list[str] = []
+        if state.company_name or state.company_website:
+            parts.append("MANUFACTURER CONTEXT (already known — do NOT search for or ask about this):")
+            if state.company_name:
+                parts.append(f"- Company name: {state.company_name}")
+            if state.company_website:
+                parts.append(f"- Website: {state.company_website}")
+            parts.append("")
+        if request.document_text:
+            doc_type = (request.document_type or "document").upper()
+            filename = request.document_filename or "uploaded file"
+            parts.append(f"DOCUMENT ({doc_type} — {filename}):")
+            parts.append(request.document_text)
+            parts.append("")
+        parts.append("Extract all available DPP fields from the document above, sorted by submodel.")
+        prompt = "\n".join(parts)
+
+        result = await self._combined_agent.run(prompt)
+        output = result.output
+
+        # Map each submodel's extracted fields into state
+        submodel_map: dict[str, list] = {
+            "dpp_metadata": output.dpp_metadata,
+            "digital_nameplate": output.digital_nameplate,
+            "technical_data": output.technical_data,
+            "carbon_footprint": output.carbon_footprint,
+            "handover_documentation": output.handover_documentation,
+            "maintenance_instructions": output.maintenance_instructions,
+        }
+
         all_extracted: list = []
         missing_required: dict[str, list[str]] = {}
 
-        for submodel_key in SUBMODEL_SEQUENCE:
-            agent = self._agents.get(submodel_key)
-            if agent is None:
-                continue
+        for submodel_key, fields in submodel_map.items():
+            if submodel_key not in state.submodel_fields:
+                state.submodel_fields[submodel_key] = {}
 
-            sm_label = SUBMODEL_LABELS.get(submodel_key, submodel_key)
+            for field in fields:
+                state.submodel_fields[submodel_key][field.idta_field] = field.value
+                state.extracted_fields[field.idta_field] = field.value
+            all_extracted.extend(fields)
 
-            # Mark as in_progress if pending
-            if state.submodel_status.get(submodel_key) == SubmodelStatus.PENDING:
-                state.submodel_status[submodel_key] = SubmodelStatus.IN_PROGRESS
-
-            agent_req = AgentRequest(
-                thread_id=thread_id,
-                message=f"Extract {sm_label} fields from this document.",
-                document_text=request.document_text,
-                document_filename=request.document_filename,
-                document_type=request.document_type,
-                company_name=request.company_name,
-                company_website=request.company_website,
-                current_submodel=submodel_key,
-            )
-            prompt = self._build_prompt(agent_req, state, submodel_key)
-
-            try:
-                result = await agent.run(prompt)
-                output = result.output
-
-                if submodel_key not in state.submodel_fields:
-                    state.submodel_fields[submodel_key] = {}
-                for field in output.extracted_fields:
-                    state.submodel_fields[submodel_key][field.idta_field] = field.value
-                    state.extracted_fields[field.idta_field] = field.value
-
-                all_extracted.extend(output.extracted_fields)
-
-            except Exception:
-                # Non-fatal — skip this submodel if extraction fails
-                pass
-
-            # Assess completion for this submodel
             required = SUBMODEL_REQUIRED.get(submodel_key, ())
             sm_fields = state.submodel_fields.get(submodel_key, {})
             missing = [f for f in required if f not in sm_fields]
             missing_required[submodel_key] = missing
 
-            if required and not missing:
-                state.submodel_status[submodel_key] = SubmodelStatus.COMPLETE
-            else:
-                state.submodel_status[submodel_key] = SubmodelStatus.IN_PROGRESS
+            if fields:
+                state.submodel_status[submodel_key] = (
+                    SubmodelStatus.COMPLETE if required and not missing
+                    else SubmodelStatus.IN_PROGRESS
+                )
 
         all_done = all(
             state.submodel_status.get(sm) in (SubmodelStatus.COMPLETE, SubmodelStatus.SKIPPED)
@@ -325,8 +342,8 @@ class Mia:
             SessionSnapshot(
                 state=state,
                 history=history,
-                reply="Bulk extraction completed",
-                decision_summary=f"Extracted {len(all_extracted)} fields across all submodels",
+                reply=output.reply,
+                decision_summary=f"Extracted {len(all_extracted)} fields across all submodels (single call)",
             )
         )
 

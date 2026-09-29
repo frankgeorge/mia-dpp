@@ -166,3 +166,62 @@ Example reply: "I found that this product requires maintenance every 12 months. 
 
 # Keep AGENT_INSTRUCTIONS as the digital nameplate default for backward compatibility
 AGENT_INSTRUCTIONS = SUBMODEL_PROMPTS["digital_nameplate"]
+
+COMBINED_EXTRACTION_PROMPT = _BASE_RULES + """
+Your task: Extract ALL available Digital Product Passport fields from the document IN ONE PASS.
+
+Sort every field you find into the correct submodel section below.
+Return nothing for a section if the document has no relevant data for it.
+Do NOT invent values. Do NOT ask for passportIssueDate or passportExpiryDate — those are set automatically.
+
+== dpp_metadata (IDTA 02099-1) ==
+REQUIRED:
+- uniqueProductIdentifier — batch/serial number, GTIN, or product URL used as unique ID
+- economicOperatorId — economic operator name and EU identifier (EORI, VAT, etc.)
+OPTIONAL (only if explicitly in document):
+- regulatoryScheme — e.g. "ESPR", "Battery Regulation 2023/1542"
+- expiryDate — product end-of-life date YYYY-MM-DD (food/pharma/battery only)
+
+== digital_nameplate (IDTA 02006) ==
+REQUIRED:
+- ManufacturerName — full legal manufacturer name
+- ManufacturerProductDesignation — official product name/type
+- OrderCodeOfManufacturer — order/catalog number
+- URIOfTheProduct — product or datasheet URL
+OPTIONAL:
+- ManufacturerProductFamily, ManufacturerProductType, SerialNumber, YearOfConstruction,
+  DateOfManufacture, CountryOfOrigin, HardwareVersion, FirmwareVersion, SoftwareVersion,
+  ProductArticleNumberOfManufacturer, UniqueFacilityIdentifier,
+  MarkingName, DesignationOfCertificateOrApproval
+
+== technical_data (IDTA 02003) ==
+REQUIRED:
+- GeneralInformation — general product description and technical capabilities
+OPTIONAL:
+- ManufacturerArticleNumber, ManufacturerOrderCode, FurtherInformation,
+  PropertyName, PropertyValue, Unit, KeyValue
+
+== carbon_footprint (IDTA 02023) ==
+REQUIRED:
+- PCFCO2eq — total CO2 equivalent (numeric)
+- ReferenceValueForCalculation — functional unit e.g. "per unit", "per kg"
+- QuantityOfMeasureForCalculation — quantity of reference unit (numeric)
+OPTIONAL:
+- PCFLiveCyclePhase, ExplanatoryStatement, PublicationDate, PCFCalculationMethod
+
+== handover_documentation (IDTA 02004) ==
+REQUIRED:
+- Title — document title e.g. "Installation Manual", "Safety Data Sheet"
+- OrganizationOfficialName — organization responsible for the document
+OPTIONAL:
+- SubTitle, DocumentId, DocumentVersion, DocumentDate, DigitalFile, Language, NumberOfPages
+
+== maintenance_instructions (IDTA 02018) ==
+REQUIRED:
+- MaintenanceFreeAsset — true or false
+OPTIONAL:
+- MaintenanceInterval, NextMaintenanceDate, ManufacturerRecommendation,
+  GuaranteedLifetime, OperatingHours, ConditionBasedMaintenance
+
+In your reply, briefly summarise what you found across all sections in plain language.
+"""

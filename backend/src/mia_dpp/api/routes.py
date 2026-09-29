@@ -237,6 +237,8 @@ async def generate_from_fields(
         raise HTTPException(status_code=503, detail=str(error)) from error
     except MiaError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"AAS build failed: {error}") from error
 
     # Merge additional submodels when submodel_fields is provided
     merged_env = dict(package.environment)

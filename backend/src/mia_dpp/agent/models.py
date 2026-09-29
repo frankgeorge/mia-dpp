@@ -157,15 +157,22 @@ class AgentResponse(WireModel):
     all_submodels_done: bool = False
 
 
+class CombinedExtractionOutput(WireModel):
+    """Structured output for single-call multi-submodel extraction."""
+
+    reply: str = Field(min_length=1, max_length=4000)
+    dpp_metadata: list[ExtractedField] = Field(default_factory=list)
+    digital_nameplate: list[ExtractedField] = Field(default_factory=list)
+    technical_data: list[ExtractedField] = Field(default_factory=list)
+    carbon_footprint: list[ExtractedField] = Field(default_factory=list)
+    handover_documentation: list[ExtractedField] = Field(default_factory=list)
+    maintenance_instructions: list[ExtractedField] = Field(default_factory=list)
+
+
 class BulkExtractRequest(WireModel):
     """HTTP-safe input for bulk multi-submodel document extraction."""
 
     thread_id: str | None = Field(default=None, min_length=8, max_length=128)
-    message: str = Field(
-        default="Extract all submodel fields from this document.",
-        min_length=1,
-        max_length=4096,
-    )
     document_text: str | None = Field(default=None, max_length=200_000)
     document_filename: str | None = Field(default=None, max_length=256)
     document_type: str | None = Field(default=None, max_length=32)

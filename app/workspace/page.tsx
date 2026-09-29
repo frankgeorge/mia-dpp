@@ -650,7 +650,9 @@ function WorkspaceInner() {
           threadId: tid,
         }),
       });
-      const body = (await res.json()) as { threadId?: string; detail?: string; [key: string]: unknown };
+      let body: { threadId?: string; detail?: string; [key: string]: unknown };
+      try { body = (await res.json()) as typeof body; }
+      catch { throw new Error(`Server error (${res.status}) — backend returned non-JSON response`); }
       if (!res.ok) throw new Error(body.detail ?? `Backend returned ${res.status}`);
       if (!threadId) setThreadId(tid);
       // Save as draft immediately so it shows in Assets even before deploy completes
@@ -681,13 +683,9 @@ function WorkspaceInner() {
           passport_base_url: process.env.NEXT_PUBLIC_BASE_URL ?? "https://mia-dpp.vercel.app",
         }),
       });
-      const body = (await res.json()) as {
-        passport_url?: string;
-        qr_code_png_b64?: string;
-        shell_ids?: string[];
-        aas_json?: Record<string, unknown>;
-        detail?: string;
-      };
+      let body: { passport_url?: string; qr_code_png_b64?: string; shell_ids?: string[]; aas_json?: Record<string, unknown>; detail?: string; };
+      try { body = (await res.json()) as typeof body; }
+      catch { throw new Error(`Server error (${res.status}) — backend returned non-JSON response`); }
       if (!res.ok) throw new Error(body.detail ?? `Deploy failed: ${res.status}`);
       const result = {
         passport_url: body.passport_url ?? "",
