@@ -97,6 +97,15 @@ function WorkspaceInner() {
   const [editingValue, setEditingValue] = useState("");
   const [manuallyEditedFields, setManuallyEditedFields] = useState<Set<string>>(new Set());
 
+  // ── Recent passports (hero state) ────────────────────────────────────────
+  const [recentPassports, setRecentPassports] = useState<{ thread_id: string; product_name: string; status: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/passports")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setRecentPassports(data.slice(0, 4)); })
+      .catch(() => {});
+  }, []);
+
   // ── Deploy state ──────────────────────────────────────────────────────────
   const [deployStatus, setDeployStatus] = useState<"idle" | "deploying" | "deployed" | "error">(saved?.deployStatus ?? "idle");
   const [deployResult, setDeployResult] = useState<{
@@ -953,16 +962,37 @@ function WorkspaceInner() {
                     <div className="mt-8">
                       <div className="flex items-center gap-3 mb-3">
                         <span className="text-[12px] font-semibold uppercase tracking-wider text-muted">
-                          Recent assets
+                          Recent passports
                         </span>
                         <span className="flex-1 border-t border-hairline" />
+                        {recentPassports.length > 0 && (
+                          <a href="/workspace/assets" className="text-[12px] text-signal hover:underline">View all →</a>
+                        )}
                       </div>
-                      <div className="rounded-xl border border-hairline bg-paper p-6 text-center">
-                        <p className="text-[14px] font-medium text-ink">No passports yet</p>
-                        <p className="mt-1 text-[13px] text-muted">
-                          Start a new chat to create your first Digital Product Passport.
-                        </p>
-                      </div>
+                      {recentPassports.length === 0 ? (
+                        <div className="rounded-xl border border-hairline bg-paper p-6 text-center">
+                          <p className="text-[14px] font-medium text-ink">No passports yet</p>
+                          <p className="mt-1 text-[13px] text-muted">
+                            Upload a product datasheet or paste a product URL to get started.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          {recentPassports.map((p) => (
+                            <a
+                              key={p.thread_id}
+                              href={`/workspace?thread=${p.thread_id}`}
+                              className="flex items-center gap-3 rounded-xl border border-hairline bg-paper px-4 py-3 transition-colors hover:border-signal/30 hover:bg-mist"
+                            >
+                              <span className={`h-2 w-2 shrink-0 rounded-full ${p.status === "deployed" ? "bg-ok" : "bg-warn"}`} />
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-medium text-ink">{p.product_name}</p>
+                                <p className="text-[11px] text-muted capitalize">{p.status}</p>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1227,7 +1257,7 @@ function WorkspaceInner() {
                     )}
 
                     {/* ── Extracted fields — click any value to edit ── */}
-                    {hasExtracted && !busy && deployStatus === "idle" && (
+                    {hasExtracted && !busy && (
                       <div className="rounded-xl border border-hairline bg-mist p-4">
                         <div className="flex items-center justify-between mb-3">
                           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted">

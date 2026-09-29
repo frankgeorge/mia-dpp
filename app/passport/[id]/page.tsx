@@ -16,21 +16,30 @@ interface PassportRecord {
   created_at: string;
 }
 
-interface AasProperty {
+interface AasElement {
   idShort: string;
   valueType?: string;
   value?: string;
   modelType?: string;
-  submodelElements?: AasProperty[];
+  submodelElements?: AasElement[];
+  statements?: AasElement[];
 }
 
-function extractProperties(elements: AasProperty[]): { label: string; value: string }[] {
+interface AasSubmodel {
+  idShort?: string;
+  id?: string;
+  submodelElements?: AasElement[];
+}
+
+function extractProperties(elements: AasElement[]): { label: string; value: string }[] {
   const results: { label: string; value: string }[] = [];
   for (const el of elements) {
-    if (el.modelType === "Property" && el.value) {
-      results.push({ label: el.idShort, value: el.value });
-    } else if (el.submodelElements) {
+    if ((el.modelType === "Property" || el.modelType === "MultiLanguageProperty") && el.value) {
+      results.push({ label: el.idShort, value: String(el.value) });
+    } else if (el.submodelElements?.length) {
       results.push(...extractProperties(el.submodelElements));
+    } else if (el.statements?.length) {
+      results.push(...extractProperties(el.statements));
     }
   }
   return results;
@@ -43,6 +52,21 @@ function formatLabel(idShort: string): string {
     .trim();
 }
 
+const SUBMODEL_DISPLAY: Record<string, { label: string; badge: string }> = {
+  digital_nameplate:       { label: "Digital Nameplate",        badge: "IDTA 02006" },
+  DigitalNameplate:        { label: "Digital Nameplate",        badge: "IDTA 02006" },
+  dpp_metadata:            { label: "DPP Metadata",             badge: "IDTA 02099" },
+  DPPMetadata:             { label: "DPP Metadata",             badge: "IDTA 02099" },
+  technical_data:          { label: "Technical Data",           badge: "IDTA 02003" },
+  TechnicalData:           { label: "Technical Data",           badge: "IDTA 02003" },
+  carbon_footprint:        { label: "Carbon Footprint",         badge: "IDTA 02023" },
+  CarbonFootprint:         { label: "Carbon Footprint",         badge: "IDTA 02023" },
+  handover_documentation:  { label: "Handover Documentation",   badge: "IDTA 02004" },
+  HandoverDocumentation:   { label: "Handover Documentation",   badge: "IDTA 02004" },
+  maintenance_instructions:{ label: "Maintenance Instructions", badge: "IDTA 02018" },
+  MaintenanceInstructions: { label: "Maintenance Instructions", badge: "IDTA 02018" },
+};
+
 export default function PassportPage() {
   const params = useParams();
   const threadId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
@@ -50,6 +74,7 @@ export default function PassportPage() {
   const [passport, setPassport] = useState<PassportRecord | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
     if (!threadId) return;
@@ -63,12 +88,21 @@ export default function PassportPage() {
       .finally(() => setLoading(false));
   }, [threadId]);
 
-  const properties: { label: string; value: string }[] = (() => {
+  // Parse all submodels from the AAS environment
+  const submodels: { key: string; label: string; badge: string; properties: { label: string; value: string }[] }[] = (() => {
     if (!passport?.aas_json) return [];
-    const submodels = (passport.aas_json.submodels as AasProperty[] | undefined) ?? [];
-    const elements = submodels[0]?.submodelElements ?? [];
-    return extractProperties(elements);
+    const rawSubmodels = (passport.aas_json.submodels as AasSubmodel[] | undefined) ?? [];
+    return rawSubmodels
+      .map((sm) => {
+        const key = sm.idShort ?? sm.id ?? "";
+        const display = SUBMODEL_DISPLAY[key] ?? { label: formatLabel(key) || "Product Data", badge: "AAS" };
+        const properties = extractProperties(sm.submodelElements ?? []);
+        return { key, label: display.label, badge: display.badge, properties };
+      })
+      .filter((sm) => sm.properties.length > 0);
   })();
+
+  const currentSubmodel = submodels[activeTab] ?? null;
 
   return (
     <div className="min-h-screen bg-white" style={{ fontFamily: "system-ui, sans-serif" }}>
@@ -145,20 +179,52 @@ export default function PassportPage() {
               </div>
             )}
 
-            {/* AAS Properties */}
-            {properties.length > 0 && (
-              <div className="w-full rounded-2xl border border-[#e8e8e8] bg-white p-6 shadow-sm">
-                <p className="mb-4 text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
-                  Product Data — {passport.submodel}
-                </p>
-                <div className="space-y-3">
-                  {properties.map(({ label, value }) => (
-                    <div key={label} className="flex items-start justify-between gap-4">
-                      <span className="text-[12px] text-[#888]">{formatLabel(label)}</span>
-                      <span className="text-right text-[13px] font-medium text-[#1a1a1a]">{value}</span>
+            {/* Submodel tabs + data */}
+            {submodels.length > 0 && (
+              <div className="w-full">
+                {/* Tab bar — only show if multiple submodels */}
+                {submodels.length > 1 && (
+                  <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-[#e8e8e8] bg-[#f8f8f8] p-1">
+                    {submodels.map((sm, i) => (
+                      <button
+                        key={sm.key}
+                        onClick={() => setActiveTab(i)}
+                        className={[
+                          "shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium transition-all",
+                          activeTab === i
+                            ? "bg-white text-[#1a1a1a] shadow-sm"
+                            : "text-[#888] hover:text-[#333]",
+                        ].join(" ")}
+                      >
+                        {sm.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Active submodel properties */}
+                {currentSubmodel && (
+                  <div className="w-full rounded-2xl border border-[#e8e8e8] bg-white p-6 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-[#aaa]">
+                        {currentSubmodel.label}
+                      </p>
+                      <span className="rounded-full border border-[#e0e8ff] bg-[#f0f4ff] px-2.5 py-0.5 text-[10px] font-medium text-[#3b5bdb]">
+                        {currentSubmodel.badge}
+                      </span>
                     </div>
-                  ))}
-                </div>
+                    <div className="space-y-3">
+                      {currentSubmodel.properties.map(({ label, value }) => (
+                        <div key={label} className="flex items-start justify-between gap-4">
+                          <span className="text-[12px] text-[#888]">{formatLabel(label)}</span>
+                          <span className="max-w-[60%] break-words text-right text-[13px] font-medium text-[#1a1a1a]">
+                            {value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -172,14 +238,16 @@ export default function PassportPage() {
                 <div className="border-t border-[#f0f0f0]" />
                 <div className="flex items-center gap-2">
                   <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <p className="text-[12px] text-[#555]">Verified — IDTA 02006 compliant</p>
+                  <p className="text-[12px] text-[#555]">
+                    Verified — {submodels.length > 0 ? submodels.map((s) => s.badge).join(", ") : "IDTA 02006"} compliant
+                  </p>
                 </div>
               </div>
             </div>
 
             {/* Standards badges */}
             <div className="flex flex-wrap justify-center gap-2">
-              {["IDTA 02006", "AAS v3.0", "EU ESPR"].map((badge) => (
+              {["AAS v3.0", "EU ESPR", "IDTA"].map((badge) => (
                 <span
                   key={badge}
                   className="rounded-full border border-[#e0e8ff] bg-[#f0f4ff] px-3 py-1 text-[11px] font-medium text-[#3b5bdb]"
