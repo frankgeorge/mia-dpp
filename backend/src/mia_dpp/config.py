@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     openrouter_api_key: SecretStr | None = None
     agent_model: str = Field(
-        default="anthropic/claude-3.5-haiku",
+        default="anthropic/claude-haiku-4.5",
         validation_alias="MIA_AGENT_MODEL",
     )
     thread_store_path: Path = Field(
