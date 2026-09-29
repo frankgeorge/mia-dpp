@@ -655,8 +655,12 @@ function WorkspaceInner() {
       catch { throw new Error(`Server error (${res.status}) — backend returned non-JSON response`); }
       if (!res.ok) throw new Error(body.detail ?? `Backend returned ${res.status}`);
       if (!threadId) setThreadId(tid);
-      // Save as draft immediately so it shows in Assets even before deploy completes
-      void savePassportRecord({ threadId: tid, status: "draft" });
+      // Await draft save so the passport exists in Assets before user navigates there
+      await savePassportRecord({ threadId: tid, status: "draft" });
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Passport saved as draft — you can see it in [Passports](/workspace/assets). Deploying to BaSyx now…" },
+      ]);
       void deployPassport(tid);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "unknown error";
@@ -725,19 +729,22 @@ function WorkspaceInner() {
     const profile = getCompanyProfile();
     const pname = extractedFields["ManufacturerProductDesignation"] || profile?.name || "Product";
     if (!tid) return;
-    try {
-      await fetch("/api/passports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          thread_id: tid,
-          product_name: pname,
-          submodel: "IDTA 02006",
-          product_image_url: productImageUrl,
-          ...overrides,
-        }),
-      });
-    } catch { /* non-blocking */ }
+    const res = await fetch("/api/passports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_id: tid,
+        product_name: pname,
+        submodel: "IDTA 02006",
+        product_image_url: productImageUrl,
+        ...overrides,
+      }),
+    });
+    if (!res.ok) {
+      let detail = `Passport save failed (${res.status})`;
+      try { const b = (await res.json()) as { error?: string }; if (b.error) detail = b.error; } catch { /* ignore */ }
+      throw new Error(detail);
+    }
   }
 
   function startEditField(field: string, value: string) {

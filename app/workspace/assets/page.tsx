@@ -36,6 +36,13 @@ export default function AssetsPage() {
     fetch("/api/passports/backfill-qr", { method: "POST" })
       .catch(() => {})
       .finally(() => void load());
+
+    // Re-fetch when the tab regains focus (user may have just generated a passport)
+    const onFocus = () => void fetch("/api/passports").then((r) => r.json()).then((data) => {
+      if (Array.isArray(data)) setPassports(data);
+    }).catch(() => {});
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   function copyLink(url: string, id: string) {
