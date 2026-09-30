@@ -367,29 +367,13 @@ function WorkspaceInner() {
       });
     }
 
-    // If current submodel is complete, auto-advance to next and inject a chat message
+    // If current submodel is complete, auto-advance to next
     if (data.submodelStatus?.[sm] === "complete") {
       const idx = SUBMODEL_SEQUENCE.indexOf(sm);
       if (idx >= 0 && idx < SUBMODEL_SEQUENCE.length - 1) {
         const nextSM = SUBMODEL_SEQUENCE[idx + 1] as SubmodelKey;
         setCurrentSubmodel(nextSM);
         setSubmodelStatus((prev) => ({ ...prev, [nextSM]: "in_progress" }));
-        // Inject transition message into chat
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant" as const,
-            content: `**${SUBMODEL_LABELS[sm]} ✓** — all required fields collected.\n\nNow let's work on **${SUBMODEL_LABELS[nextSM]}**. Paste the product URL, upload a document, or type the information directly.`,
-          },
-        ]);
-      } else if (data.allSubmodelsDone) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant" as const,
-            content: `**All submodels complete!** You're ready to generate your Digital Product Passport. Click **Generate passport** above.`,
-          },
-        ]);
       }
     }
 
@@ -1043,7 +1027,7 @@ function WorkspaceInner() {
                   Agent activity →
                 </a>
               )}
-              {allSubmodelsDone && deployStatus === "idle" && (
+              {hasExtracted && deployStatus === "idle" && (
                 <button
                   onClick={() => void generate()}
                   disabled={busy}
@@ -1074,13 +1058,6 @@ function WorkspaceInner() {
                         if (submodelStatus[key] === "pending") {
                           setSubmodelStatus((prev) => ({ ...prev, [key]: "in_progress" }));
                         }
-                        setMessages((prev) => [
-                          ...prev,
-                          {
-                            role: "assistant" as const,
-                            content: `Switched to **${SUBMODEL_LABELS[key as SubmodelKey]}**. Share any information you have for this section, or upload a document.`,
-                          },
-                        ]);
                       }}
                       className={[
                         "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all",
@@ -1380,12 +1357,16 @@ function WorkspaceInner() {
                       </div>
                     )}
 
-                    {/* ── All submodels done — Generate button ────────── */}
-                    {allSubmodelsDone && deployStatus === "idle" && !busy && (
+                    {/* ── Generate button — shown whenever there is data ─ */}
+                    {hasExtracted && deployStatus === "idle" && !busy && (
                       <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4">
-                        <p className="text-[13px] font-semibold text-ok">All submodels complete</p>
+                        <p className="text-[13px] font-semibold text-ok">
+                          {allSubmodelsDone ? "All submodels complete" : "Ready to generate"}
+                        </p>
                         <p className="mt-1 text-[12px] text-muted">
-                          MIA has collected data across all {SUBMODEL_SEQUENCE.length} IDTA submodels.
+                          {allSubmodelsDone
+                            ? `MIA has collected data across all ${SUBMODEL_SEQUENCE.length} IDTA submodels.`
+                            : "Generate the passport with the data collected so far."}
                         </p>
                         <button
                           onClick={() => void generate()}
@@ -1393,42 +1374,6 @@ function WorkspaceInner() {
                         >
                           Generate passport →
                         </button>
-                      </div>
-                    )}
-
-                    {/* ── Digital Nameplate ready (early generate) ──── */}
-                    {!allSubmodelsDone && dppReady && deployStatus === "idle" && !busy && (
-                      <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4">
-                        <p className="text-[13px] font-semibold text-ok">Digital Nameplate ready</p>
-                        <p className="mt-1 text-[12px] text-muted">
-                          You can generate a passport now, skip remaining sections, or keep adding data.
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            onClick={() => void skipAllAndGenerate()}
-                            disabled={busy}
-                            className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white hover:shadow-md hover:-translate-y-px transition-all disabled:opacity-40"
-                          >
-                            Skip remaining &amp; generate →
-                          </button>
-                          <button
-                            onClick={() => {
-                              const idx = SUBMODEL_SEQUENCE.indexOf(currentSubmodel);
-                              if (idx < SUBMODEL_SEQUENCE.length - 1) {
-                                const next = SUBMODEL_SEQUENCE[idx + 1];
-                                setCurrentSubmodel(next);
-                                setSubmodelStatus((prev) => ({ ...prev, [next]: "in_progress" }));
-                                setMessages((prev) => [
-                                  ...prev,
-                                  { role: "assistant" as const, content: `Let's continue with **${SUBMODEL_LABELS[next]}**. What information do you have for this section?` },
-                                ]);
-                              }
-                            }}
-                            className="rounded-full border border-hairline px-4 py-1.5 text-[13px] font-medium text-ink hover:bg-mist"
-                          >
-                            Continue to {SUBMODEL_LABELS[SUBMODEL_SEQUENCE[SUBMODEL_SEQUENCE.indexOf(currentSubmodel) + 1] ?? currentSubmodel]}
-                          </button>
-                        </div>
                       </div>
                     )}
 

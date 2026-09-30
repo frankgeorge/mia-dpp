@@ -264,23 +264,42 @@ async def generate_from_fields(
                         "handover_documentation", "maintenance_instructions")
             if k in payload.submodel_fields and payload.submodel_fields[k]
         ]
+        _SM_ID_SHORTS = {
+            "dpp_metadata": "DPPMetadata",
+            "technical_data": "TechnicalData",
+            "carbon_footprint": "CarbonFootprint",
+            "handover_documentation": "HandoverDocumentation",
+            "maintenance_instructions": "MaintenanceInstructions",
+        }
         for sm_key in additional_keys:
             sm_fields = payload.submodel_fields[sm_key]
             sm_mappings = _fields_to_mappings(sm_fields, sm_key, templates)
-            if not sm_mappings:
-                continue
-            try:
-                from mia_dpp.aas.build import build_dpp as _build
-                sm_package = _build(
-                    payload.product_name,
-                    sm_mappings,
-                    repository=templates,
-                    evidence=(),
-                )
-                extra_submodels.append(sm_package.submodel)
-            except Exception:
-                # Non-blocking — skip submodels that fail to build
-                pass
+            built = False
+            if sm_mappings:
+                try:
+                    from mia_dpp.aas.build import build_dpp as _build
+                    sm_package = _build(
+                        payload.product_name,
+                        sm_mappings,
+                        repository=templates,
+                        evidence=(),
+                    )
+                    extra_submodels.append(sm_package.submodel)
+                    built = True
+                except Exception:
+                    pass
+            if not built and sm_fields:
+                # Fallback: store raw fields as plain Properties so they appear on the passport page
+                elements = [
+                    {"idShort": k, "modelType": "Property", "valueType": "xs:string", "value": str(v)}
+                    for k, v in sm_fields.items() if v
+                ]
+                if elements:
+                    extra_submodels.append({
+                        "idShort": _SM_ID_SHORTS.get(sm_key, sm_key),
+                        "modelType": "Submodel",
+                        "submodelElements": elements,
+                    })
 
         if extra_submodels:
             merged_env = dict(package.environment)
