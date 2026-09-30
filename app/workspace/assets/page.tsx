@@ -138,7 +138,7 @@ export default function AssetsPage() {
                 passport={p}
                 copied={copied === p.id}
                 deleting={deleting === p.thread_id}
-                onCopy={() => p.passport_url && copyLink(p.passport_url, p.id)}
+                onCopy={(url?: string) => copyLink(url ?? p.passport_url ?? `${window.location.origin}/passport/${p.id}`, p.id)}
                 onDelete={() => void deletePassport(p.thread_id)}
               />
             ))}
@@ -172,10 +172,10 @@ function PassportCard({
   passport: Passport;
   copied: boolean;
   deleting: boolean;
-  onCopy: () => void;
+  onCopy: (url?: string) => void;
   onDelete: () => void;
 }) {
-  const deployed = passport.status === "deployed" && passport.qr_code_b64;
+  const deployed = passport.status === "deployed" && !!passport.passport_url;
   const date = new Date(passport.updated_at).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
@@ -236,10 +236,10 @@ function PassportCard({
         <div className="mt-4 space-y-2">
           {/* Primary action row */}
           <div className="flex gap-2">
-            {deployed && passport.passport_url ? (
+            {deployed ? (
               <>
                 <a
-                  href={passport.passport_url}
+                  href={passport.passport_url!}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
@@ -247,7 +247,23 @@ function PassportCard({
                   Open
                 </a>
                 <button
-                  onClick={onCopy}
+                  onClick={() => onCopy()}
+                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+                >
+                  {copied ? "Copied!" : "Share"}
+                </button>
+              </>
+            ) : passport.has_aas ? (
+              <>
+                <Link
+                  href={`/passport/${passport.id}`}
+                  target="_blank"
+                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+                >
+                  Open
+                </Link>
+                <button
+                  onClick={() => onCopy(`${window.location.origin}/passport/${passport.id}`)}
                   className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
                 >
                   {copied ? "Copied!" : "Share"}
