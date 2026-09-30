@@ -138,7 +138,7 @@ export default function AssetsPage() {
                 passport={p}
                 copied={copied === p.id}
                 deleting={deleting === p.thread_id}
-                onCopy={(url?: string) => copyLink(url ?? p.passport_url ?? `${window.location.origin}/passport/${p.id}`, p.id)}
+                onCopy={(url?: string) => copyLink(url ?? p.passport_url ?? `${window.location.origin}/passport/${p.thread_id}`, p.id)}
                 onDelete={() => void deletePassport(p.thread_id)}
               />
             ))}
@@ -256,14 +256,14 @@ function PassportCard({
             ) : passport.has_aas ? (
               <>
                 <Link
-                  href={`/passport/${passport.id}`}
+                  href={`/passport/${passport.thread_id}`}
                   target="_blank"
                   className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
                 >
                   Open
                 </Link>
                 <button
-                  onClick={() => onCopy(`${window.location.origin}/passport/${passport.id}`)}
+                  onClick={() => onCopy(`${window.location.origin}/passport/${passport.thread_id}`)}
                   className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
                 >
                   {copied ? "Copied!" : "Share"}
