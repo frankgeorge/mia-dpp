@@ -105,14 +105,9 @@ async def agent_message(
 
     try:
         return await _application(http_request).message(payload)
-    except (
-        UnexpectedModelBehavior,
-        httpx.HTTPError,
-        KeyError,
-        TypeError,
-        ValueError,
-        json.JSONDecodeError,
-    ) as error:
+    except HTTPException:
+        raise
+    except Exception as error:
         raise HTTPException(status_code=502, detail=f"agent failed: {error}") from error
 
 
@@ -125,14 +120,9 @@ async def extract_all_submodels(
 
     try:
         return await _application(http_request).extract_all_submodels(payload)
-    except (
-        UnexpectedModelBehavior,
-        httpx.HTTPError,
-        KeyError,
-        TypeError,
-        ValueError,
-        json.JSONDecodeError,
-    ) as error:
+    except HTTPException:
+        raise
+    except Exception as error:
         raise HTTPException(status_code=502, detail=f"bulk extraction failed: {error}") from error
 
 
@@ -558,13 +548,9 @@ async def run_carbon_footprint_agent(
     """Run the Carbon Footprint Calculator specialist agent."""
     try:
         return await _application(http_request).run_specialist_agent("carbon_footprint", payload)
-    except (
-        UnexpectedModelBehavior,
-        httpx.HTTPError,
-        KeyError,
-        TypeError,
-        ValueError,
-    ) as error:
+    except HTTPException:
+        raise
+    except Exception as error:
         raise HTTPException(status_code=502, detail=f"carbon footprint agent failed: {error}") from error
 
 
@@ -576,11 +562,7 @@ async def run_technical_data_agent(
     """Run the Technical Data Expert specialist agent."""
     try:
         return await _application(http_request).run_specialist_agent("technical_data", payload)
-    except (
-        UnexpectedModelBehavior,
-        httpx.HTTPError,
-        KeyError,
-        TypeError,
-        ValueError,
-    ) as error:
+    except HTTPException:
+        raise
+    except Exception as error:
         raise HTTPException(status_code=502, detail=f"technical data agent failed: {error}") from error

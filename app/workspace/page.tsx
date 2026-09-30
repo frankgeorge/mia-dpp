@@ -431,7 +431,12 @@ function WorkspaceInner() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const body = (await res.json()) as AgentResponse | { detail?: string };
+    let body: AgentResponse | { detail?: string };
+    try {
+      body = (await res.json()) as AgentResponse | { detail?: string };
+    } catch {
+      throw new Error(`Server error (${res.status}) — the backend may be starting up, please try again in a moment`);
+    }
     if (!res.ok) {
       throw new Error("detail" in body && body.detail ? body.detail : `Backend returned ${res.status}`);
     }
@@ -444,7 +449,12 @@ function WorkspaceInner() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const body = (await res.json()) as BulkExtractResponse | { detail?: string };
+    let body: BulkExtractResponse | { detail?: string };
+    try {
+      body = (await res.json()) as BulkExtractResponse | { detail?: string };
+    } catch {
+      throw new Error(`Server error (${res.status}) — the backend may be starting up, please try again in a moment`);
+    }
     if (!res.ok) {
       throw new Error("detail" in body && body.detail ? body.detail : `Backend returned ${res.status}`);
     }
@@ -660,7 +670,7 @@ function WorkspaceInner() {
           existing_fields: extractedFields,
         }),
       });
-      const body = (await res.json()) as {
+      let body: {
         reply?: string;
         extracted_fields?: Array<{ idta_field: string; value: string; confidence?: number; source_excerpt?: string }>;
         submodel_key?: string;
@@ -669,6 +679,11 @@ function WorkspaceInner() {
         data_sources?: string[];
         detail?: string;
       };
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        throw new Error(`Server error (${res.status}) — please try again in a moment`);
+      }
       if (!res.ok) throw new Error(body.detail ?? `Agent returned ${res.status}`);
 
       // Merge extracted fields into state
@@ -745,13 +760,12 @@ function WorkspaceInner() {
 
     try {
       const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(url)}`);
-      const fetched = (await res.json()) as {
-        text?: string;
-        title?: string;
-        error?: string;
-        productImageUrl?: string | null;
-        pdfLinks?: string[];
-      };
+      let fetched: { text?: string; title?: string; error?: string; productImageUrl?: string | null; pdfLinks?: string[] };
+      try {
+        fetched = (await res.json()) as typeof fetched;
+      } catch {
+        throw new Error(`Could not reach the page — server returned an unexpected response (${res.status}), please try again`);
+      }
       if (!res.ok || !fetched.text) {
         throw new Error(fetched.error ?? "Could not fetch the page");
       }
