@@ -159,6 +159,23 @@ function WorkspaceInner() {
 
         // Rebuild extractedFields + submodelFields from the stored AAS JSON
         if (data.aas_json) {
+          // AAS compiled idShort → our internal submodel key
+          const AAS_ID_SHORT_TO_KEY: Record<string, string> = {
+            Nameplate: "digital_nameplate",
+            DigitalNameplate: "digital_nameplate",
+            TechnicalData: "technical_data",
+            CarbonFootprint: "carbon_footprint",
+            HandoverDocumentation: "handover_documentation",
+            MaintenanceInstructions: "maintenance_instructions",
+            DPPMetadata: "dpp_metadata",
+            dpp_metadata: "dpp_metadata",
+            digital_nameplate: "digital_nameplate",
+            technical_data: "technical_data",
+            carbon_footprint: "carbon_footprint",
+            handover_documentation: "handover_documentation",
+            maintenance_instructions: "maintenance_instructions",
+          };
+
           const aasSubmodels: Array<{ idShort?: string; submodelElements?: unknown[] }> =
             (data.aas_json.submodels as typeof aasSubmodels) ?? [];
           const flat: Record<string, string> = {};
@@ -166,27 +183,39 @@ function WorkspaceInner() {
 
           function pullProps(elements: unknown[], smKey: string) {
             for (const el of elements as Array<{ idShort: string; modelType?: string; value?: unknown; submodelElements?: unknown[] }>) {
-              if ((el.modelType === "Property" || el.modelType === "MultiLanguageProperty") && el.value) {
+              if (el.modelType === "Property" && el.value != null) {
                 const v = String(el.value);
                 flat[el.idShort] = v;
                 bySubmodel[smKey] = { ...(bySubmodel[smKey] ?? {}), [el.idShort]: v };
+              } else if (el.modelType === "MultiLanguageProperty" && Array.isArray(el.value)) {
+                // Extract English text, fall back to first language
+                const langs = el.value as Array<{ language: string; text: string }>;
+                const en = langs.find((l) => l.language === "en") ?? langs[0];
+                if (en?.text) {
+                  flat[el.idShort] = en.text;
+                  bySubmodel[smKey] = { ...(bySubmodel[smKey] ?? {}), [el.idShort]: en.text };
+                }
               }
               if (el.submodelElements?.length) pullProps(el.submodelElements, smKey);
             }
           }
 
           for (const sm of aasSubmodels) {
-            const key = sm.idShort ?? "unknown";
-            pullProps(sm.submodelElements ?? [], key);
+            const rawKey = sm.idShort ?? "unknown";
+            const smKey = AAS_ID_SHORT_TO_KEY[rawKey] ?? rawKey;
+            pullProps(sm.submodelElements ?? [], smKey);
           }
 
           if (Object.keys(flat).length > 0) {
             setExtractedFields(flat);
             setSubmodelFields(bySubmodel);
-            // Mark submodels that have data as in_progress
             const statusUpdate: Record<string, SubmodelStatusValue> = {};
-            for (const key of Object.keys(bySubmodel)) {
-              statusUpdate[key] = "in_progress";
+            for (const sm of SUBMODEL_SEQUENCE) {
+              if (bySubmodel[sm] && Object.keys(bySubmodel[sm]).length > 0) {
+                const required = SUBMODEL_REQUIRED[sm] ?? [];
+                const allPresent = required.every((f) => bySubmodel[sm][f]);
+                statusUpdate[sm] = allPresent ? "complete" : "in_progress";
+              }
             }
             setSubmodelStatus((prev) => ({ ...prev, ...statusUpdate }));
           }
@@ -743,13 +772,17 @@ function WorkspaceInner() {
           threadId: tid,
         }),
       });
-      let body: { threadId?: string; detail?: string; [key: string]: unknown };
+      let body: { threadId?: string; dppJson?: Record<string, unknown>; detail?: string; [key: string]: unknown };
       try { body = (await res.json()) as typeof body; }
       catch { throw new Error(`Server error (${res.status}) — backend returned non-JSON response`); }
       if (!res.ok) throw new Error(body.detail ?? `Backend returned ${res.status}`);
       if (!threadId) setThreadId(tid);
-      // Await draft save so the passport exists in Assets before user navigates there
-      await savePassportRecord({ threadId: tid, status: "draft" });
+      // Await draft save — include aas_json so the passport page has data immediately
+      await savePassportRecord({
+        threadId: tid,
+        status: "draft",
+        aas_json: (body.dppJson as Record<string, unknown>) ?? null,
+      });
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "Passport saved as draft — you can see it in [Passports](/workspace/assets). Deploying to BaSyx now…" },
