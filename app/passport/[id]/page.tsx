@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 interface PassportRecord {
@@ -130,6 +130,29 @@ function getHeaderFields(sections: ParsedSection[]): { manufacturer: string; pro
   return { manufacturer, product, uri };
 }
 
+function QrCode({ url, size }: { url: string; size: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!canvasRef.current || !url) return;
+    import("qrcode").then((QRCode) => {
+      QRCode.toCanvas(canvasRef.current!, url, {
+        width: size,
+        margin: 1,
+        color: { dark: "#1a1a1a", light: "#ffffff" },
+      }).catch(() => {});
+    }).catch(() => {});
+  }, [url, size]);
+  return (
+    <canvas
+      ref={canvasRef}
+      width={size}
+      height={size}
+      className="rounded-lg"
+      title="Scan to open this passport"
+    />
+  );
+}
+
 export default function PassportPage() {
   const params = useParams();
   const threadId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
@@ -211,7 +234,7 @@ export default function PassportPage() {
                 className="flex items-center gap-1.5 rounded-lg border border-[#e8e8e8] bg-white px-3 py-1.5 text-[12px] font-medium text-[#555] transition-colors hover:bg-[#f5f5f5]"
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M8 11l-3-3M8 11l3-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
-                AAS JSON
+                Download DPP
               </a>
             )}
             <button
@@ -268,11 +291,12 @@ export default function PassportPage() {
                     </a>
                   )}
                 </div>
-                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <div className="flex flex-col items-end gap-2 shrink-0">
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDeployed ? "bg-[#e8f5ee] text-[#1b8a5a]" : "bg-[#fff8e6] text-[#b45309]"}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${isDeployed ? "bg-[#1b8a5a]" : "bg-[#b45309]"}`} />
                     {isDeployed ? "Active" : "Draft"}
                   </span>
+                  <QrCode url={passportUrl} size={80} />
                 </div>
               </div>
 
@@ -293,22 +317,6 @@ export default function PassportPage() {
             </div>
           </div>
 
-          {/* QR code row */}
-          {passport.qr_code_b64 && (
-            <div className="flex items-center gap-6 border-t border-[#f0f0f0] px-6 py-5">
-              <img
-                src={`data:image/png;base64,${passport.qr_code_b64}`}
-                alt="Passport QR Code"
-                className="h-24 w-24 rounded-xl"
-                style={{ imageRendering: "pixelated" }}
-              />
-              <div>
-                <p className="text-[13px] font-semibold text-[#1a1a1a]">Scan to share this passport</p>
-                <p className="mt-0.5 text-[12px] text-[#888]">Publicly accessible · EU ESPR compliant</p>
-                <p className="mt-2 break-all font-mono text-[10px] text-[#bbb]">{passportUrl}</p>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Section tabs + data */}
@@ -328,9 +336,6 @@ export default function PassportPage() {
                   ].join(" ")}
                 >
                   {s.label}
-                  <span className="ml-1.5 rounded-full bg-[#f0f0f0] px-1.5 py-0.5 text-[10px] font-semibold text-[#888]">
-                    {s.fields.length}
-                  </span>
                 </button>
               ))}
             </div>

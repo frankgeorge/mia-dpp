@@ -291,9 +291,9 @@ function PassportCard({
                 href={`/api/passports/thread/${passport.thread_id}/download`}
                 download
                 className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-                title="Download AAS JSON"
+                title="Download DPP as PDF"
               >
-                ↓
+                PDF
               </a>
             )}
             <button
