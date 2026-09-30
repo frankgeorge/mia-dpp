@@ -35,6 +35,8 @@ from mia_dpp.api.schemas import (
     GenerateRequest,
     GenerateResponse,
     HealthResponse,
+    SpecialistAgentRequest,
+    SpecialistAgentResponse,
 )
 from mia_dpp.canonical import sha256_json
 from mia_dpp.domain.mappings import (
@@ -527,3 +529,39 @@ async def deploy_workspace(
         qr_code_png_b64=qr_b64,
         aas_json=environment,
     )
+
+
+@router.post("/api/agent/carbon-footprint", response_model=SpecialistAgentResponse)
+async def run_carbon_footprint_agent(
+    payload: SpecialistAgentRequest,
+    http_request: Request,
+) -> SpecialistAgentResponse:
+    """Run the Carbon Footprint Calculator specialist agent."""
+    try:
+        return await _application(http_request).run_specialist_agent("carbon_footprint", payload)
+    except (
+        UnexpectedModelBehavior,
+        httpx.HTTPError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise HTTPException(status_code=502, detail=f"carbon footprint agent failed: {error}") from error
+
+
+@router.post("/api/agent/technical-data", response_model=SpecialistAgentResponse)
+async def run_technical_data_agent(
+    payload: SpecialistAgentRequest,
+    http_request: Request,
+) -> SpecialistAgentResponse:
+    """Run the Technical Data Expert specialist agent."""
+    try:
+        return await _application(http_request).run_specialist_agent("technical_data", payload)
+    except (
+        UnexpectedModelBehavior,
+        httpx.HTTPError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise HTTPException(status_code=502, detail=f"technical data agent failed: {error}") from error

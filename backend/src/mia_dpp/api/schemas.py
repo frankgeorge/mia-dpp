@@ -63,3 +63,24 @@ class DeployResponse(WireModel):
     passport_url: str
     qr_code_png_b64: str
     aas_json: dict | None = None
+
+
+class SpecialistAgentRequest(WireModel):
+    """Request to run a specialist calculation agent (carbon footprint or technical data)."""
+
+    thread_id: str = Field(min_length=8, max_length=128)
+    product_url: str | None = Field(default=None, max_length=1024)
+    product_name: str | None = Field(default=None, max_length=512)
+    existing_fields: dict[str, str] = Field(default_factory=dict)
+
+
+class SpecialistAgentResponse(WireModel):
+    """Result from a specialist agent run."""
+
+    thread_id: str
+    submodel_key: str
+    reply: str
+    extracted_fields: list = Field(default_factory=list)  # list[ExtractedField] — avoid circular
+    methodology: str = ""
+    confidence: str = "estimated"
+    data_sources: list[str] = Field(default_factory=list)

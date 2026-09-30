@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+import httpx
+
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openrouter import OpenRouterModel
@@ -27,8 +29,12 @@ from mia_dpp.agent.models import (
     TraceStatus,
 )
 from mia_dpp.agent.prompts import COMBINED_EXTRACTION_PROMPT, SUBMODEL_PROMPTS
+from mia_dpp.agent.web_agents import WebAgentDeps, build_carbon_footprint_agent, build_technical_data_agent
+from mia_dpp.api.schemas import SpecialistAgentRequest, SpecialistAgentResponse
 from mia_dpp.config import Settings
+from mia_dpp.integrations.ddgs import DdgsSearchProvider
 from mia_dpp.store import SessionSnapshot, Store
+from typing import Literal
 
 
 class Mia:
@@ -91,6 +97,9 @@ class Mia:
                     max_tokens=8192,
                 ),
             )
+        self._carbon_footprint_agent = build_carbon_footprint_agent(agent_model) if agent_model is not None else None
+        self._technical_data_agent = build_technical_data_agent(agent_model) if agent_model is not None else None
+        self._search = DdgsSearchProvider()
 
     @property
     def configured(self) -> bool:
@@ -356,6 +365,85 @@ class Mia:
             all_submodels_done=all_done,
             dpp_ready=dpp_ready,
             missing_required=missing_required,
+        )
+
+    async def run_specialist_agent(
+        self,
+        agent_type: Literal["carbon_footprint", "technical_data"],
+        request: SpecialistAgentRequest,
+    ) -> SpecialistAgentResponse:
+        """Run a web-enabled specialist agent (carbon footprint or technical data)."""
+
+        agent = (
+            self._carbon_footprint_agent
+            if agent_type == "carbon_footprint"
+            else self._technical_data_agent
+        )
+        if agent is None:
+            raise ValueError("OPENROUTER_API_KEY not configured.")
+
+        # Load session state so we can merge results back
+        snapshot = self.store.load(request.thread_id)
+        state = snapshot.state if snapshot is not None else MiaState(thread_id=request.thread_id)
+
+        # Build the user prompt with all known context
+        parts: list[str] = ["PRODUCT CONTEXT:"]
+        if request.product_name:
+            parts.append(f"- Product name: {request.product_name}")
+        if request.product_url:
+            parts.append(f"- Product URL: {request.product_url}")
+        if request.existing_fields:
+            for k, v in request.existing_fields.items():
+                parts.append(f"- {k}: {v}")
+        parts.append("")
+        if agent_type == "carbon_footprint":
+            parts.append("Use your research tools to calculate the product carbon footprint. Start by fetching the product URL if one is provided, then search for manufacturer sustainability data and material emission factors.")
+        else:
+            parts.append("Use your research tools to extract complete technical specifications. Start by fetching the product URL if one is provided, then search for the product datasheet.")
+
+        prompt = "\n".join(parts)
+
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "MIA-DPP/1.0 (+https://mia-dpp.vercel.app)"},
+            timeout=30.0,
+        ) as http_client:
+            deps = WebAgentDeps(search=self._search, http=http_client)
+            result = await agent.run(prompt, deps=deps)
+
+        output = result.output
+
+        # Merge the results back into session state
+        if output.extracted_fields:
+            submodel_fields = state.submodel_fields.setdefault(agent_type, {})
+            for field in output.extracted_fields:
+                submodel_fields[field.idta_field] = field.value
+                state.extracted_fields[field.idta_field] = field.value
+
+            # Update submodel status
+            required = SUBMODEL_REQUIRED.get(agent_type, ())
+            sm_fields = state.submodel_fields.get(agent_type, {})
+            if required and all(f in sm_fields for f in required):
+                state.submodel_status[agent_type] = SubmodelStatus.COMPLETE
+            elif sm_fields:
+                state.submodel_status[agent_type] = SubmodelStatus.IN_PROGRESS
+
+        self.store.save(
+            SessionSnapshot(
+                state=state,
+                history=snapshot.history if snapshot else [],
+                reply=output.reply,
+                decision_summary=f"{agent_type} specialist agent: {len(output.extracted_fields)} fields",
+            )
+        )
+
+        return SpecialistAgentResponse(
+            thread_id=request.thread_id,
+            submodel_key=agent_type,
+            reply=output.reply,
+            extracted_fields=output.extracted_fields,
+            methodology=output.methodology,
+            confidence=output.confidence,
+            data_sources=output.data_sources,
         )
 
     @staticmethod

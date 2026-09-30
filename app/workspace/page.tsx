@@ -105,6 +105,11 @@ function WorkspaceInner() {
   );
   const [pdfLinks, setPdfLinks] = useState<string[]>(saved?.pdfLinks ?? []);
 
+  // ── Specialist agent state ────────────────────────────────────────────────
+  const [agentRunning, setAgentRunning] = useState<"carbon_footprint" | "technical_data" | null>(null);
+  const [showAgentSuggestion, setShowAgentSuggestion] = useState(false);
+  const [lastProductUrl, setLastProductUrl] = useState<string | null>(null);
+
   // ── Edit state ────────────────────────────────────────────────────────────
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -533,6 +538,14 @@ function WorkspaceInner() {
       }
 
       setMessages((prev) => [...prev, { role: "assistant" as const, content: summary }]);
+
+      // Suggest specialist agents if carbon/technical data are incomplete and we have a product URL
+      const productUrl = data.submodelFields?.digital_nameplate?.URIOfTheProduct || extractedFields["URIOfTheProduct"];
+      const cfIncomplete = !data.submodelStatus?.carbon_footprint || data.submodelStatus.carbon_footprint === "pending" || data.submodelStatus.carbon_footprint === "in_progress";
+      const tdIncomplete = !data.submodelStatus?.technical_data || data.submodelStatus.technical_data === "pending" || data.submodelStatus.technical_data === "in_progress";
+      if ((cfIncomplete || tdIncomplete) && productUrl) {
+        setShowAgentSuggestion(true);
+      }
     } else {
       setMessages((prev) => [
         ...prev,
@@ -641,8 +654,83 @@ function WorkspaceInner() {
     }
   }
 
+  async function runSpecialistAgent(type: "carbon_footprint" | "technical_data") {
+    if (busy || agentRunning || !threadId) return;
+    setAgentRunning(type);
+    setShowAgentSuggestion(false);
+    setBusy(true);
+    const label = type === "carbon_footprint" ? "Carbon Footprint Calculator" : "Technical Data Expert";
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant" as const, content: `Running **${label}** — searching the web and analysing product data…` },
+    ]);
+    try {
+      const endpoint = type === "carbon_footprint" ? "carbon-footprint" : "technical-data";
+      const res = await fetch(`${API_URL}/api/agent/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          thread_id: threadId,
+          product_url: lastProductUrl ?? extractedFields["URIOfTheProduct"] ?? null,
+          product_name: extractedFields["ManufacturerProductDesignation"] || extractedFields["ManufacturerArticleNumber"] || null,
+          existing_fields: extractedFields,
+        }),
+      });
+      const body = (await res.json()) as {
+        reply?: string;
+        extracted_fields?: Array<{ idta_field: string; value: string; confidence?: number; source_excerpt?: string }>;
+        submodel_key?: string;
+        methodology?: string;
+        confidence?: string;
+        data_sources?: string[];
+        detail?: string;
+      };
+      if (!res.ok) throw new Error(body.detail ?? `Agent returned ${res.status}`);
+
+      // Merge extracted fields into state
+      if (body.extracted_fields?.length) {
+        setExtractedFields((prev) => {
+          const next = { ...prev };
+          for (const f of body.extracted_fields!) next[f.idta_field] = f.value;
+          return next;
+        });
+        setSubmodelFields((prev) => {
+          const smKey = body.submodel_key ?? type;
+          const smPrev = prev[smKey] ?? {};
+          const smNext = { ...smPrev };
+          for (const f of body.extracted_fields!) smNext[f.idta_field] = f.value;
+          return { ...prev, [smKey]: smNext };
+        });
+        const required = SUBMODEL_REQUIRED[type] ?? [];
+        const allFields = { ...extractedFields };
+        for (const f of body.extracted_fields) allFields[f.idta_field] = f.value;
+        const allPresent = required.every((f) => allFields[f]);
+        if (allPresent) setSubmodelStatus((prev) => ({ ...prev, [type]: "complete" as SubmodelStatusValue }));
+        else setSubmodelStatus((prev) => ({ ...prev, [type]: "in_progress" as SubmodelStatusValue }));
+      }
+
+      setMessages((prev) => [...prev, { role: "assistant" as const, content: body.reply ?? "Agent completed." }]);
+
+      // Show other agent suggestion if it wasn't run yet
+      const otherType = type === "carbon_footprint" ? "technical_data" : "carbon_footprint";
+      if (submodelStatus[otherType] === "pending" || submodelStatus[otherType] === "in_progress") {
+        setShowAgentSuggestion(true);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant" as const, content: `${label} encountered an error: ${msg}` },
+      ]);
+    } finally {
+      setBusy(false);
+      setAgentRunning(null);
+    }
+  }
+
   async function ingestWebsite(url: string) {
     if (!url || busy) return;
+    setLastProductUrl(url);
     setInput("");
     setBusy(true);
     setMessages((prev) => [...prev, { role: "user", content: url }]);
@@ -1138,6 +1226,49 @@ function WorkspaceInner() {
                         </div>
                       </div>
                     ))}
+
+                    {/* ── Specialist agent suggestion card ─────────────── */}
+                    {showAgentSuggestion && !busy && (
+                      <div className="rounded-xl border border-signal/20 bg-signal/[0.03] p-4">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div>
+                            <p className="text-[13px] font-semibold text-ink">Run specialist agents</p>
+                            <p className="mt-0.5 text-[12px] text-muted">These agents search the web and calculate values automatically — no manual entry needed.</p>
+                          </div>
+                          <button onClick={() => setShowAgentSuggestion(false)} className="shrink-0 text-muted hover:text-ink">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                          </button>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          {(submodelStatus["carbon_footprint"] === "pending" || submodelStatus["carbon_footprint"] === "in_progress") && (
+                            <button
+                              onClick={() => void runSpecialistAgent("carbon_footprint")}
+                              disabled={!!agentRunning}
+                              className="flex items-center gap-2 rounded-lg border border-hairline bg-paper px-4 py-2.5 text-[13px] font-medium text-ink transition-colors hover:border-signal/30 hover:bg-mist disabled:opacity-40"
+                            >
+                              <span>🌿</span>
+                              <div className="text-left">
+                                <div className="font-semibold">Carbon Footprint</div>
+                                <div className="text-[11px] text-muted font-normal">Calculates PCF using emission factors</div>
+                              </div>
+                            </button>
+                          )}
+                          {(submodelStatus["technical_data"] === "pending" || submodelStatus["technical_data"] === "in_progress") && (
+                            <button
+                              onClick={() => void runSpecialistAgent("technical_data")}
+                              disabled={!!agentRunning}
+                              className="flex items-center gap-2 rounded-lg border border-hairline bg-paper px-4 py-2.5 text-[13px] font-medium text-ink transition-colors hover:border-signal/30 hover:bg-mist disabled:opacity-40"
+                            >
+                              <span>⚙️</span>
+                              <div className="text-left">
+                                <div className="font-semibold">Technical Data</div>
+                                <div className="text-[11px] text-muted font-normal">Extracts specs from product page & datasheet</div>
+                              </div>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* ── PDF links found on product page ──────────────── */}
                     {pdfLinks.length > 0 && !busy && (
