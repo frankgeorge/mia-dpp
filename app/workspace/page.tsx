@@ -695,6 +695,25 @@ function WorkspaceInner() {
 
       setMessages((prev) => [...prev, { role: "assistant" as const, content: body.reply ?? "Agent completed." }]);
 
+      // Fire-and-forget: persist run to audit log
+      void fetch("/api/agent-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          thread_id: threadId,
+          product_name:
+            extractedFields["ManufacturerProductDesignation"] ||
+            extractedFields["ManufacturerArticleNumber"] ||
+            "Unknown product",
+          agent_type: type,
+          reply: body.reply ?? "",
+          methodology: body.methodology ?? "",
+          confidence: body.confidence ?? "estimated",
+          data_sources: body.data_sources ?? [],
+          extracted_fields: body.extracted_fields ?? [],
+        }),
+      });
+
       // Show other agent suggestion if it wasn't run yet
       const otherType = type === "carbon_footprint" ? "technical_data" : "carbon_footprint";
       if (submodelStatus[otherType] === "pending" || submodelStatus[otherType] === "in_progress") {
