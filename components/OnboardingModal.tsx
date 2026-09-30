@@ -111,7 +111,7 @@ export function OnboardingModal({ onClose }: Props) {
                   type="url"
                   value={companyWebsite}
                   onChange={(e) => setCompanyWebsite(e.target.value)}
-                  placeholder="https://
+                  placeholder="https://www.example.com"
                   className="w-full rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
                 />
               </div>
