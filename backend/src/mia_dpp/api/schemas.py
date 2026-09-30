@@ -84,3 +84,5 @@ class SpecialistAgentResponse(WireModel):
     methodology: str = ""
     confidence: str = "estimated"
     data_sources: list[str] = Field(default_factory=list)
+    tool_trace: list[dict] = Field(default_factory=list)
+    calculation_inputs: dict[str, str] = Field(default_factory=dict)

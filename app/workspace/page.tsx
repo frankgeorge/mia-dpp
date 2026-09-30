@@ -677,6 +677,8 @@ function WorkspaceInner() {
         methodology?: string;
         confidence?: string;
         data_sources?: string[];
+        tool_trace?: Array<{ tool: string; input: string; success: string; summary: string }>;
+        calculation_inputs?: Record<string, string>;
         detail?: string;
       };
       try {
@@ -726,6 +728,8 @@ function WorkspaceInner() {
           confidence: body.confidence ?? "estimated",
           data_sources: body.data_sources ?? [],
           extracted_fields: body.extracted_fields ?? [],
+          tool_calls: body.tool_trace ?? [],
+          calculation_inputs: body.calculation_inputs ?? {},
         }),
       });
 

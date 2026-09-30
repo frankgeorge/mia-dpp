@@ -23,6 +23,8 @@ interface AgentRun {
   data_sources: string[];
   extracted_fields: ExtractedField[];
   field_count: number;
+  tool_calls: Array<{ tool: string; input: string; success: string; summary: string }>;
+  calculation_inputs: Record<string, string>;
   created_at: string;
 }
 
@@ -300,6 +302,56 @@ function RunRow({
                       </a>
                     ) : (
                       <p className="text-[12px] text-ink break-all">{src}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Calculation Inputs */}
+          {Object.keys(run.calculation_inputs ?? {}).length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-2">
+                Calculation Inputs
+              </p>
+              <div className="rounded-xl border border-hairline overflow-hidden">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="border-b border-hairline bg-mist">
+                      <th className="px-3 py-2 text-left font-semibold text-muted">Parameter</th>
+                      <th className="px-3 py-2 text-left font-semibold text-muted">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(run.calculation_inputs).map(([k, v], i, arr) => (
+                      <tr key={k} className={i < arr.length - 1 ? "border-b border-hairline" : ""}>
+                        <td className="px-3 py-2 font-mono text-signal whitespace-nowrap">{k}</td>
+                        <td className="px-3 py-2 text-ink break-all">{v}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Agent Trace */}
+          {run.tool_calls?.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-2">
+                Agent Trace ({run.tool_calls.length} tool call{run.tool_calls.length !== 1 ? "s" : ""})
+              </p>
+              <div className="space-y-2">
+                {run.tool_calls.map((tc, i) => (
+                  <div key={i} className="rounded-xl border border-hairline overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-mist border-b border-hairline">
+                      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${tc.success === "true" ? "bg-ok" : "bg-error"}`} />
+                      <span className="font-mono text-[11px] font-semibold text-ink">{tc.tool}</span>
+                      <span className="text-[11px] text-muted truncate">{tc.input}</span>
+                    </div>
+                    {tc.summary && (
+                      <p className="px-3 py-2 text-[11px] text-muted leading-relaxed line-clamp-3">{tc.summary}</p>
                     )}
                   </div>
                 ))}

@@ -407,10 +407,11 @@ class Mia:
             headers={"User-Agent": "MIA-DPP/1.0 (+https://mia-dpp.vercel.app)"},
             timeout=30.0,
         ) as http_client:
-            deps = WebAgentDeps(search=self._search, http=http_client)
+            deps = WebAgentDeps(search=self._search, http=http_client, tool_trace=[])
             result = await agent.run(prompt, deps=deps)
 
         output = result.output
+        tool_trace = deps.tool_trace
 
         # Merge the results back into session state
         if output.extracted_fields:
@@ -444,6 +445,8 @@ class Mia:
             methodology=output.methodology,
             confidence=output.confidence,
             data_sources=output.data_sources,
+            tool_trace=tool_trace,
+            calculation_inputs=output.calculation_inputs,
         )
 
     @staticmethod

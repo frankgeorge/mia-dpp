@@ -6,20 +6,25 @@ export const runtime = "nodejs";
 async function ensureTable() {
   await sql`
     CREATE TABLE IF NOT EXISTS agent_runs (
-      id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id      TEXT        NOT NULL,
-      thread_id    TEXT        NOT NULL,
-      product_name TEXT        NOT NULL,
-      agent_type   TEXT        NOT NULL,
-      reply        TEXT        NOT NULL DEFAULT '',
-      methodology  TEXT        NOT NULL DEFAULT '',
-      confidence   TEXT        NOT NULL DEFAULT 'estimated',
-      data_sources JSONB       NOT NULL DEFAULT '[]',
-      extracted_fields JSONB   NOT NULL DEFAULT '[]',
-      field_count  INTEGER     NOT NULL DEFAULT 0,
-      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id            TEXT        NOT NULL,
+      thread_id          TEXT        NOT NULL,
+      product_name       TEXT        NOT NULL,
+      agent_type         TEXT        NOT NULL,
+      reply              TEXT        NOT NULL DEFAULT '',
+      methodology        TEXT        NOT NULL DEFAULT '',
+      confidence         TEXT        NOT NULL DEFAULT 'estimated',
+      data_sources       JSONB       NOT NULL DEFAULT '[]',
+      extracted_fields   JSONB       NOT NULL DEFAULT '[]',
+      field_count        INTEGER     NOT NULL DEFAULT 0,
+      tool_calls         JSONB       NOT NULL DEFAULT '[]',
+      calculation_inputs JSONB       NOT NULL DEFAULT '{}',
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  // Idempotent migrations for existing tables
+  await sql`ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tool_calls JSONB NOT NULL DEFAULT '[]'`;
+  await sql`ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS calculation_inputs JSONB NOT NULL DEFAULT '{}'`;
 }
 
 // GET /api/agent-runs — list all runs for the signed-in user
@@ -31,7 +36,8 @@ export async function GET() {
 
   const rows = await sql`
     SELECT id, thread_id, product_name, agent_type, reply, methodology,
-           confidence, data_sources, extracted_fields, field_count, created_at
+           confidence, data_sources, extracted_fields, field_count,
+           tool_calls, calculation_inputs, created_at
     FROM   agent_runs
     WHERE  user_id = ${userId}
     ORDER  BY created_at DESC
@@ -54,6 +60,8 @@ export async function POST(req: Request) {
     confidence?: string;
     data_sources?: string[];
     extracted_fields?: unknown[];
+    tool_calls?: unknown[];
+    calculation_inputs?: Record<string, string>;
   };
 
   const { thread_id, product_name, agent_type } = body;
@@ -72,14 +80,18 @@ export async function POST(req: Request) {
   const data_sources = JSON.stringify(body.data_sources ?? []);
   const extracted_fields = JSON.stringify(body.extracted_fields ?? []);
   const field_count  = Array.isArray(body.extracted_fields) ? body.extracted_fields.length : 0;
+  const tool_calls         = JSON.stringify(body.tool_calls        ?? []);
+  const calculation_inputs = JSON.stringify(body.calculation_inputs ?? {});
 
   await sql`
     INSERT INTO agent_runs
       (user_id, thread_id, product_name, agent_type,
-       reply, methodology, confidence, data_sources, extracted_fields, field_count)
+       reply, methodology, confidence, data_sources, extracted_fields, field_count,
+       tool_calls, calculation_inputs)
     VALUES
       (${userId}, ${thread_id}, ${product_name}, ${agent_type},
-       ${reply}, ${methodology}, ${confidence}, ${data_sources}, ${extracted_fields}, ${field_count})
+       ${reply}, ${methodology}, ${confidence}, ${data_sources}, ${extracted_fields}, ${field_count},
+       ${tool_calls}, ${calculation_inputs})
   `;
 
   return Response.json({ ok: true });
