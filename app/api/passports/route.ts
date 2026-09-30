@@ -20,6 +20,21 @@ export async function GET() {
   return Response.json(rows);
 }
 
+// DELETE /api/passports?thread_id=xxx — delete a passport by thread_id
+export async function DELETE(req: Request) {
+  const { userId } = await auth();
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const thread_id = searchParams.get("thread_id");
+  if (!thread_id) return Response.json({ error: "thread_id required" }, { status: 400 });
+
+  await sql`
+    DELETE FROM passports WHERE thread_id = ${thread_id} AND user_id = ${userId}
+  `;
+  return Response.json({ ok: true });
+}
+
 // POST /api/passports — upsert a passport record (called after deploy or on save)
 export async function POST(req: Request) {
   const { userId } = await auth();

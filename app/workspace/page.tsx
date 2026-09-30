@@ -474,12 +474,35 @@ function WorkspaceInner() {
       if (completedSubmodelLabels.length > 0) {
         summary += `\n\n✓ Complete: ${completedSubmodelLabels.join(", ")}`;
       }
-      const stillMissing = SUBMODEL_SEQUENCE.filter(
+
+      // Find the first incomplete submodel that has missing required fields and ask for them
+      const firstIncomplete = SUBMODEL_SEQUENCE.find(
         (sm) => data.submodelStatus?.[sm] === "in_progress" || data.submodelStatus?.[sm] === "pending"
-      ).map((sm) => SUBMODEL_LABELS[sm as SubmodelKey]);
-      if (stillMissing.length > 0) {
-        summary += `\n\nStill need more info for: ${stillMissing.join(", ")}. You can add data for each section or skip ones that don't apply.`;
+      );
+      const stillMissingSubmodels = SUBMODEL_SEQUENCE.filter(
+        (sm) => data.submodelStatus?.[sm] === "in_progress" || data.submodelStatus?.[sm] === "pending"
+      );
+
+      if (firstIncomplete && data.missingRequired) {
+        const missingForFirst = data.missingRequired[firstIncomplete] ?? [];
+        const otherMissingLabels = stillMissingSubmodels
+          .filter((sm) => sm !== firstIncomplete)
+          .map((sm) => SUBMODEL_LABELS[sm as SubmodelKey]);
+
+        if (missingForFirst.length > 0) {
+          summary += `\n\nTo complete **${SUBMODEL_LABELS[firstIncomplete as SubmodelKey]}**, I still need:\n`;
+          summary += missingForFirst.map((f) => `- **${f}**`).join("\n");
+          if (otherMissingLabels.length > 0) {
+            summary += `\n\nAfter that we'll move on to: ${otherMissingLabels.join(", ")}. Or click **Skip remaining & generate** to create the passport now with what we have.`;
+          } else {
+            summary += "\n\nCan you provide any of these, or would you like to skip and generate the passport now?";
+          }
+        } else if (stillMissingSubmodels.length > 0) {
+          const labels = stillMissingSubmodels.map((sm) => SUBMODEL_LABELS[sm as SubmodelKey]);
+          summary += `\n\nStill need more info for: ${labels.join(", ")}. You can add data for each section, or click **Skip remaining & generate** to create the passport with what we have.`;
+        }
       }
+
       setMessages((prev) => [...prev, { role: "assistant" as const, content: summary }]);
     } else {
       setMessages((prev) => [

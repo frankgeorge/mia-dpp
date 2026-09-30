@@ -147,7 +147,10 @@ def _fields_to_mappings(
     except TemplateRepositoryError:
         return []
 
-    index = build_template_index([template])
+    try:
+        index = build_template_index([template])
+    except Exception:
+        return []
     req_by_id_short = {
         req.id_short: req
         for req in index.requirements
@@ -273,7 +276,7 @@ async def generate_from_fields(
                     evidence=(),
                 )
                 extra_submodels.append(sm_package.submodel)
-            except (TemplateRepositoryError, MiaError):
+            except Exception:
                 # Non-blocking — skip submodels that fail to build
                 pass
 

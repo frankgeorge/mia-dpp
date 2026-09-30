@@ -22,6 +22,18 @@ export default function AssetsPage() {
   const [passports, setPassports] = useState<Passport[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function deletePassport(threadId: string) {
+    if (!confirm("Delete this passport? This cannot be undone.")) return;
+    setDeleting(threadId);
+    try {
+      await fetch(`/api/passports?thread_id=${encodeURIComponent(threadId)}`, { method: "DELETE" });
+      setPassports((prev) => prev.filter((p) => p.thread_id !== threadId));
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   useEffect(() => {
     // Backfill QR codes for any deployed passports missing them, then load list
@@ -125,7 +137,9 @@ export default function AssetsPage() {
                 key={p.id}
                 passport={p}
                 copied={copied === p.id}
+                deleting={deleting === p.thread_id}
                 onCopy={() => p.passport_url && copyLink(p.passport_url, p.id)}
+                onDelete={() => void deletePassport(p.thread_id)}
               />
             ))}
 
@@ -151,11 +165,15 @@ export default function AssetsPage() {
 function PassportCard({
   passport,
   copied,
+  deleting,
   onCopy,
+  onDelete,
 }: {
   passport: Passport;
   copied: boolean;
+  deleting: boolean;
   onCopy: () => void;
+  onDelete: () => void;
 }) {
   const deployed = passport.status === "deployed" && passport.qr_code_b64;
   const date = new Date(passport.updated_at).toLocaleDateString("en-GB", {
@@ -215,49 +233,62 @@ function PassportCard({
         </div>
 
         {/* Actions */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {deployed && passport.passport_url ? (
-            <>
-              <a
-                href={passport.passport_url}
-                target="_blank"
-                rel="noopener noreferrer"
+        <div className="mt-4 space-y-2">
+          {/* Primary action row */}
+          <div className="flex gap-2">
+            {deployed && passport.passport_url ? (
+              <>
+                <a
+                  href={passport.passport_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+                >
+                  Open
+                </a>
+                <button
+                  onClick={onCopy}
+                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+                >
+                  {copied ? "Copied!" : "Share"}
+                </button>
+              </>
+            ) : (
+              <Link
+                href={`/workspace?thread=${passport.thread_id}`}
                 className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
               >
-                Open
-              </a>
-              <button
-                onClick={onCopy}
-                className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-              >
-                {copied ? "Copied!" : "Share"}
-              </button>
-            </>
-          ) : (
+                Continue
+              </Link>
+            )}
+          </div>
+          {/* Secondary action row — Edit, Download, Delete */}
+          <div className="flex gap-2">
             <Link
               href={`/workspace?thread=${passport.thread_id}`}
               className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
             >
-              Continue
+              Edit
             </Link>
-          )}
-          <Link
-            href={`/workspace?thread=${passport.thread_id}`}
-            className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-            title="Edit passport"
-          >
-            Edit
-          </Link>
-          {passport.has_aas && (
-            <a
-              href={`/api/passports/thread/${passport.thread_id}/download`}
-              download
-              className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-              title="Download AAS JSON"
+            {passport.has_aas && (
+              <a
+                href={`/api/passports/thread/${passport.thread_id}/download`}
+                download
+                className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+                title="Download AAS JSON"
+              >
+                ↓
+              </a>
+            )}
+            <button
+              onClick={onDelete}
+              disabled={deleting}
+              className="rounded-lg border border-hairline py-1.5 px-3 text-[12px] font-medium text-warn/70 transition-colors hover:border-warn/30 hover:bg-warn/5 hover:text-warn disabled:opacity-40"
+              title="Delete passport"
             >
-              ↓
-            </a>
-          )}
+              {deleting ? "…" : "Delete"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
