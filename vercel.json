@@ -23,6 +23,7 @@
     { "source": "/api/email/(.*)", "destination": { "service": "frontend" } },
     { "source": "/api/session/(.*)", "destination": { "service": "frontend" } },
     { "source": "/api/agent-runs", "destination": { "service": "frontend" } },
+    { "source": "/api/upload-handover-doc", "destination": { "service": "frontend" } },
     { "source": "/api/(.*)", "destination": { "service": "backend" } },
     { "source": "/health", "destination": { "service": "backend" } },
     { "source": "/(.*)", "destination": { "service": "frontend" } }

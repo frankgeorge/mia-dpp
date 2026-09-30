@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 interface PassportRecord {
@@ -131,23 +131,28 @@ function getHeaderFields(sections: ParsedSection[]): { manufacturer: string; pro
 }
 
 function QrCode({ url, size }: { url: string; size: number }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!canvasRef.current || !url) return;
-    import("qrcode").then((QRCode) => {
-      QRCode.toCanvas(canvasRef.current!, url, {
-        width: size,
-        margin: 1,
-        color: { dark: "#1a1a1a", light: "#ffffff" },
-      }).catch(() => {});
-    }).catch(() => {});
+    if (!url) return;
+    import("qrcode")
+      .then((QRCode) =>
+        QRCode.toDataURL(url, {
+          width: size,
+          margin: 1,
+          color: { dark: "#1a1a1a", light: "#ffffff" },
+        })
+      )
+      .then(setDataUrl)
+      .catch(() => {});
   }, [url, size]);
+  if (!dataUrl) return <div style={{ width: size, height: size }} />;
   return (
-    <canvas
-      ref={canvasRef}
+    <img
+      src={dataUrl}
       width={size}
       height={size}
       className="rounded-lg"
+      alt="QR code — scan to open this passport"
       title="Scan to open this passport"
     />
   );

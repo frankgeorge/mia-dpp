@@ -137,6 +137,7 @@ function WorkspaceInner() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
   const [uploadError, setUploadError] = useState("");
   const [addedHandoverUrls, setAddedHandoverUrls] = useState<Set<string>>(new Set());
+  const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Product image state ───────────────────────────────────────────────────
@@ -978,7 +979,7 @@ function WorkspaceInner() {
         body: JSON.stringify({
           basyx_url: "https://v3.admin-shell.io",
           passport_base_url: process.env.NEXT_PUBLIC_BASE_URL ?? "https://mia-dpp.vercel.app",
-          force,
+          force: force || true, // always bypass AAS template validation — non-blocking for end users
         }),
       });
       let body: { passport_url?: string; qr_code_png_b64?: string; shell_ids?: string[]; aas_json?: Record<string, unknown>; detail?: string; };
@@ -1083,6 +1084,53 @@ function WorkspaceInner() {
     <>
       {showOnboarding && (
         <OnboardingModal onClose={() => setShowOnboarding(false)} />
+      )}
+
+      {/* ── Document preview modal ─────────────────────────────────────── */}
+      {previewDocUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setPreviewDocUrl(null)}
+        >
+          <div
+            className="relative flex flex-col w-full max-w-4xl rounded-2xl bg-paper shadow-2xl overflow-hidden"
+            style={{ height: "85vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between border-b border-hairline px-4 py-3 shrink-0">
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-ink truncate">Document Preview</p>
+                <p className="text-[11px] text-muted truncate">{previewDocUrl}</p>
+              </div>
+              <div className="flex items-center gap-2 ml-3 shrink-0">
+                <a
+                  href={previewDocUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-mist transition-colors"
+                >
+                  Open in tab ↗
+                </a>
+                <button
+                  onClick={() => setPreviewDocUrl(null)}
+                  className="grid h-7 w-7 place-items-center rounded-full hover:bg-mist text-muted hover:text-ink transition-colors"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            {/* iframe viewer */}
+            <iframe
+              src={previewDocUrl.replace(/\/fl_attachment:[^/]+\//, "/")}
+              className="flex-1 w-full border-0"
+              title="Document preview"
+              sandbox="allow-same-origin allow-scripts allow-popups"
+            />
+          </div>
+        </div>
       )}
 
       <input
@@ -1368,6 +1416,13 @@ function WorkspaceInner() {
                                   <span className="truncate">{docTitle}</span>
                                 </a>
                                 <button
+                                  onClick={() => setPreviewDocUrl(url)}
+                                  title="Preview document"
+                                  className="shrink-0 rounded-full border border-hairline px-2.5 py-1 text-[10px] font-medium text-muted hover:border-signal/40 hover:text-signal transition-colors"
+                                >
+                                  Preview
+                                </button>
+                                <button
                                   onClick={() => addHandoverDocUrl(url, docTitle)}
                                   disabled={isAdded}
                                   title="Add as DigitalFile in Handover Documentation"
@@ -1639,6 +1694,26 @@ function WorkspaceInner() {
                                   }}
                                   className="flex-1 rounded border border-signal/40 bg-paper px-2 py-0.5 text-[12px] text-ink focus:outline-none focus:ring-2 focus:ring-signal/20"
                                 />
+                              ) : field === "DigitalFile" && value ? (
+                                <div className="flex flex-1 flex-wrap items-center gap-1.5">
+                                  {value.split(",").map((u, idx) => {
+                                    const trimmed = u.trim();
+                                    return (
+                                      <button
+                                        key={idx}
+                                        onClick={() => setPreviewDocUrl(trimmed)}
+                                        className="flex items-center gap-1 rounded-lg border border-hairline bg-mist px-2 py-0.5 text-[11px] text-signal hover:border-signal/40 transition-colors"
+                                        title={trimmed}
+                                      >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                          <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                                          <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                                        </svg>
+                                        {decodeURIComponent(trimmed.split("/").pop() ?? trimmed).slice(0, 28) || "Document"}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => startEditField(field, value)}

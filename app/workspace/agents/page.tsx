@@ -282,7 +282,7 @@ function RunRow({
           )}
 
           {/* Sources */}
-          {run.data_sources?.length > 0 && (
+          {Array.isArray(run.data_sources) && run.data_sources.length > 0 && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-2">
                 Sources ({run.data_sources.length})
@@ -324,10 +324,10 @@ function RunRow({
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(run.calculation_inputs).map(([k, v], i, arr) => (
+                    {Object.entries(run.calculation_inputs ?? {}).map(([k, v], i, arr) => (
                       <tr key={k} className={i < arr.length - 1 ? "border-b border-hairline" : ""}>
                         <td className="px-3 py-2 font-mono text-signal whitespace-nowrap">{k}</td>
-                        <td className="px-3 py-2 text-ink break-all">{v}</td>
+                        <td className="px-3 py-2 text-ink break-all">{String(v)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -337,7 +337,7 @@ function RunRow({
           )}
 
           {/* Agent Trace */}
-          {run.tool_calls?.length > 0 && (
+          {Array.isArray(run.tool_calls) && run.tool_calls.length > 0 && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-2">
                 Agent Trace ({run.tool_calls.length} tool call{run.tool_calls.length !== 1 ? "s" : ""})
@@ -360,7 +360,7 @@ function RunRow({
           )}
 
           {/* Extracted fields table */}
-          {run.extracted_fields?.length > 0 && (
+          {Array.isArray(run.extracted_fields) && run.extracted_fields.length > 0 && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-2">
                 Extracted Fields ({run.extracted_fields.length})

@@ -75,7 +75,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   if (!rows[0]) return Response.json({ error: "Passport not found" }, { status: 404 });
 
-  const { product_name, aas_json, passport_url, product_image_url, qr_code_b64, updated_at } = rows[0];
+  const { product_name, aas_json, passport_url, qr_code_b64, updated_at } = rows[0];
   if (!aas_json) return Response.json({ error: "No AAS data available" }, { status: 404 });
 
   const submodels = ((aas_json as Record<string, unknown>).submodels as AasSubmodel[] | undefined) ?? [];
@@ -91,7 +91,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }
   } catch { /* skip QR if generation fails */ }
 
-  // Build PDF
+  // Build PDF — set up stream BEFORE any drawing or doc.end()
   const doc = new PDFDocument({
     size: "A4",
     margin: 0,
@@ -102,8 +102,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     },
   });
 
-  const chunks: Buffer[] = [];
-  doc.on("data", (c: Buffer) => chunks.push(c));
+  // Register stream listeners BEFORE drawing to avoid race conditions
+  const pdfPromise = new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
 
   const W = 595.28; // A4 width in points
   const MARGIN = 48;
@@ -117,29 +122,33 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   doc.fontSize(11).fillColor("#888888").font("Helvetica").text("  ·  Digital Product Passport", { continued: false });
 
   // Standards badges
-  const badgeY = 42;
+  const badgeY = 44;
   const badges = ["IDTA AAS v3.0", "EU ESPR", "GHG Protocol"];
   let bx = MARGIN;
   for (const b of badges) {
-    const bw = doc.fontSize(8).widthOfString(b) + 16;
-    doc.roundedRect(bx, badgeY, bw, 14, 3).fillColor("#2a2a2a").fill();
-    doc.fontSize(8).fillColor("#aaaaaa").font("Helvetica").text(b, bx + 8, badgeY + 3);
+    doc.fontSize(8);
+    const bw = doc.widthOfString(b) + 16;
+    doc.roundedRect(bx, badgeY, bw, 14, 3).fill("#2a2a2a");
+    doc.fillColor("#aaaaaa").font("Helvetica").text(b, bx + 8, badgeY + 3);
     bx += bw + 6;
   }
 
   // ── Product hero section ───────────────────────────────────────────────────
   let y = 96;
-  const heroH = qrBuffer ? 120 : 80;
+  const heroH = qrBuffer ? 120 : 84;
 
-  doc.rect(MARGIN, y, CONTENT_W, heroH).roundedRect(MARGIN, y, CONTENT_W, heroH, 8).fillColor("#f8f8f8").fill();
-  doc.rect(MARGIN, y, CONTENT_W, heroH).roundedRect(MARGIN, y, CONTENT_W, heroH, 8).strokeColor("#e8e8e8").lineWidth(1).stroke();
+  doc.roundedRect(MARGIN, y, CONTENT_W, heroH, 8).fill("#f8f8f8");
+  doc.roundedRect(MARGIN, y, CONTENT_W, heroH, 8).lineWidth(1).stroke("#e8e8e8");
 
   // Product name & date
-  const dateStr = updated_at ? new Date(updated_at as string).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const dateStr = updated_at
+    ? new Date(updated_at as string).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
   doc.fontSize(9).fillColor("#999999").font("Helvetica").text("DIGITAL PRODUCT PASSPORT", MARGIN + 16, y + 16);
   doc.fontSize(17).fillColor("#0f0f0f").font("Helvetica-Bold").text(product_name as string, MARGIN + 16, y + 30, { width: CONTENT_W - 150 });
-  doc.fontSize(9).fillColor("#999999").font("Helvetica").text(`Generated: ${dateStr}`, MARGIN + 16, y + 55);
-  doc.fontSize(8).fillColor("#3b5bdb").font("Helvetica").text(passportLink, MARGIN + 16, y + 68, { width: CONTENT_W - 150 });
+  doc.fontSize(9).fillColor("#999999").font("Helvetica").text(`Generated: ${dateStr}`, MARGIN + 16, y + 56);
+  doc.fontSize(8).fillColor("#3b5bdb").font("Helvetica").text(passportLink, MARGIN + 16, y + 70, { width: CONTENT_W - 150 });
 
   // QR code (top right of hero)
   if (qrBuffer) {
@@ -160,40 +169,40 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     // Section heading bar
     if (y > 720) { doc.addPage(); y = MARGIN; }
-    doc.rect(MARGIN, y, CONTENT_W, 26).roundedRect(MARGIN, y, CONTENT_W, 26, 5).fillColor("#0f0f0f").fill();
+    doc.roundedRect(MARGIN, y, CONTENT_W, 26, 5).fill("#0f0f0f");
     doc.fontSize(11).fillColor("#ffffff").font("Helvetica-Bold").text(label, MARGIN + 12, y + 7, { continued: true });
     doc.fontSize(8).fillColor("#888888").font("Helvetica").text(`  ${code}`, { continued: false });
     y += 34;
 
-    // Fields
-    for (const { label: fl, value } of fields) {
+    // Fields — alternate background rows
+    fields.forEach(({ label: fl, value }, idx) => {
       if (y > 760) { doc.addPage(); y = MARGIN; }
       const ROW_H = 18;
-      const isEven = fields.indexOf({ label: fl, value }) % 2 === 0;
-      if (isEven) doc.rect(MARGIN, y, CONTENT_W, ROW_H).fillColor("#fafafa").fill();
+      if (idx % 2 === 0) {
+        doc.rect(MARGIN, y, CONTENT_W, ROW_H).fill("#fafafa");
+      }
       doc.fontSize(9).fillColor("#888888").font("Helvetica").text(fl, MARGIN + 10, y + 5, { width: 180, continued: false });
       doc.fontSize(9).fillColor("#1a1a1a").font("Helvetica").text(value, MARGIN + 200, y + 5, { width: CONTENT_W - 210 });
-      doc.moveTo(MARGIN, y + ROW_H).lineTo(MARGIN + CONTENT_W, y + ROW_H).strokeColor("#f0f0f0").lineWidth(0.5).stroke();
+      doc.moveTo(MARGIN, y + ROW_H).lineTo(MARGIN + CONTENT_W, y + ROW_H).lineWidth(0.5).stroke("#f0f0f0");
       y += ROW_H;
-    }
+    });
     y += 16;
   }
 
   // ── Footer ─────────────────────────────────────────────────────────────────
   const PAGE_H = 841.89;
   if (y < PAGE_H - 60) {
-    doc.moveTo(MARGIN, PAGE_H - 48).lineTo(W - MARGIN, PAGE_H - 48).strokeColor("#e8e8e8").lineWidth(0.5).stroke();
+    doc.moveTo(MARGIN, PAGE_H - 48).lineTo(W - MARGIN, PAGE_H - 48).lineWidth(0.5).stroke("#e8e8e8");
     doc.fontSize(8).fillColor("#bbbbbb").font("Helvetica")
       .text(`Generated by MIA · mia-dpp.vercel.app · ${new Date().toISOString().slice(0, 10)}`, MARGIN, PAGE_H - 36, { align: "center", width: CONTENT_W });
   }
 
+  // End the document — the pdfPromise resolves when all chunks are collected
   doc.end();
-
-  await new Promise<void>((resolve) => doc.on("end", resolve));
-  const pdfBuffer = Buffer.concat(chunks);
+  const pdfBuffer = await pdfPromise;
 
   const filename = `${String(product_name).replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
-  return new Response(pdfBuffer, {
+  return new Response(pdfBuffer as unknown as BodyInit, {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
