@@ -11,3 +11,4 @@ export function createServiceClient() {
 }
 
 export const PRODUCT_IMAGES_BUCKET = "product-images";
+export const HANDOVER_DOCS_BUCKET = "handover-docs";

@@ -121,7 +121,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const badges = ["IDTA AAS v3.0", "EU ESPR", "GHG Protocol"];
   let bx = MARGIN;
   for (const b of badges) {
-    const bw = doc.widthOfString(b, { fontSize: 8 }) + 16;
+    const bw = doc.fontSize(8).widthOfString(b) + 16;
     doc.roundedRect(bx, badgeY, bw, 14, 3).fillColor("#2a2a2a").fill();
     doc.fontSize(8).fillColor("#aaaaaa").font("Helvetica").text(b, bx + 8, badgeY + 3);
     bx += bw + 6;

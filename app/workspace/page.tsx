@@ -136,6 +136,7 @@ function WorkspaceInner() {
   // ── File upload state ─────────────────────────────────────────────────────
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
   const [uploadError, setUploadError] = useState("");
+  const [addedHandoverUrls, setAddedHandoverUrls] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Product image state ───────────────────────────────────────────────────
@@ -804,12 +805,50 @@ function WorkspaceInner() {
     }
   }
 
+  function mergeHandoverField(key: string, value: string) {
+    setExtractedFields((prev) => ({ ...prev, [key]: value }));
+    setSubmodelFields((prev) => {
+      const smPrev = prev["handover_documentation"] ?? {};
+      return { ...prev, handover_documentation: { ...smPrev, [key]: value } };
+    });
+  }
+
+  function addHandoverDocUrl(url: string, title: string) {
+    const existing = extractedFields["DigitalFile"] ?? "";
+    const urls = existing ? `${existing}, ${url}` : url;
+    mergeHandoverField("DigitalFile", urls);
+    if (!extractedFields["Title"]) mergeHandoverField("Title", title);
+    setAddedHandoverUrls((prev) => new Set(prev).add(url));
+    setSubmodelStatus((prev) => ({ ...prev, handover_documentation: "in_progress" }));
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant" as const,
+        content: `Added **${title}** to Handover Documentation as a DigitalFile link.`,
+      },
+    ]);
+  }
+
   async function uploadFile(file: File) {
     if (busy) return;
     setUploadStatus("uploading");
     setUploadError("");
     const form = new FormData();
     form.append("file", file);
+
+    // Option B: if in handover_documentation submodel, also upload to Supabase Storage
+    const isHandover = currentSubmodel === "handover_documentation";
+    let storedUrl: string | null = null;
+    if (isHandover) {
+      try {
+        const storeForm = new FormData();
+        storeForm.append("file", file);
+        const storeRes = await fetch("/api/upload-handover-doc", { method: "POST", body: storeForm });
+        const storeData = (await storeRes.json()) as { url?: string; error?: string };
+        if (storeRes.ok && storeData.url) storedUrl = storeData.url;
+      } catch { /* non-blocking — proceed with text extraction even if storage fails */ }
+    }
+
     try {
       const res = await fetch("/api/upload", { method: "POST", body: form });
       const data = (await res.json()) as {
@@ -833,6 +872,16 @@ function WorkspaceInner() {
         setSubmodelStatus((prev) => ({ ...prev, [currentSubmodel]: "in_progress" }));
       }
 
+      // If we stored the file in Supabase, add it as DigitalFile immediately
+      if (storedUrl && data.fileName) {
+        const title = data.fileName.replace(/\.[^.]+$/, "");
+        const existing = extractedFields["DigitalFile"] ?? "";
+        const urls = existing ? `${existing}, ${storedUrl}` : storedUrl;
+        mergeHandoverField("DigitalFile", urls);
+        if (!extractedFields["Title"]) mergeHandoverField("Title", title);
+        setAddedHandoverUrls((prev) => new Set(prev).add(storedUrl!));
+      }
+
       try {
         const bulkData = await callBulkExtract({
           threadId: tid,
@@ -843,6 +892,15 @@ function WorkspaceInner() {
           companyWebsite: profile?.website || undefined,
         });
         applyBulkResponse(bulkData, tid);
+        if (storedUrl) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant" as const,
+              content: `File stored and linked as a DigitalFile in Handover Documentation. I've also extracted any relevant fields from its contents.`,
+            },
+          ]);
+        }
       } catch (agentErr) {
         const msg = agentErr instanceof Error ? agentErr.message : "unknown error";
         setMessages((prev) => [...prev, { role: "assistant", content: `Could not process the file: ${msg}` }]);
@@ -1287,25 +1345,45 @@ function WorkspaceInner() {
                     {/* ── PDF links found on product page ──────────────── */}
                     {pdfLinks.length > 0 && !busy && (
                       <div className="rounded-xl border border-hairline bg-paper p-4">
-                        <p className="text-[12px] font-semibold text-ink mb-2">Found documents</p>
-                        <div className="space-y-1.5">
-                          {pdfLinks.map((url, i) => (
-                            <a
-                              key={i}
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 text-[12px] text-signal hover:underline"
-                            >
-                              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-                                <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                              </svg>
-                              <span className="truncate">{url.split("/").pop() || url}</span>
-                            </a>
-                          ))}
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[12px] font-semibold text-ink">Found documents</p>
+                          <span className="text-[11px] text-muted">from product page</span>
                         </div>
-                        <p className="mt-2 text-[11px] text-muted">Upload a PDF to extract data from it →</p>
+                        <div className="space-y-1.5">
+                          {pdfLinks.map((url, i) => {
+                            const docTitle = decodeURIComponent(url.split("/").pop() ?? url).replace(/\.[^.]+$/, "") || "Document";
+                            const isAdded = addedHandoverUrls.has(url);
+                            return (
+                              <div key={i} className="flex items-center gap-2">
+                                <a
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex flex-1 items-center gap-2 text-[12px] text-signal hover:underline min-w-0"
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="shrink-0">
+                                    <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                                    <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                                  </svg>
+                                  <span className="truncate">{docTitle}</span>
+                                </a>
+                                <button
+                                  onClick={() => addHandoverDocUrl(url, docTitle)}
+                                  disabled={isAdded}
+                                  title="Add as DigitalFile in Handover Documentation"
+                                  className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                                    isAdded
+                                      ? "bg-ok/10 text-ok cursor-default"
+                                      : "border border-hairline hover:border-signal/40 hover:text-signal text-muted"
+                                  }`}
+                                >
+                                  {isAdded ? "✓ Added" : "+ Handover"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted">Click <strong>+ Handover</strong> to link a document into the Handover Documentation submodel, or upload a file to extract data from it.</p>
                       </div>
                     )}
 
@@ -1394,6 +1472,30 @@ function WorkspaceInner() {
                       </div>
                     )}
 
+                    {/* ── Handover Documentation helper card ───────────── */}
+                    {currentSubmodel === "handover_documentation" && !busy && (
+                      <div className="rounded-xl border border-signal/20 bg-signal/[0.03] p-4">
+                        <p className="text-[12px] font-semibold text-ink mb-1">Handover Documentation</p>
+                        <p className="text-[12px] text-muted leading-relaxed">
+                          Add manuals, datasheets, and certificates to this passport.
+                          Files you upload now will be stored permanently and linked as downloadable
+                          DigitalFile references in the IDTA 02004 submodel.
+                        </p>
+                        <div className="mt-2.5 flex gap-2">
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex items-center gap-1.5 rounded-full border border-signal/30 bg-paper px-3 py-1.5 text-[12px] font-medium text-signal hover:bg-signal/5 transition-colors"
+                          >
+                            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                              <path d="M8 11V2M8 2L4.5 5.5M8 2l3.5 3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M2 13h12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+                            </svg>
+                            Upload & store document
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* ── Generate button — shown whenever there is data ─ */}
                     {hasExtracted && deployStatus === "idle" && !busy && (
                       <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4">
@@ -1474,7 +1576,7 @@ function WorkspaceInner() {
                                   download
                                   className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-muted hover:text-ink"
                                 >
-                                  Download AAS JSON
+                                  Download DPP
                                 </a>
                               )}
                             </div>
