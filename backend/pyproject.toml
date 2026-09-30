@@ -17,6 +17,7 @@ dependencies = [
   "uvicorn[standard]>=0.34,<1",
   "pydantic-ai-slim[openai]==2.43.0",
   "segno>=1.6,<2",
+  "ddgs>=9,<10",
 ]
 
 [project.optional-dependencies]
