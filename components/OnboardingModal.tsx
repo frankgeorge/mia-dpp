@@ -98,7 +98,7 @@ export function OnboardingModal({ onClose }: Props) {
                   type="text"
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="Company name"
+                  placeholder="e.g. AFRISO GmbH"
                   className="w-full rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
                 />
               </div>
@@ -111,7 +111,7 @@ export function OnboardingModal({ onClose }: Props) {
                   type="url"
                   value={companyWebsite}
                   onChange={(e) => setCompanyWebsite(e.target.value)}
-                  placeholder="Company website"
+                  placeholder="https://
                   className="w-full rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
                 />
               </div>
@@ -123,7 +123,7 @@ export function OnboardingModal({ onClose }: Props) {
                   value={productDescription}
                   onChange={(e) => setProductDescription(e.target.value)}
                   rows={2}
-                  placeholder="What your company makes"
+                  placeholder="e.g. pressure sensors and measurement instruments"
                   className="w-full resize-none rounded-xl border border-hairline bg-mist px-4 py-3 text-[14px] text-ink placeholder:text-muted focus:border-signal/50 focus:outline-none focus:ring-4 focus:ring-signal/10"
                 />
               </div>

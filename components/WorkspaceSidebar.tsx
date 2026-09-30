@@ -8,7 +8,7 @@ import { UserButton } from "@clerk/nextjs";
 const NAV_ITEMS = [
   {
     label: "New passport",
-    href: "/workspace",
+    href: "/workspace?new=1",
     exact: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -66,9 +66,10 @@ function NavItem({
   pathname: string;
   onClick?: () => void;
 }) {
+  const hrefPath = item.href.split("?")[0];
   const isActive = item.exact
-    ? pathname === item.href
-    : pathname.startsWith(item.href);
+    ? pathname === hrefPath
+    : pathname.startsWith(hrefPath);
 
   return (
     <Link

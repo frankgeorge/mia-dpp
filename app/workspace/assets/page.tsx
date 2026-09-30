@@ -13,6 +13,7 @@ interface Passport {
   passport_url: string | null;
   basyx_shell_id: string | null;
   product_image_url: string | null;
+  has_aas: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -214,7 +215,7 @@ function PassportCard({
         </div>
 
         {/* Actions */}
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           {deployed && passport.passport_url ? (
             <>
               <a
@@ -239,6 +240,23 @@ function PassportCard({
             >
               Continue
             </Link>
+          )}
+          <Link
+            href={`/workspace?thread=${passport.thread_id}`}
+            className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+            title="Edit passport"
+          >
+            Edit
+          </Link>
+          {passport.has_aas && (
+            <a
+              href={`/api/passports/thread/${passport.thread_id}/download`}
+              download
+              className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+              title="Download AAS JSON"
+            >
+              ↓
+            </a>
           )}
         </div>
       </div>

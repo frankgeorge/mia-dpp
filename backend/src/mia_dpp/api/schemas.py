@@ -52,6 +52,7 @@ class HealthResponse(WireModel):
 class DeployRequest(WireModel):
     basyx_url: str = "https://v3.admin-shell.io"
     passport_base_url: str = ""
+    force: bool = False  # Skip AAS validation and deploy anyway
 
 
 class DeployResponse(WireModel):

@@ -504,7 +504,7 @@ async def deploy_workspace(
         except (ValueError, KeyError):
             validation = None
 
-    if validation is None or not validation.valid:
+    if not payload.force and (validation is None or not validation.valid):
         raise HTTPException(
             status_code=422,
             detail="The AAS artifact did not pass validation and cannot be deployed.",

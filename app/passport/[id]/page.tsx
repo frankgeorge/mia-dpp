@@ -256,6 +256,21 @@ export default function PassportPage() {
                 </span>
               ))}
             </div>
+
+            {/* Download */}
+            {passport.aas_json && (
+              <a
+                href={`/api/passports/thread/${threadId}/download`}
+                download
+                className="flex items-center gap-2 rounded-full border border-[#e8e8e8] px-5 py-2.5 text-[13px] font-medium text-[#333] transition-colors hover:bg-[#f5f5f5]"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2v9M8 11l-3-3M8 11l3-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                </svg>
+                Download AAS JSON
+              </a>
+            )}
           </div>
         ) : null}
       </main>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import type {
   AgentResponse,
@@ -61,14 +61,27 @@ function statusColor(status: SubmodelStatusValue | undefined) {
 
 function WorkspaceInner() {
   const { user } = useUser();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const threadParam = searchParams.get("thread");
+  const isNewSession = searchParams.get("new") === "1";
 
+  // When ?new=1, clear stored session so we start fresh
   const saved = typeof window !== "undefined"
-    ? (threadParam
+    ? (isNewSession ? null :
+       threadParam
         ? (loadSession()?.threadId === threadParam ? loadSession() : null)
         : loadSession())
     : null;
+
+  // Clear sessionStorage and strip ?new=1 from URL immediately
+  useEffect(() => {
+    if (isNewSession) {
+      try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+      router.replace("/workspace");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNewSession]);
 
   const [messages, setMessages] = useState<ChatMessage[]>(saved?.messages ?? []);
   const [input, setInput] = useState("");
@@ -135,7 +148,7 @@ function WorkspaceInner() {
     }
   }, []);
 
-  // ── Restore from Supabase when ?thread= doesn't match current session ──────
+  // ── Restore from Supabase when ?thread= is provided ────────────────────────
   useEffect(() => {
     if (!threadParam) return;
     fetch(`/api/passports/thread/${encodeURIComponent(threadParam)}`)
@@ -143,6 +156,42 @@ function WorkspaceInner() {
       .then((data) => {
         if (data.error) return;
         setThreadId(data.thread_id);
+
+        // Rebuild extractedFields + submodelFields from the stored AAS JSON
+        if (data.aas_json) {
+          const aasSubmodels: Array<{ idShort?: string; submodelElements?: unknown[] }> =
+            (data.aas_json.submodels as typeof aasSubmodels) ?? [];
+          const flat: Record<string, string> = {};
+          const bySubmodel: Record<string, Record<string, string>> = {};
+
+          function pullProps(elements: unknown[], smKey: string) {
+            for (const el of elements as Array<{ idShort: string; modelType?: string; value?: unknown; submodelElements?: unknown[] }>) {
+              if ((el.modelType === "Property" || el.modelType === "MultiLanguageProperty") && el.value) {
+                const v = String(el.value);
+                flat[el.idShort] = v;
+                bySubmodel[smKey] = { ...(bySubmodel[smKey] ?? {}), [el.idShort]: v };
+              }
+              if (el.submodelElements?.length) pullProps(el.submodelElements, smKey);
+            }
+          }
+
+          for (const sm of aasSubmodels) {
+            const key = sm.idShort ?? "unknown";
+            pullProps(sm.submodelElements ?? [], key);
+          }
+
+          if (Object.keys(flat).length > 0) {
+            setExtractedFields(flat);
+            setSubmodelFields(bySubmodel);
+            // Mark submodels that have data as in_progress
+            const statusUpdate: Record<string, SubmodelStatusValue> = {};
+            for (const key of Object.keys(bySubmodel)) {
+              statusUpdate[key] = "in_progress";
+            }
+            setSubmodelStatus((prev) => ({ ...prev, ...statusUpdate }));
+          }
+        }
+
         if (data.status === "deployed" && data.passport_url) {
           setDeployStatus("deployed");
           setDeployResult({
@@ -153,15 +202,10 @@ function WorkspaceInner() {
           setDppReady(true);
         }
         if (data.product_image_url) setProductImageUrl(data.product_image_url);
-        if (data.product_name) {
-          setExtractedFields((prev) => ({
-            ...prev,
-            ManufacturerProductDesignation: prev.ManufacturerProductDesignation || data.product_name,
-          }));
-        }
+
         setMessages([{
           role: "assistant",
-          content: `Welcome back! I've restored your passport for **${data.product_name}**. You can continue editing or upload a new document.`,
+          content: `Welcome back! I've restored your passport for **${data.product_name}**. You can edit any field in the panel on the right, upload new documents, or click **Generate passport** to update it.`,
         }]);
       })
       .catch(() => { /* silent */ });
@@ -486,6 +530,23 @@ function WorkspaceInner() {
     }
   }
 
+  async function skipAllAndGenerate() {
+    if (busy) return;
+    // Mark every non-complete submodel as skipped
+    setSubmodelStatus((prev) => {
+      const next = { ...prev };
+      for (const sm of SUBMODEL_SEQUENCE) {
+        if (next[sm] !== "complete") next[sm] = "skipped";
+      }
+      return next;
+    });
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant" as const, content: "Skipping remaining sections and generating your passport now…" },
+    ]);
+    await generate();
+  }
+
   async function send(text: string) {
     const t = text.trim();
     if (!t || busy) return;
@@ -682,7 +743,7 @@ function WorkspaceInner() {
     }
   }
 
-  async function deployPassport(tid?: string) {
+  async function deployPassport(tid?: string, force = false) {
     const deployThreadId = tid ?? threadId;
     if (!deployThreadId || deployStatus === "deploying") return;
     setDeployStatus("deploying");
@@ -694,6 +755,7 @@ function WorkspaceInner() {
         body: JSON.stringify({
           basyx_url: "https://v3.admin-shell.io",
           passport_base_url: process.env.NEXT_PUBLIC_BASE_URL ?? "https://mia-dpp.vercel.app",
+          force,
         }),
       });
       let body: { passport_url?: string; qr_code_png_b64?: string; shell_ids?: string[]; aas_json?: Record<string, unknown>; detail?: string; };
@@ -1152,14 +1214,15 @@ function WorkspaceInner() {
                       <div className="rounded-xl border border-ok/20 bg-ok/[0.04] p-4">
                         <p className="text-[13px] font-semibold text-ok">Digital Nameplate ready</p>
                         <p className="mt-1 text-[12px] text-muted">
-                          You can generate a passport now with Digital Nameplate data, or continue adding more submodels.
+                          You can generate a passport now, skip remaining sections, or keep adding data.
                         </p>
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-3 flex flex-wrap gap-2">
                           <button
-                            onClick={() => void generate()}
-                            className="rounded-full border border-hairline px-4 py-1.5 text-[13px] font-medium text-ink hover:bg-mist"
+                            onClick={() => void skipAllAndGenerate()}
+                            disabled={busy}
+                            className="rounded-full bg-ink px-4 py-1.5 text-[13px] font-medium text-white hover:shadow-md hover:-translate-y-px transition-all disabled:opacity-40"
                           >
-                            Generate now
+                            Skip remaining &amp; generate →
                           </button>
                           <button
                             onClick={() => {
@@ -1174,7 +1237,7 @@ function WorkspaceInner() {
                                 ]);
                               }
                             }}
-                            className="rounded-full bg-signal px-4 py-1.5 text-[13px] font-medium text-white hover:bg-signal/90"
+                            className="rounded-full border border-hairline px-4 py-1.5 text-[13px] font-medium text-ink hover:bg-mist"
                           >
                             Continue to {SUBMODEL_LABELS[SUBMODEL_SEQUENCE[SUBMODEL_SEQUENCE.indexOf(currentSubmodel) + 1] ?? currentSubmodel]}
                           </button>
@@ -1236,6 +1299,15 @@ function WorkspaceInner() {
                               >
                                 View in Assets →
                               </a>
+                              {threadId && (
+                                <a
+                                  href={`/api/passports/thread/${threadId}/download`}
+                                  download
+                                  className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-muted hover:text-ink"
+                                >
+                                  Download AAS JSON
+                                </a>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1247,12 +1319,22 @@ function WorkspaceInner() {
                       <div className="rounded-xl border border-warn/20 bg-warn/[0.04] p-4">
                         <p className="text-[13px] font-semibold text-warn">Deployment error</p>
                         <p className="mt-1 text-[12px] text-muted">{deployError}</p>
-                        <button
-                          onClick={() => { setDeployStatus("idle"); setDeployError(""); }}
-                          className="mt-2 text-[12px] text-signal underline"
-                        >
-                          Try again
-                        </button>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            onClick={() => { setDeployStatus("idle"); setDeployError(""); }}
+                            className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-mist"
+                          >
+                            Try again
+                          </button>
+                          {deployError.toLowerCase().includes("validation") && (
+                            <button
+                              onClick={() => void deployPassport(threadId ?? undefined, true)}
+                              className="rounded-full bg-warn/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-warn transition-colors"
+                            >
+                              Deploy anyway (skip validation)
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
 

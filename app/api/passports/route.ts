@@ -10,7 +10,8 @@ export async function GET() {
 
   const rows = await sql`
     SELECT id, thread_id, product_name, submodel, status,
-           qr_code_b64, passport_url, basyx_shell_id, product_image_url, created_at, updated_at
+           qr_code_b64, passport_url, basyx_shell_id, product_image_url, created_at, updated_at,
+           (aas_json IS NOT NULL) as has_aas
     FROM passports
     WHERE user_id = ${userId}
     ORDER BY updated_at DESC
