@@ -8,6 +8,7 @@ const nextConfig = {
   outputFileTracingIncludes: {
     "/api/passports/thread/[id]/download": [
       "./node_modules/pdfkit/js/data/**/*",
+      "./node_modules/pdfkit/js/standard-fonts/**/*",
     ],
   },
 };
