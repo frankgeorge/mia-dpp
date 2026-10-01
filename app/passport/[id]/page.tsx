@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import QRCode from "qrcode";
 
 interface PassportRecord {
   id: string;
@@ -134,14 +135,7 @@ function QrCode({ url, size }: { url: string; size: number }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!url) return;
-    import("qrcode")
-      .then((QRCode) =>
-        QRCode.toDataURL(url, {
-          width: size,
-          margin: 1,
-          color: { dark: "#1a1a1a", light: "#ffffff" },
-        })
-      )
+    QRCode.toDataURL(url, { width: size, margin: 1, color: { dark: "#1a1a1a", light: "#ffffff" } })
       .then(setDataUrl)
       .catch(() => {});
   }, [url, size]);
@@ -166,7 +160,6 @@ export default function PassportPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(0);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!threadId) return;
@@ -183,12 +176,6 @@ export default function PassportPage() {
   const sections = passport?.aas_json ? parseSections(passport.aas_json) : [];
   const header = getHeaderFields(sections);
   const activeFields = sections[activeSection]?.fields ?? [];
-
-  function copyLink() {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
 
   if (loading) {
     return (
@@ -213,7 +200,21 @@ export default function PassportPage() {
   }
 
   const isDeployed = passport.status === "deployed";
-  const passportUrl = passport.passport_url ?? window.location.href;
+  const passportUrl = passport.passport_url ?? (typeof window !== "undefined" ? window.location.href : "");
+
+  async function downloadDpp() {
+    try {
+      const res = await fetch(`/api/passports/thread/${threadId}/download`);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${passport!.product_name.replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* silent */ }
+  }
 
   return (
     <div className="min-h-screen bg-[#f5f5f5]" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
@@ -233,22 +234,14 @@ export default function PassportPage() {
           </div>
           <div className="flex items-center gap-2">
             {passport.aas_json && (
-              <a
-                href={`/api/passports/thread/${threadId}/download`}
-                download
+              <button
+                onClick={downloadDpp}
                 className="flex items-center gap-1.5 rounded-lg border border-[#e8e8e8] bg-white px-3 py-1.5 text-[12px] font-medium text-[#555] transition-colors hover:bg-[#f5f5f5]"
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M8 11l-3-3M8 11l3-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
                 Download DPP
-              </a>
+              </button>
             )}
-            <button
-              onClick={copyLink}
-              className="flex items-center gap-1.5 rounded-lg border border-[#e8e8e8] bg-white px-3 py-1.5 text-[12px] font-medium text-[#555] transition-colors hover:bg-[#f5f5f5]"
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 2H4a1 1 0 0 0-1 1v9h1V3h6V2z" fill="currentColor"/><rect x="5" y="4" width="8" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none"/></svg>
-              {copied ? "Copied!" : "Copy link"}
-            </button>
           </div>
         </div>
       </header>

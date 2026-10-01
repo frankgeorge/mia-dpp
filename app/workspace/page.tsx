@@ -431,7 +431,7 @@ function WorkspaceInner() {
     const res = await fetch(`${API_URL}/api/agent/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, knownFields: extractedFields }),
     });
     let body: AgentResponse | { detail?: string };
     try {
@@ -449,7 +449,7 @@ function WorkspaceInner() {
     const res = await fetch(`${API_URL}/api/agent/extract-all`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, knownFields: extractedFields }),
     });
     let body: BulkExtractResponse | { detail?: string };
     try {
@@ -852,14 +852,13 @@ function WorkspaceInner() {
 
     try {
       const res = await fetch("/api/upload", { method: "POST", body: form });
-      const data = (await res.json()) as {
-        text?: string;
-        fileName?: string;
-        fileType?: string;
-        sizeKb?: number;
-        truncated?: boolean;
-        error?: string;
-      };
+      let data: { text?: string; fileName?: string; fileType?: string; sizeKb?: number; truncated?: boolean; error?: string; };
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        const text = await res.text().catch(() => "");
+        throw new Error(text.length < 200 ? `Upload failed: ${text}` : `Upload failed (${res.status}). The file may be too large.`);
+      }
       if (!res.ok || data.error) throw new Error(data.error ?? `Upload failed (${res.status})`);
       setUploadStatus("idle");
 
@@ -1227,8 +1226,8 @@ function WorkspaceInner() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1">
-          <section className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="scroll-quiet flex-1 overflow-y-auto">
               {!hasChat ? (
                 /* ── Empty / hero state ── */
@@ -1489,43 +1488,6 @@ function WorkspaceInner() {
                       </div>
                     )}
 
-                    {/* ── Product image card ───────────────────────────── */}
-                    {(productImageUrl || (hasExtracted && !busy)) && (
-                      <div className="rounded-xl border border-hairline bg-paper p-4">
-                        <p className="text-[12px] font-semibold text-ink mb-3">Product image</p>
-                        {productImageUrl ? (
-                          <div className="flex items-start gap-4">
-                            <img
-                              src={productImageUrl}
-                              alt="Product"
-                              className="h-24 w-24 rounded-lg object-contain border border-hairline bg-mist"
-                              onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
-                            />
-                            <div className="flex flex-col gap-2">
-                              <p className="text-[12px] text-muted">
-                                {imageSource === "og" ? "Extracted from product page" : "Uploaded by you"}
-                              </p>
-                              <button
-                                onClick={() => imageInputRef.current?.click()}
-                                className="text-[12px] font-medium text-signal hover:underline text-left"
-                              >
-                                Use a different image →
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3">
-                            <p className="text-[12px] text-muted flex-1">No product image yet.</p>
-                            <button
-                              onClick={() => imageInputRef.current?.click()}
-                              className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-mist transition-colors"
-                            >
-                              Upload image
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
 
                     {/* ── Handover Documentation helper card ───────────── */}
                     {currentSubmodel === "handover_documentation" && !busy && (
@@ -1605,14 +1567,8 @@ function WorkspaceInner() {
                             <p className="text-[12px] text-muted mb-2">Shareable link:</p>
                             <p className="break-all font-mono text-[11px] text-ink bg-mist rounded-lg p-2">{deployResult.passport_url}</p>
                             <div className="mt-3 flex flex-wrap gap-2">
-                              <button
-                                onClick={() => void navigator.clipboard.writeText(deployResult!.passport_url)}
-                                className="rounded-full border border-hairline bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-mist"
-                              >
-                                Copy link
-                              </button>
                               <a
-                                href={deployResult.passport_url}
+                                href={`/passport/${threadId}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="rounded-full border border-signal/30 bg-signalDim px-3 py-1.5 text-[12px] font-medium text-signal hover:bg-signal/15"
@@ -1626,13 +1582,22 @@ function WorkspaceInner() {
                                 View in Assets →
                               </a>
                               {threadId && (
-                                <a
-                                  href={`/api/passports/thread/${threadId}/download`}
-                                  download
+                                <button
+                                  onClick={async () => {
+                                    const res = await fetch(`/api/passports/thread/${threadId}/download`);
+                                    if (!res.ok) return;
+                                    const blob = await res.blob();
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = `${(productName || "passport").replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                  }}
                                   className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-muted hover:text-ink"
                                 >
                                   Download DPP
-                                </a>
+                                </button>
                               )}
                             </div>
                           </div>
@@ -1664,69 +1629,6 @@ function WorkspaceInner() {
                       </div>
                     )}
 
-                    {/* ── Extracted fields — click any value to edit ── */}
-                    {hasExtracted && !busy && (
-                      <div className="rounded-xl border border-hairline bg-mist p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <p className="text-[12px] font-semibold uppercase tracking-wider text-muted">
-                            Extracted fields ({Object.keys(extractedFields).length})
-                          </p>
-                          <p className="text-[11px] text-muted">Click a value to edit</p>
-                        </div>
-                        <div className="space-y-1">
-                          {Object.entries(extractedFields).map(([field, value]) => (
-                            <div key={field} className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-paper/70 group">
-                              <span className="shrink-0 font-mono text-[11px] text-muted w-48 flex items-center gap-1">
-                                {field}
-                                {manuallyEditedFields.has(field) && (
-                                  <span className="h-1.5 w-1.5 rounded-full bg-signal" title="Manually edited" />
-                                )}
-                              </span>
-                              {editingField === field ? (
-                                <input
-                                  autoFocus
-                                  value={editingValue}
-                                  onChange={(e) => setEditingValue(e.target.value)}
-                                  onBlur={commitFieldEdit}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") commitFieldEdit();
-                                    if (e.key === "Escape") setEditingField(null);
-                                  }}
-                                  className="flex-1 rounded border border-signal/40 bg-paper px-2 py-0.5 text-[12px] text-ink focus:outline-none focus:ring-2 focus:ring-signal/20"
-                                />
-                              ) : field === "DigitalFile" && value ? (
-                                <div className="flex flex-1 flex-wrap items-center gap-1.5">
-                                  {value.split(",").map((u, idx) => {
-                                    const trimmed = u.trim();
-                                    return (
-                                      <button
-                                        key={idx}
-                                        onClick={() => setPreviewDocUrl(trimmed)}
-                                        className="flex items-center gap-1 rounded-lg border border-hairline bg-mist px-2 py-0.5 text-[11px] text-signal hover:border-signal/40 transition-colors"
-                                        title={trimmed}
-                                      >
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                          <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-                                          <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                                        </svg>
-                                        {decodeURIComponent(trimmed.split("/").pop() ?? trimmed).slice(0, 28) || "Document"}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => startEditField(field, value)}
-                                  className="flex-1 text-left text-[12px] text-ink hover:text-signal"
-                                >
-                                  {value}
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                     {busy && (
                       <div className="flex items-center gap-3 py-2">
@@ -1750,7 +1652,7 @@ function WorkspaceInner() {
 
             {/* Chat input — shown once chat has started */}
             {hasChat && (
-              <div className="shrink-0 border-t border-hairline bg-paper px-6 py-4">
+              <div className="shrink-0 border-t border-hairline bg-paper px-6 py-4" style={{ zIndex: 1 }}>
                 <div className="mx-auto max-w-2xl space-y-3">
                   <div className="flex gap-2">
                     <button
@@ -1817,6 +1719,109 @@ function WorkspaceInner() {
               </div>
             )}
           </section>
+
+          {/* ── Right sidebar: product image + extracted fields ── */}
+          {hasChat && hasExtracted && (
+            <aside className="hidden lg:flex w-80 xl:w-96 shrink-0 flex-col border-l border-hairline bg-paper overflow-y-auto scroll-quiet">
+              {/* Product image */}
+              <div className="border-b border-hairline p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-3">Product image</p>
+                {productImageUrl ? (
+                  <div className="flex items-start gap-3">
+                    <img
+                      src={productImageUrl}
+                      alt="Product"
+                      className="h-20 w-20 rounded-lg object-contain border border-hairline bg-mist shrink-0"
+                      onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                    />
+                    <div className="flex flex-col gap-1.5 min-w-0">
+                      <p className="text-[11px] text-muted leading-relaxed">
+                        {imageSource === "og" ? "Extracted from product page" : "Uploaded by you"}
+                      </p>
+                      <button
+                        onClick={() => imageInputRef.current?.click()}
+                        className="text-[11px] font-medium text-signal hover:underline text-left"
+                      >
+                        Use a different image →
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <p className="text-[11px] text-muted flex-1">No product image yet.</p>
+                    <button
+                      onClick={() => imageInputRef.current?.click()}
+                      className="rounded-full border border-hairline px-3 py-1.5 text-[11px] font-medium text-ink hover:bg-mist transition-colors"
+                    >
+                      Upload
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Extracted fields */}
+              <div className="flex-1 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    Extracted fields ({Object.keys(extractedFields).length})
+                  </p>
+                  <p className="text-[10px] text-muted">Click to edit</p>
+                </div>
+                <div className="space-y-0.5">
+                  {Object.entries(extractedFields).map(([field, value]) => (
+                    <div key={field} className="flex items-start gap-2 rounded-lg px-2 py-1 hover:bg-mist group">
+                      <span className="shrink-0 font-mono text-[10px] text-muted w-36 pt-0.5 flex items-center gap-1 leading-relaxed">
+                        {field}
+                        {manuallyEditedFields.has(field) && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-signal shrink-0" title="Manually edited" />
+                        )}
+                      </span>
+                      {editingField === field ? (
+                        <input
+                          autoFocus
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={commitFieldEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitFieldEdit();
+                            if (e.key === "Escape") setEditingField(null);
+                          }}
+                          className="flex-1 rounded border border-signal/40 bg-paper px-2 py-0.5 text-[11px] text-ink focus:outline-none focus:ring-2 focus:ring-signal/20"
+                        />
+                      ) : field === "DigitalFile" && value ? (
+                        <div className="flex flex-1 flex-wrap items-center gap-1">
+                          {value.split(",").map((u, idx) => {
+                            const trimmed = u.trim();
+                            return (
+                              <button
+                                key={idx}
+                                onClick={() => setPreviewDocUrl(trimmed)}
+                                className="flex items-center gap-1 rounded border border-hairline bg-mist px-1.5 py-0.5 text-[10px] text-signal hover:border-signal/40 transition-colors"
+                                title={trimmed}
+                              >
+                                <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+                                  <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                                  <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                                </svg>
+                                {decodeURIComponent(trimmed.split("/").pop() ?? trimmed).slice(0, 22) || "Doc"}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startEditField(field, value)}
+                          className="flex-1 text-left text-[11px] text-ink hover:text-signal break-words min-w-0"
+                        >
+                          {value}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     </>

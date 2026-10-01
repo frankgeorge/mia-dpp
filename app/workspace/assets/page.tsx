@@ -21,7 +21,6 @@ interface Passport {
 export default function AssetsPage() {
   const [passports, setPassports] = useState<Passport[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   async function deletePassport(threadId: string) {
@@ -57,12 +56,6 @@ export default function AssetsPage() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
-
-  function copyLink(url: string, id: string) {
-    navigator.clipboard.writeText(url);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  }
 
   return (
     <div className="px-8 py-8">
@@ -136,9 +129,7 @@ export default function AssetsPage() {
               <PassportCard
                 key={p.id}
                 passport={p}
-                copied={copied === p.id}
                 deleting={deleting === p.thread_id}
-                onCopy={(url?: string) => copyLink(url ?? p.passport_url ?? `${window.location.origin}/passport/${p.thread_id}`, p.id)}
                 onDelete={() => void deletePassport(p.thread_id)}
               />
             ))}
@@ -164,15 +155,11 @@ export default function AssetsPage() {
 
 function PassportCard({
   passport,
-  copied,
   deleting,
-  onCopy,
   onDelete,
 }: {
   passport: Passport;
-  copied: boolean;
   deleting: boolean;
-  onCopy: (url?: string) => void;
   onDelete: () => void;
 }) {
   const deployed = passport.status === "deployed" && !!passport.passport_url;
@@ -237,38 +224,22 @@ function PassportCard({
           {/* Primary action row */}
           <div className="flex gap-2">
             {deployed ? (
-              <>
-                <a
-                  href={passport.passport_url!}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-                >
-                  Open
-                </a>
-                <button
-                  onClick={() => onCopy()}
-                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-                >
-                  {copied ? "Copied!" : "Share"}
-                </button>
-              </>
+              <a
+                href={passport.passport_url!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+              >
+                Open passport
+              </a>
             ) : passport.has_aas ? (
-              <>
-                <Link
-                  href={`/passport/${passport.thread_id}`}
-                  target="_blank"
-                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-                >
-                  Open
-                </Link>
-                <button
-                  onClick={() => onCopy(`${window.location.origin}/passport/${passport.thread_id}`)}
-                  className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
-                >
-                  {copied ? "Copied!" : "Share"}
-                </button>
-              </>
+              <Link
+                href={`/passport/${passport.thread_id}`}
+                target="_blank"
+                className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
+              >
+                Open passport
+              </Link>
             ) : (
               <Link
                 href={`/workspace?thread=${passport.thread_id}`}

@@ -136,6 +136,7 @@ class AgentRequest(WireModel):
     company_website: str | None = Field(default=None, max_length=512)
     current_submodel: str = Field(default=SUBMODEL_SEQUENCE[0], max_length=64)
     action: Literal["skip"] | None = None
+    known_fields: dict[str, str] | None = Field(default=None)
 
 
 class AgentResponse(WireModel):
@@ -178,6 +179,7 @@ class BulkExtractRequest(WireModel):
     document_type: str | None = Field(default=None, max_length=32)
     company_name: str | None = Field(default=None, max_length=256)
     company_website: str | None = Field(default=None, max_length=512)
+    known_fields: dict[str, str] | None = Field(default=None)
 
 
 class BulkExtractResponse(WireModel):

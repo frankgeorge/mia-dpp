@@ -123,6 +123,13 @@ class Mia:
         if request.document_filename:
             state.document_filename = request.document_filename
 
+        # Restore extracted fields from frontend on ephemeral container restarts
+        # (SQLite on Vercel is in-memory — known_fields carries state across cold starts)
+        if request.known_fields:
+            for field, value in request.known_fields.items():
+                if field not in state.extracted_fields:
+                    state.extracted_fields[field] = value
+
         # Update current submodel from request (frontend drives the sequence)
         current_submodel = request.current_submodel
         if current_submodel not in SUBMODEL_SEQUENCE:
@@ -285,6 +292,12 @@ class Mia:
             state.company_website = request.company_website
         if request.document_filename:
             state.document_filename = request.document_filename
+
+        # Restore extracted fields from frontend on ephemeral container restarts
+        if request.known_fields:
+            for field, value in request.known_fields.items():
+                if field not in state.extracted_fields:
+                    state.extracted_fields[field] = value
 
         # Build prompt with document text and known context
         parts: list[str] = []
@@ -474,13 +487,28 @@ class Mia:
             parts.append(request.document_text)
             parts.append("")
 
-        # Show fields already confirmed for this submodel in this session
-        sm_fields = state.submodel_fields.get(current_submodel, {})
+        # Show fields already confirmed for this submodel — merge SQLite state with
+        # frontend-supplied known_fields so context survives ephemeral container restarts.
+        sm_fields = dict(state.submodel_fields.get(current_submodel, {}))
+        if request.known_fields:
+            for field, value in request.known_fields.items():
+                if field not in sm_fields:
+                    sm_fields[field] = value
+
         if sm_fields:
             parts.append(f"FIELDS ALREADY EXTRACTED for {current_submodel}:")
             for field, value in sm_fields.items():
                 parts.append(f"  {field}: {value}")
             parts.append("")
+
+        # Show all other known fields from the frontend (other submodels already filled)
+        if request.known_fields:
+            other = {k: v for k, v in request.known_fields.items() if k not in sm_fields}
+            if other:
+                parts.append("PREVIOUSLY COLLECTED FIELDS (already known — do not ask again):")
+                for field, value in other.items():
+                    parts.append(f"  {field}: {value}")
+                parts.append("")
 
         parts.append("USER MESSAGE:")
         parts.append(request.message)

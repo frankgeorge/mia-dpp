@@ -202,7 +202,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const pdfBuffer = await pdfPromise;
 
   const filename = `${String(product_name).replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
-  return new Response(pdfBuffer as unknown as BodyInit, {
+  return new Response(new Uint8Array(pdfBuffer), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
