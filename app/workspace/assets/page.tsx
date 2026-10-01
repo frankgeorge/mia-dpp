@@ -258,14 +258,25 @@ function PassportCard({
               Edit
             </Link>
             {passport.has_aas && (
-              <a
-                href={`/api/passports/thread/${passport.thread_id}/download`}
-                download
+              <button
+                onClick={async () => {
+                  const res = await fetch(`/api/passports/thread/${passport.thread_id}/download`);
+                  if (!res.ok) return;
+                  const blob = new Blob([await res.arrayBuffer()], { type: "application/pdf" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `${passport.product_name.replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }}
                 className="rounded-lg border border-hairline py-1.5 px-3 text-center text-[12px] font-medium text-ink transition-colors hover:bg-mist"
                 title="Download DPP as PDF"
               >
                 PDF
-              </a>
+              </button>
             )}
             <button
               onClick={onDelete}

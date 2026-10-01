@@ -1598,7 +1598,7 @@ function WorkspaceInner() {
                                   onClick={async () => {
                                     const res = await fetch(`/api/passports/thread/${threadId}/download`);
                                     if (!res.ok) return;
-                                    const blob = await res.blob();
+                                    const blob = new Blob([await res.arrayBuffer()], { type: "application/pdf" });
                                     const url = URL.createObjectURL(blob);
                                     const a = document.createElement("a");
                                     a.href = url;

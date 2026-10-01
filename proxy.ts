@@ -7,12 +7,18 @@ const PROTECTED_PREFIXES = [
   "/api/email",
   "/api/chat",
   "/api/upload",
-  "/api/passport",
   "/api/sap",
+];
+
+// Routes that must remain public (direct browser navigation, QR scans, etc.)
+const PUBLIC_PREFIXES = [
+  "/api/passports/thread/",  // includes /download — must be accessible without session cookie
+  "/passport/",
 ];
 
 export default clerkMiddleware(async (auth, req) => {
   const path = req.nextUrl.pathname;
+  if (PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix))) return;
   if (PROTECTED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
     await auth.protect();
   }
