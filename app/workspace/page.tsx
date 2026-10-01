@@ -1591,8 +1591,10 @@ function WorkspaceInner() {
                                     const a = document.createElement("a");
                                     a.href = url;
                                     a.download = `${(productName || "passport").replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
+                                    document.body.appendChild(a);
                                     a.click();
-                                    URL.revokeObjectURL(url);
+                                    document.body.removeChild(a);
+                                    setTimeout(() => URL.revokeObjectURL(url), 1000);
                                   }}
                                   className="rounded-full border border-hairline px-3 py-1.5 text-[12px] font-medium text-muted hover:text-ink"
                                 >

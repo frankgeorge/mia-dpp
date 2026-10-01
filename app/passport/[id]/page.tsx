@@ -211,8 +211,10 @@ export default function PassportPage() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `${passport!.product_name.replace(/[^a-z0-9]/gi, "_").toLowerCase()}-dpp.pdf`;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch { /* silent */ }
   }
 
