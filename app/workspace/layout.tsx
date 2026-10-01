@@ -6,7 +6,7 @@ export default function WorkspaceLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-screen overflow-hidden bg-mist">
+    <div className="flex h-[100dvh] overflow-hidden bg-mist">
       <WorkspaceSidebar />
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto md:ml-[240px]">
         {children}

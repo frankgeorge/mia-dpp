@@ -38,6 +38,16 @@ const SUBMODEL_CODES: Record<string, string> = {
   MaintenanceInstructions: "IDTA 02018",
 };
 
+const SUBMODEL_ACCENT: Record<string, string> = {
+  Nameplate: "#1a1a1a",
+  DigitalNameplate: "#1a1a1a",
+  TechnicalData: "#1d4ed8",
+  CarbonFootprint: "#15803d",
+  DPPMetadata: "#7c3aed",
+  HandoverDocumentation: "#b45309",
+  MaintenanceInstructions: "#be123c",
+};
+
 function extractFields(elements: AasElement[]): { label: string; value: string }[] {
   const fields: { label: string; value: string }[] = [];
   for (const el of elements) {
@@ -53,7 +63,10 @@ function extractFields(elements: AasElement[]): { label: string; value: string }
       const langs = el.value as Array<{ language: string; text: string }>;
       const en = langs.find((l) => l.language === "en") ?? langs[0];
       if (en?.text) {
-        const label = el.idShort.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (s) => s.toUpperCase()).trim();
+        const label = el.idShort
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .replace(/^./, (s) => s.toUpperCase())
+          .trim();
         fields.push({ label, value: en.text });
       }
     } else if (el.submodelElements?.length) {
@@ -63,6 +76,20 @@ function extractFields(elements: AasElement[]): { label: string; value: string }
     }
   }
   return fields;
+}
+
+async function fetchImageBuffer(url: string): Promise<Buffer | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const ab = await res.arrayBuffer();
+    return Buffer.from(ab);
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -75,34 +102,36 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   if (!rows[0]) return Response.json({ error: "Passport not found" }, { status: 404 });
 
-  const { product_name, aas_json, passport_url, qr_code_b64, updated_at } = rows[0];
+  const { product_name, aas_json, passport_url, product_image_url, qr_code_b64, updated_at } = rows[0];
   if (!aas_json) return Response.json({ error: "No AAS data available" }, { status: 404 });
 
   const submodels = ((aas_json as Record<string, unknown>).submodels as AasSubmodel[] | undefined) ?? [];
   const passportLink = (passport_url as string | null) ?? `https://mia-dpp.vercel.app/passport/${id}`;
 
-  // Generate QR code PNG buffer
-  let qrBuffer: Buffer | null = null;
-  try {
-    if (qr_code_b64) {
-      qrBuffer = Buffer.from(qr_code_b64 as string, "base64");
-    } else {
-      qrBuffer = await QRCode.toBuffer(passportLink, { width: 120, margin: 1 });
-    }
-  } catch { /* skip QR if generation fails */ }
+  // Fetch product image and QR code in parallel
+  const [productImgBuffer, qrBuffer] = await Promise.all([
+    product_image_url ? fetchImageBuffer(product_image_url as string) : Promise.resolve(null),
+    (async () => {
+      try {
+        if (qr_code_b64) return Buffer.from(qr_code_b64 as string, "base64");
+        return await QRCode.toBuffer(passportLink, { width: 128, margin: 1 });
+      } catch { return null; }
+    })(),
+  ]);
 
-  // Build PDF — set up stream BEFORE any drawing or doc.end()
-  const doc = new PDFDocument({
-    size: "A4",
-    margin: 0,
-    info: {
-      Title: `Digital Product Passport — ${product_name as string}`,
-      Author: "MIA Digital Product Passport",
-      Subject: "EU ESPR Digital Product Passport",
-    },
-  });
+  // ─── PDF layout constants ────────────────────────────────────────────────
+  const W = 595.28;   // A4 width pts
+  const H = 841.89;   // A4 height pts
+  const MARGIN = 44;
+  const CW = W - MARGIN * 2;   // content width
 
-  // Register stream listeners BEFORE drawing to avoid race conditions
+  const doc = new PDFDocument({ size: "A4", margin: 0, info: {
+    Title: `Digital Product Passport — ${product_name as string}`,
+    Author: "MIA",
+    Subject: "EU ESPR Digital Product Passport",
+  }});
+
+  // Register listeners BEFORE any drawing
   const pdfPromise = new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
@@ -110,94 +139,160 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.on("error", reject);
   });
 
-  const W = 595.28; // A4 width in points
-  const MARGIN = 48;
-  const CONTENT_W = W - MARGIN * 2;
+  // ─── Header bar ──────────────────────────────────────────────────────────
+  doc.rect(0, 0, W, 64).fill("#0f0f0f");
 
-  // ── Header banner ──────────────────────────────────────────────────────────
-  doc.rect(0, 0, W, 72).fill("#0f0f0f");
-
-  // MIA wordmark
-  doc.fontSize(15).fillColor("#ffffff").font("Helvetica-Bold").text("MIA", MARGIN, 24, { continued: true });
-  doc.fontSize(11).fillColor("#888888").font("Helvetica").text("  ·  Digital Product Passport", { continued: false });
+  doc.fontSize(16).fillColor("#ffffff").font("Helvetica-Bold")
+    .text("MIA", MARGIN, 20, { continued: true });
+  doc.fontSize(10).fillColor("#888888").font("Helvetica")
+    .text("  ·  Digital Product Passport", { continued: false });
 
   // Standards badges
-  const badgeY = 44;
   const badges = ["IDTA AAS v3.0", "EU ESPR", "GHG Protocol"];
   let bx = MARGIN;
+  const badgeY = 40;
+  doc.fontSize(7.5);
   for (const b of badges) {
-    doc.fontSize(8);
-    const bw = doc.widthOfString(b) + 16;
-    doc.roundedRect(bx, badgeY, bw, 14, 3).fill("#2a2a2a");
-    doc.fillColor("#aaaaaa").font("Helvetica").text(b, bx + 8, badgeY + 3);
-    bx += bw + 6;
+    const bw = doc.widthOfString(b) + 14;
+    doc.roundedRect(bx, badgeY, bw, 13, 2).fill("#2a2a2a");
+    doc.fillColor("#aaaaaa").font("Helvetica").text(b, bx + 7, badgeY + 3);
+    bx += bw + 5;
   }
 
-  // ── Product hero section ───────────────────────────────────────────────────
-  let y = 96;
-  const heroH = qrBuffer ? 120 : 84;
+  // ─── Hero card ────────────────────────────────────────────────────────────
+  let y = 80;
+  const HERO_H = 110;
 
-  doc.roundedRect(MARGIN, y, CONTENT_W, heroH, 8).fill("#f8f8f8");
-  doc.roundedRect(MARGIN, y, CONTENT_W, heroH, 8).lineWidth(1).stroke("#e8e8e8");
+  doc.roundedRect(MARGIN, y, CW, HERO_H, 6).fill("#f9f9f9");
+  doc.roundedRect(MARGIN, y, CW, HERO_H, 6).lineWidth(0.75).stroke("#e8e8e8");
 
-  // Product name & date
+  const IMG_SIZE = 80;
+  const IMG_X = MARGIN + 14;
+  const IMG_Y = y + 15;
+
+  // Product image
+  if (productImgBuffer) {
+    try {
+      // Draw white rounded square behind image
+      doc.roundedRect(IMG_X - 2, IMG_Y - 2, IMG_SIZE + 4, IMG_SIZE + 4, 4).fill("#ffffff");
+      doc.roundedRect(IMG_X - 2, IMG_Y - 2, IMG_SIZE + 4, IMG_SIZE + 4, 4).lineWidth(0.5).stroke("#e8e8e8");
+      doc.image(productImgBuffer, IMG_X, IMG_Y, { fit: [IMG_SIZE, IMG_SIZE], align: "center", valign: "center" });
+    } catch { /* skip image if format unsupported */ }
+  }
+
+  // Product info (shift right if image present)
+  const textX = productImgBuffer ? IMG_X + IMG_SIZE + 14 : MARGIN + 14;
+  const textMaxW = CW - (textX - MARGIN) - (qrBuffer ? 110 : 20);
+
   const dateStr = updated_at
     ? new Date(updated_at as string).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
     : new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
-  doc.fontSize(9).fillColor("#999999").font("Helvetica").text("DIGITAL PRODUCT PASSPORT", MARGIN + 16, y + 16);
-  doc.fontSize(17).fillColor("#0f0f0f").font("Helvetica-Bold").text(product_name as string, MARGIN + 16, y + 30, { width: CONTENT_W - 150 });
-  doc.fontSize(9).fillColor("#999999").font("Helvetica").text(`Generated: ${dateStr}`, MARGIN + 16, y + 56);
-  doc.fontSize(8).fillColor("#3b5bdb").font("Helvetica").text(passportLink, MARGIN + 16, y + 70, { width: CONTENT_W - 150 });
+  doc.fontSize(8).fillColor("#999999").font("Helvetica")
+    .text("DIGITAL PRODUCT PASSPORT", textX, y + 14);
+  doc.fontSize(15).fillColor("#0f0f0f").font("Helvetica-Bold")
+    .text(product_name as string, textX, y + 27, { width: textMaxW, lineBreak: false });
 
-  // QR code (top right of hero)
+  // Extract manufacturer for subtitle
+  let manufacturer = "";
+  for (const sm of submodels) {
+    const key = sm.idShort ?? "";
+    if (key === "Nameplate" || key === "DigitalNameplate" || key === "digital_nameplate") {
+      for (const el of sm.submodelElements ?? []) {
+        if ((el.idShort === "ManufacturerName" || el.idShort === "Manufacturer Name") && el.value) {
+          manufacturer = String(el.value);
+        }
+        if (!manufacturer && el.modelType === "MultiLanguageProperty" && el.idShort.toLowerCase().includes("manufacturer")) {
+          const langs = el.value as Array<{ language: string; text: string }> | undefined;
+          const en = langs?.find((l) => l.language === "en") ?? langs?.[0];
+          if (en?.text) manufacturer = en.text;
+        }
+      }
+    }
+    if (manufacturer) break;
+  }
+
+  if (manufacturer) {
+    doc.fontSize(9).fillColor("#666666").font("Helvetica")
+      .text(manufacturer, textX, y + 48, { width: textMaxW });
+  }
+
+  doc.fontSize(8).fillColor("#bbbbbb").font("Helvetica")
+    .text(`Generated: ${dateStr}`, textX, y + 62);
+  doc.fontSize(7.5).fillColor("#3b5bdb").font("Helvetica")
+    .text(passportLink, textX, y + 74, { width: textMaxW });
+
+  // QR code — top right of hero
   if (qrBuffer) {
     try {
-      doc.image(qrBuffer, MARGIN + CONTENT_W - 116, y + 10, { width: 100, height: 100 });
+      doc.image(qrBuffer, MARGIN + CW - 108, y + 8, { width: 94, height: 94 });
     } catch { /* skip */ }
   }
 
-  y += heroH + 20;
+  y += HERO_H + 18;
 
-  // ── Submodels ──────────────────────────────────────────────────────────────
+  // ─── Submodels ────────────────────────────────────────────────────────────
   for (const sm of submodels) {
     const key = sm.idShort ?? "unknown";
     const label = SUBMODEL_LABELS[key] ?? key.replace(/([a-z])([A-Z])/g, "$1 $2");
     const code = SUBMODEL_CODES[key] ?? "AAS";
+    const accent = SUBMODEL_ACCENT[key] ?? "#1a1a1a";
     const fields = extractFields(sm.submodelElements ?? []);
     if (fields.length === 0) continue;
 
-    // Section heading bar
-    if (y > 720) { doc.addPage(); y = MARGIN; }
-    doc.roundedRect(MARGIN, y, CONTENT_W, 26, 5).fill("#0f0f0f");
-    doc.fontSize(11).fillColor("#ffffff").font("Helvetica-Bold").text(label, MARGIN + 12, y + 7, { continued: true });
-    doc.fontSize(8).fillColor("#888888").font("Helvetica").text(`  ${code}`, { continued: false });
-    y += 34;
+    // Page break check — leave room for heading + at least 2 rows
+    if (y > H - 80) { doc.addPage(); y = MARGIN; }
 
-    // Fields — alternate background rows
+    // Section heading
+    doc.roundedRect(MARGIN, y, CW, 24, 4).fill(accent);
+    doc.fontSize(10).fillColor("#ffffff").font("Helvetica-Bold")
+      .text(label, MARGIN + 12, y + 7, { continued: true });
+    doc.fontSize(7.5).fillColor("rgba(255,255,255,0.6)").font("Helvetica")
+      .text(`  ${code}`, { continued: false });
+    y += 30;
+
+    // Field rows
     fields.forEach(({ label: fl, value }, idx) => {
-      if (y > 760) { doc.addPage(); y = MARGIN; }
-      const ROW_H = 18;
+      const ROW_H = 17;
+      // Page break mid-submodel
+      if (y > H - 36) { doc.addPage(); y = MARGIN; }
+
       if (idx % 2 === 0) {
-        doc.rect(MARGIN, y, CONTENT_W, ROW_H).fill("#fafafa");
+        doc.rect(MARGIN, y, CW, ROW_H).fill("#f7f7f7");
       }
-      doc.fontSize(9).fillColor("#888888").font("Helvetica").text(fl, MARGIN + 10, y + 5, { width: 180, continued: false });
-      doc.fontSize(9).fillColor("#1a1a1a").font("Helvetica").text(value, MARGIN + 200, y + 5, { width: CONTENT_W - 210 });
-      doc.moveTo(MARGIN, y + ROW_H).lineTo(MARGIN + CONTENT_W, y + ROW_H).lineWidth(0.5).stroke("#f0f0f0");
+
+      // Label
+      doc.fontSize(8.5).fillColor("#888888").font("Helvetica")
+        .text(fl, MARGIN + 10, y + 4, { width: 185, continued: false });
+
+      // Value — truncate very long values
+      const displayValue = value.length > 120 ? value.slice(0, 117) + "…" : value;
+      doc.fontSize(8.5).fillColor("#1a1a1a").font("Helvetica")
+        .text(displayValue, MARGIN + 202, y + 4, { width: CW - 210, continued: false });
+
+      // Row divider
+      doc.moveTo(MARGIN, y + ROW_H)
+        .lineTo(MARGIN + CW, y + ROW_H)
+        .lineWidth(0.4).stroke("#eeeeee");
+
       y += ROW_H;
     });
-    y += 16;
+
+    y += 14;
   }
 
-  // ── Footer ─────────────────────────────────────────────────────────────────
-  const PAGE_H = 841.89;
-  if (y < PAGE_H - 60) {
-    doc.moveTo(MARGIN, PAGE_H - 48).lineTo(W - MARGIN, PAGE_H - 48).lineWidth(0.5).stroke("#e8e8e8");
-    doc.fontSize(8).fillColor("#bbbbbb").font("Helvetica")
-      .text(`Generated by MIA · mia-dpp.vercel.app · ${new Date().toISOString().slice(0, 10)}`, MARGIN, PAGE_H - 36, { align: "center", width: CONTENT_W });
+  // ─── Footer ───────────────────────────────────────────────────────────────
+  // Draw footer on the last page only if there's room
+  if (y < H - 50) {
+    doc.moveTo(MARGIN, H - 44).lineTo(W - MARGIN, H - 44).lineWidth(0.5).stroke("#e0e0e0");
+    doc.fontSize(7.5).fillColor("#bbbbbb").font("Helvetica")
+      .text(
+        `Generated by MIA  ·  mia-dpp.vercel.app  ·  ${new Date().toISOString().slice(0, 10)}  ·  IDTA AAS v3.0  ·  EU ESPR compliant`,
+        MARGIN, H - 32,
+        { align: "center", width: CW }
+      );
   }
 
-  // End the document — the pdfPromise resolves when all chunks are collected
   doc.end();
   const pdfBuffer = await pdfPromise;
 
@@ -206,6 +301,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "no-store",
     },
   });
 }

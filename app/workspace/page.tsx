@@ -1154,7 +1154,7 @@ function WorkspaceInner() {
       <div className="flex h-full flex-col">
         {/* Top bar */}
         {hasChat && (
-          <header className="shrink-0 flex h-14 items-center justify-between border-b border-hairline bg-paper pl-14 pr-6 md:pl-6">
+          <header className="shrink-0 flex h-14 items-center justify-between border-b border-hairline bg-paper pl-14 pr-4 md:pl-6 md:pr-6">
             <span className="text-[14px] font-medium text-ink truncate">
               {productName || "New passport"}
             </span>
@@ -1184,8 +1184,8 @@ function WorkspaceInner() {
 
         {/* Submodel progress strip */}
         {hasChat && (
-          <div className="shrink-0 border-b border-hairline bg-paper px-4 py-2 overflow-x-auto scroll-quiet">
-            <div className="flex items-center gap-0.5 min-w-max pl-10 md:pl-0 mx-auto max-w-4xl">
+          <div className="shrink-0 border-b border-hairline bg-paper px-4 py-2 overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
+            <div className="flex items-center gap-0.5 min-w-max pl-10 md:pl-0">
               {SUBMODEL_SEQUENCE.map((key, idx) => {
                 const status = submodelStatus[key] ?? "pending";
                 const isCurrent = key === currentSubmodel;
@@ -1231,7 +1231,7 @@ function WorkspaceInner() {
             <div className="scroll-quiet flex-1 overflow-y-auto">
               {!hasChat ? (
                 /* ── Empty / hero state ── */
-                <div className="flex min-h-full flex-col items-center justify-center px-6 pt-20 pb-16 md:py-16 animate-rise">
+                <div className="flex min-h-full flex-col items-center justify-center px-4 pt-12 pb-8 sm:px-6 md:py-16 animate-rise">
                   <div className="w-full max-w-xl">
                     <h1 className="text-[28px] font-semibold tracking-tight text-ink">
                       {getGreeting()}{firstName ? `, ${firstName}` : ""}.
@@ -1323,7 +1323,7 @@ function WorkspaceInner() {
                 </div>
               ) : (
                 /* ── Active chat ── */
-                <div className="px-6 py-6">
+                <div className="px-4 py-4 sm:px-6 sm:py-6">
                   <div className="mx-auto max-w-2xl space-y-5">
                     {messages.map((m, i) => (
                       <div
@@ -1554,7 +1554,7 @@ function WorkspaceInner() {
                           <span className="h-2 w-2 rounded-full bg-ok" />
                           <p className="text-[13px] font-semibold text-ink">Passport ready</p>
                         </div>
-                        <div className="flex gap-4 items-start">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                           {deployResult.qr_code_png_b64 && (
                             <img
                               src={`data:image/png;base64,${deployResult.qr_code_png_b64}`}
@@ -1566,7 +1566,7 @@ function WorkspaceInner() {
                           <div className="flex-1 min-w-0">
                             <p className="text-[12px] text-muted mb-2">Shareable link:</p>
                             <p className="break-all font-mono text-[11px] text-ink bg-mist rounded-lg p-2">{deployResult.passport_url}</p>
-                            <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="mt-3 flex flex-wrap gap-2 sm:gap-2">
                               <a
                                 href={`/passport/${threadId}`}
                                 target="_blank"
@@ -1630,6 +1630,45 @@ function WorkspaceInner() {
                     )}
 
 
+                    {/* Mobile extracted fields toggle — shown below chat on small screens */}
+                    {hasExtracted && !busy && (
+                      <div className="md:hidden rounded-xl border border-hairline bg-mist p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[12px] font-semibold uppercase tracking-wider text-muted">
+                            Extracted fields ({Object.keys(extractedFields).length})
+                          </p>
+                          <p className="text-[11px] text-muted">Tap to edit</p>
+                        </div>
+                        <div className="space-y-0.5 max-h-64 overflow-y-auto scroll-quiet">
+                          {Object.entries(extractedFields).map(([field, value]) => (
+                            <div key={field} className="flex items-start gap-2 rounded-lg px-2 py-2">
+                              <span className="shrink-0 font-mono text-[11px] text-muted w-32 pt-0.5 leading-relaxed">{field}</span>
+                              {editingField === field ? (
+                                <input
+                                  autoFocus
+                                  value={editingValue}
+                                  onChange={(e) => setEditingValue(e.target.value)}
+                                  onBlur={commitFieldEdit}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") commitFieldEdit();
+                                    if (e.key === "Escape") setEditingField(null);
+                                  }}
+                                  className="flex-1 rounded border border-signal/40 bg-paper px-2 py-1 text-[12px] text-ink focus:outline-none"
+                                />
+                              ) : (
+                                <button
+                                  onClick={() => startEditField(field, value)}
+                                  className="flex-1 text-left text-[12px] text-ink break-words min-w-0 py-0.5"
+                                >
+                                  {value}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {busy && (
                       <div className="flex items-center gap-3 py-2">
                         <div className="flex gap-1">
@@ -1652,7 +1691,7 @@ function WorkspaceInner() {
 
             {/* Chat input — shown once chat has started */}
             {hasChat && (
-              <div className="shrink-0 border-t border-hairline bg-paper px-6 py-4" style={{ zIndex: 1 }}>
+              <div className="shrink-0 border-t border-hairline bg-paper px-4 pt-3 pb-safe md:px-6 md:py-4" style={{ zIndex: 1 }}>
                 <div className="mx-auto max-w-2xl space-y-3">
                   <div className="flex gap-2">
                     <button
@@ -1722,7 +1761,7 @@ function WorkspaceInner() {
 
           {/* ── Right sidebar: product image + extracted fields ── */}
           {hasChat && hasExtracted && (
-            <aside className="hidden lg:flex w-80 xl:w-96 shrink-0 flex-col border-l border-hairline bg-paper overflow-y-auto scroll-quiet">
+            <aside className="hidden md:flex w-72 lg:w-80 xl:w-96 shrink-0 flex-col border-l border-hairline bg-paper overflow-y-auto scroll-quiet">
               {/* Product image */}
               <div className="border-b border-hairline p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-3">Product image</p>

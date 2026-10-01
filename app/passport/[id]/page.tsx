@@ -250,9 +250,9 @@ export default function PassportPage() {
 
         {/* Hero card */}
         <div className="mb-6 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-[#e8e8e8]">
-          <div className="flex items-start gap-6 p-6">
+          <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:gap-6 sm:p-6">
             {/* Product image */}
-            <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#f0f0f0] bg-[#fafafa]">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#f0f0f0] bg-[#fafafa] sm:h-24 sm:w-24">
               {passport.product_image_url ? (
                 <img
                   src={passport.product_image_url}
@@ -289,12 +289,12 @@ export default function PassportPage() {
                     </a>
                   )}
                 </div>
-                <div className="flex flex-col items-end gap-2 shrink-0">
+                <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-2 shrink-0">
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDeployed ? "bg-[#e8f5ee] text-[#1b8a5a]" : "bg-[#fff8e6] text-[#b45309]"}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${isDeployed ? "bg-[#1b8a5a]" : "bg-[#b45309]"}`} />
                     {isDeployed ? "Active" : "Draft"}
                   </span>
-                  <QrCode url={passportUrl} size={80} />
+                  <QrCode url={passportUrl} size={72} />
                 </div>
               </div>
 
@@ -321,7 +321,7 @@ export default function PassportPage() {
         {sections.length > 0 && (
           <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-[#e8e8e8]">
             {/* Tab bar */}
-            <div className="flex overflow-x-auto border-b border-[#f0f0f0] px-2 pt-2">
+            <div className="flex overflow-x-auto border-b border-[#f0f0f0] px-2 pt-2 scrollbar-none" style={{ WebkitOverflowScrolling: "touch" }}>
               {sections.map((s, i) => (
                 <button
                   key={s.key}
@@ -349,8 +349,8 @@ export default function PassportPage() {
 
               <div className="divide-y divide-[#f5f5f5]">
                 {activeFields.map(({ label, value }, i) => (
-                  <div key={i} className="flex items-start gap-4 py-3">
-                    <p className="w-52 shrink-0 text-[13px] text-[#888]">{label}</p>
+                  <div key={i} className="flex flex-col gap-0.5 py-3 sm:flex-row sm:items-start sm:gap-4">
+                    <p className="w-full text-[12px] text-[#aaa] sm:w-52 sm:shrink-0 sm:text-[13px] sm:text-[#888]">{label}</p>
                     <p className="flex-1 text-[13px] font-medium text-[#1a1a1a] break-words">
                       {value.startsWith("http") ? (
                         <a href={value} target="_blank" rel="noopener noreferrer" className="text-[#3b5bdb] hover:underline break-all">

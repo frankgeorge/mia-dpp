@@ -88,3 +88,14 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* iOS safe area inset for chat input bar */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Minimum touch target helper */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
