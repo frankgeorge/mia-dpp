@@ -39,13 +39,13 @@ const SUBMODEL_CODES: Record<string, string> = {
 };
 
 const SUBMODEL_ACCENT: Record<string, string> = {
-  Nameplate: "#1a1a1a",
-  DigitalNameplate: "#1a1a1a",
+  Nameplate: "#1d4ed8",
+  DigitalNameplate: "#1d4ed8",
   TechnicalData: "#1d4ed8",
-  CarbonFootprint: "#15803d",
-  DPPMetadata: "#7c3aed",
-  HandoverDocumentation: "#b45309",
-  MaintenanceInstructions: "#be123c",
+  CarbonFootprint: "#1d4ed8",
+  DPPMetadata: "#1d4ed8",
+  HandoverDocumentation: "#1d4ed8",
+  MaintenanceInstructions: "#1d4ed8",
 };
 
 function extractFields(elements: AasElement[]): { label: string; value: string }[] {
