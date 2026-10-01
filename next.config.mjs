@@ -2,13 +2,13 @@
 const nextConfig = {
   reactStrictMode: true,
   devIndicators: false,
-  // pdfkit reads .afm font metric files at runtime from its data directory.
-  // Without this, Next.js serverless on Vercel omits them and pdfkit produces
-  // an empty or corrupt PDF response.
+  // pdfkit uses Node.js package subpath imports (#standard-fonts/*, #fs, etc.)
+  // which break when Next.js bundles the package. Marking it as external tells
+  // Next.js to leave it in node_modules and let Node.js resolve it natively.
+  serverExternalPackages: ["pdfkit"],
   outputFileTracingIncludes: {
     "/api/passports/thread/[id]/download": [
-      "./node_modules/pdfkit/js/data/**/*",
-      "./node_modules/pdfkit/js/standard-fonts/**/*",
+      "./node_modules/pdfkit/**/*",
     ],
   },
 };
