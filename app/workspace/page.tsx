@@ -333,6 +333,18 @@ function WorkspaceInner() {
     setAgentStatus(data.status);
     setDppReady(data.dppReady);
 
+    // Persist trace events to localStorage so the activity page can read them
+    // even when the backend container changes (ephemeral SQLite).
+    if (data.traceEvents.length > 0) {
+      try {
+        const key = `mia_trace_${data.threadId}`;
+        const existing = JSON.parse(localStorage.getItem(key) ?? "[]") as { id: string }[];
+        const existingIds = new Set(existing.map((e) => e.id));
+        const merged = [...existing, ...data.traceEvents.filter((e) => !existingIds.has(e.id))];
+        localStorage.setItem(key, JSON.stringify(merged));
+      } catch { /* storage not available */ }
+    }
+
     const sm = (data.currentSubmodel || currentSubmodel) as SubmodelKey;
 
     // Update submodel status from backend

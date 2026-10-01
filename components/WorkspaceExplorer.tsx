@@ -31,9 +31,16 @@ export function WorkspaceExplorer({ apiUrl, threadId, artifacts }: {
     if (!artifact.contentType.includes("json") && !artifact.contentType.startsWith("text/")) return;
     setLoading(true);
     try {
-      const response = await fetch(`${apiUrl}/api/workspaces/${encodeURIComponent(threadId)}/artifacts/${artifact.id}`);
-      const text = await response.text();
-      setPreview(artifact.contentType.includes("json") ? JSON.stringify(JSON.parse(text), null, 2) : text);
+      // Synthetic passport artifact — served from the Next.js passports API
+      if (artifact.id.startsWith("passport-aas-")) {
+        const response = await fetch(`/api/passports/thread/${encodeURIComponent(threadId)}`);
+        const data = await response.json() as { aas_json?: unknown };
+        setPreview(data.aas_json ? JSON.stringify(data.aas_json, null, 2) : null);
+      } else {
+        const response = await fetch(`${apiUrl}/api/workspaces/${encodeURIComponent(threadId)}/artifacts/${artifact.id}`);
+        const text = await response.text();
+        setPreview(artifact.contentType.includes("json") ? JSON.stringify(JSON.parse(text), null, 2) : text);
+      }
     } finally {
       setLoading(false);
     }
@@ -68,7 +75,10 @@ export function WorkspaceExplorer({ apiUrl, threadId, artifacts }: {
           <>
             <div className="flex items-start justify-between gap-3 border-b border-hairline pb-3">
               <div><h2 className="font-mono text-[13px] font-semibold">{selected.name}</h2><p className="mt-1 text-[11px] text-muted">{selected.contentType} · {selected.size.toLocaleString()} bytes</p></div>
-              <a href={`${artifactUrl}?download=true`} className="rounded-full border border-hairline px-3 py-1.5 text-[11px] font-medium">Download</a>
+              <a
+                href={selected.id.startsWith("passport-aas-") ? `/api/passports/thread/${encodeURIComponent(threadId ?? "")}/download` : `${artifactUrl}?download=true`}
+                className="rounded-full border border-hairline px-3 py-1.5 text-[11px] font-medium"
+              >Download</a>
             </div>
             {loading && <p className="mt-4 text-[12px] text-muted">Loading preview…</p>}
             {preview !== null && <pre className="mt-4 max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-mist p-4 font-mono text-[11px] leading-relaxed">{preview}</pre>}
